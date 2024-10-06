@@ -1154,3 +1154,13 @@ class GatewayHttpClient:
             "orderId": exchange_order_id,
         }
         return await self.api_request("delete", "clob/perp/orders", request_payload, use_body=True)
+
+    async def get_mango_account(
+        self, chain: str, network: str, connector: str, bot_wallet: str, fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        return await self.api_request(
+            "get",
+            "mango/account",
+            {"chain": chain, "network": network, "connector": connector, "botWallet": bot_wallet},
+            fail_silently=fail_silently,
+        )
