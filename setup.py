@@ -33,7 +33,7 @@ class BuildExt(build_ext):
 
 def main():
     cpu_count = os.cpu_count() or 8
-    version = "20241010"
+    version = "20241014"
     all_packages = find_packages(
         include=["hummingbot", "hummingbot.*"],
     )
@@ -117,7 +117,7 @@ def main():
         "language_level": 3,
     }
 
-    cython_sources = []
+    cython_sources = ["hummingbot/**/*.pyx"]
 
     compiler_directives = {
         "annotation_typing": False,
@@ -133,11 +133,11 @@ def main():
     if is_posix:
         cython_kwargs["nthreads"] = cpu_count
 
-    if "DEV_MODE" in os.environ:
-        version += ".dev1"
-        package_data[""] = ["*.pxd", "*.pyx", "*.h"]
-        package_data["hummingbot"].append("core/cpp/*.cpp")
-        cython_sources.append("hummingbot/**/*.pyx")
+    # if "DEV_MODE" in os.environ:
+    # version += ".dev1"
+    package_data[""] = ["*.pxd", "*.pyx", "*.h"]
+    package_data["hummingbot"].append("core/cpp/*.cpp")
+    package_data["hummingbot"].append("connector/*.cpp")
 
     if len(sys.argv) > 1 and sys.argv[1] == "build_ext" and is_posix:
         sys.argv.append(f"--parallel={cpu_count}")
