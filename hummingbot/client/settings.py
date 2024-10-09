@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 from decimal import Decimal
 from enum import Enum
 from os import DirEntry, scandir
@@ -27,36 +28,120 @@ requried_connector_trading_pairs: Dict[str, List[str]] = {}
 required_rate_oracle: bool = False
 rate_oracle_pairs: List[str] = []
 
+
 # Global static values
-KEYFILE_PREFIX = "key_file_"
-KEYFILE_POSTFIX = ".yml"
-ENCYPTED_CONF_POSTFIX = ".json"
-DEFAULT_LOG_FILE_PATH = root_path() / "logs"
-DEFAULT_ETHEREUM_RPC_URL = "https://mainnet.coinalpha.com/hummingbot-test-node"
-TEMPLATE_PATH = root_path() / "hummingbot" / "templates"
-CONF_DIR_PATH = root_path() / "conf"
-CLIENT_CONFIG_PATH = CONF_DIR_PATH / "conf_client.yml"
-TRADE_FEES_CONFIG_PATH = CONF_DIR_PATH / "conf_fee_overrides.yml"
-STRATEGIES_CONF_DIR_PATH = CONF_DIR_PATH / "strategies"
-CONNECTORS_CONF_DIR_PATH = CONF_DIR_PATH / "connectors"
-SCRIPT_STRATEGY_CONF_DIR_PATH = CONF_DIR_PATH / "scripts"
-CONTROLLERS_CONF_DIR_PATH = CONF_DIR_PATH / "controllers"
-CONF_PREFIX = "conf_"
-CONF_POSTFIX = "_strategy"
-SCRIPT_STRATEGIES_MODULE = "scripts"
-SCRIPT_STRATEGIES_PATH = root_path() / SCRIPT_STRATEGIES_MODULE
-CONTROLLERS_MODULE = "controllers"
-CONTROLLERS_PATH = root_path() / CONTROLLERS_MODULE
-DEFAULT_GATEWAY_CERTS_PATH = root_path() / "certs"
+def load_config_values():
+    config_file_path = str(root_path() / "conf" / "settings_conf_client.yml")
+    if exists(config_file_path):
+        with open(config_file_path, "r") as file:
+            config_data = json.load(file)
+    else:
+        config_data = {}
 
-GATEWAY_SSL_CONF_FILE = root_path() / "gateway" / "conf" / "ssl.yml"
+    return {
+        "KEYFILE_PREFIX": config_data.get("KEYFILE_PREFIX", os.environ.get("KEYFILE_PREFIX", "key_file_")),
+        "KEYFILE_POSTFIX": config_data.get("KEYFILE_POSTFIX", os.environ.get("KEYFILE_POSTFIX", ".yml")),
+        "ENCYPTED_CONF_POSTFIX": config_data.get(
+            "ENCYPTED_CONF_POSTFIX", os.environ.get("ENCYPTED_CONF_POSTFIX", ".json")
+        ),
+        "DEFAULT_LOG_FILE_PATH": config_data.get(
+            "DEFAULT_LOG_FILE_PATH", os.environ.get("DEFAULT_LOG_FILE_PATH", str(root_path() / "logs"))
+        ),
+        "DEFAULT_ETHEREUM_RPC_URL": config_data.get(
+            "DEFAULT_ETHEREUM_RPC_URL",
+            os.environ.get("DEFAULT_ETHEREUM_RPC_URL", "https://mainnet.coinalpha.com/hummingbot-test-node"),
+        ),
+        "TEMPLATE_PATH": config_data.get(
+            "TEMPLATE_PATH", os.environ.get("TEMPLATE_PATH", str(root_path() / "hummingbot" / "templates"))
+        ),
+        "CONF_DIR_PATH": config_data.get("CONF_DIR_PATH", os.environ.get("CONF_DIR_PATH", str(root_path() / "conf"))),
+        "CLIENT_CONFIG_PATH": config_data.get(
+            "CLIENT_CONFIG_PATH", os.environ.get("CLIENT_CONFIG_PATH", str(root_path() / "conf" / "conf_client.yml"))
+        ),
+        "TRADE_FEES_CONFIG_PATH": config_data.get(
+            "TRADE_FEES_CONFIG_PATH",
+            os.environ.get("TRADE_FEES_CONFIG_PATH", str(root_path() / "conf" / "conf_fee_overrides.yml")),
+        ),
+        "STRATEGIES_CONF_DIR_PATH": config_data.get(
+            "STRATEGIES_CONF_DIR_PATH",
+            os.environ.get("STRATEGIES_CONF_DIR_PATH", str(root_path() / "conf" / "strategies")),
+        ),
+        "CONNECTORS_CONF_DIR_PATH": config_data.get(
+            "CONNECTORS_CONF_DIR_PATH",
+            os.environ.get("CONNECTORS_CONF_DIR_PATH", str(root_path() / "conf" / "connectors")),
+        ),
+        "SCRIPT_STRATEGY_CONF_DIR_PATH": config_data.get(
+            "SCRIPT_STRATEGY_CONF_DIR_PATH",
+            os.environ.get("SCRIPT_STRATEGY_CONF_DIR_PATH", str(root_path() / "conf" / "scripts")),
+        ),
+        "CONTROLLERS_CONF_DIR_PATH": config_data.get(
+            "CONTROLLERS_CONF_DIR_PATH",
+            os.environ.get("CONTROLLERS_CONF_DIR_PATH", str(root_path() / "conf" / "controllers")),
+        ),
+        "CONF_PREFIX": config_data.get("CONF_PREFIX", os.environ.get("CONF_PREFIX", "conf_")),
+        "CONF_POSTFIX": config_data.get("CONF_POSTFIX", os.environ.get("CONF_POSTFIX", "_strategy")),
+        "SCRIPT_STRATEGIES_MODULE": config_data.get(
+            "SCRIPT_STRATEGIES_MODULE", os.environ.get("SCRIPT_STRATEGIES_MODULE", "scripts")
+        ),
+        "SCRIPT_STRATEGIES_PATH": config_data.get(
+            "SCRIPT_STRATEGIES_PATH", os.environ.get("SCRIPT_STRATEGIES_PATH", str(root_path() / "scripts"))
+        ),
+        "CONTROLLERS_MODULE": config_data.get(
+            "CONTROLLERS_MODULE", os.environ.get("CONTROLLERS_MODULE", "controllers")
+        ),
+        "CONTROLLERS_PATH": config_data.get(
+            "CONTROLLERS_PATH", os.environ.get("CONTROLLERS_PATH", str(root_path() / "controllers"))
+        ),
+        "DEFAULT_GATEWAY_CERTS_PATH": config_data.get(
+            "DEFAULT_GATEWAY_CERTS_PATH", os.environ.get("DEFAULT_GATEWAY_CERTS_PATH", str(root_path() / "certs"))
+        ),
+        "GATEWAY_SSL_CONF_FILE": config_data.get(
+            "GATEWAY_SSL_CONF_FILE",
+            os.environ.get("GATEWAY_SSL_CONF_FILE", str(root_path() / "gateway" / "conf" / "ssl.yml")),
+        ),
+        "GATEAWAY_CA_CERT_PATH": config_data.get(
+            "GATEAWAY_CA_CERT_PATH", os.environ.get("GATEAWAY_CA_CERT_PATH", str(root_path() / "certs" / "ca_cert.pem"))
+        ),
+        "GATEAWAY_CLIENT_CERT_PATH": config_data.get(
+            "GATEAWAY_CLIENT_CERT_PATH",
+            os.environ.get("GATEAWAY_CLIENT_CERT_PATH", str(root_path() / "certs" / "client_cert.pem")),
+        ),
+        "GATEAWAY_CLIENT_KEY_PATH": config_data.get(
+            "GATEAWAY_CLIENT_KEY_PATH",
+            os.environ.get("GATEAWAY_CLIENT_KEY_PATH", str(root_path() / "certs" / "client_key.pem")),
+        ),
+        "CONNECTOR_SUBMODULES_THAT_ARE_NOT_CEX_TYPES": config_data.get(
+            "CONNECTOR_SUBMODULES_THAT_ARE_NOT_CEX_TYPES", ["test_support", "utilities", "gateway"]
+        ),
+    }
 
-# Certificates for securely communicating with the gateway api
-GATEAWAY_CA_CERT_PATH = DEFAULT_GATEWAY_CERTS_PATH / "ca_cert.pem"
-GATEAWAY_CLIENT_CERT_PATH = DEFAULT_GATEWAY_CERTS_PATH / "client_cert.pem"
-GATEAWAY_CLIENT_KEY_PATH = DEFAULT_GATEWAY_CERTS_PATH / "client_key.pem"
 
-CONNECTOR_SUBMODULES_THAT_ARE_NOT_CEX_TYPES = ["test_support", "utilities", "gateway"]
+config_values = load_config_values()
+KEYFILE_PREFIX = config_values["KEYFILE_PREFIX"]
+KEYFILE_POSTFIX = config_values["KEYFILE_POSTFIX"]
+ENCYPTED_CONF_POSTFIX = config_values["ENCYPTED_CONF_POSTFIX"]
+DEFAULT_LOG_FILE_PATH = config_values["DEFAULT_LOG_FILE_PATH"]
+DEFAULT_ETHEREUM_RPC_URL = config_values["DEFAULT_ETHEREUM_RPC_URL"]
+TEMPLATE_PATH = config_values["TEMPLATE_PATH"]
+CONF_DIR_PATH = config_values["CONF_DIR_PATH"]
+CLIENT_CONFIG_PATH = config_values["CLIENT_CONFIG_PATH"]
+TRADE_FEES_CONFIG_PATH = config_values["TRADE_FEES_CONFIG_PATH"]
+STRATEGIES_CONF_DIR_PATH = config_values["STRATEGIES_CONF_DIR_PATH"]
+CONNECTORS_CONF_DIR_PATH = config_values["CONNECTORS_CONF_DIR_PATH"]
+SCRIPT_STRATEGY_CONF_DIR_PATH = config_values["SCRIPT_STRATEGY_CONF_DIR_PATH"]
+CONTROLLERS_CONF_DIR_PATH = config_values["CONTROLLERS_CONF_DIR_PATH"]
+CONF_PREFIX = config_values["CONF_PREFIX"]
+CONF_POSTFIX = config_values["CONF_POSTFIX"]
+SCRIPT_STRATEGIES_MODULE = config_values["SCRIPT_STRATEGIES_MODULE"]
+SCRIPT_STRATEGIES_PATH = config_values["SCRIPT_STRATEGIES_PATH"]
+CONTROLLERS_MODULE = config_values["CONTROLLERS_MODULE"]
+CONTROLLERS_PATH = config_values["CONTROLLERS_PATH"]
+DEFAULT_GATEWAY_CERTS_PATH = config_values["DEFAULT_GATEWAY_CERTS_PATH"]
+GATEWAY_SSL_CONF_FILE = config_values["GATEWAY_SSL_CONF_FILE"]
+GATEAWAY_CA_CERT_PATH = config_values["GATEAWAY_CA_CERT_PATH"]
+GATEAWAY_CLIENT_CERT_PATH = config_values["GATEAWAY_CLIENT_CERT_PATH"]
+GATEAWAY_CLIENT_KEY_PATH = config_values["GATEAWAY_CLIENT_KEY_PATH"]
+CONNECTOR_SUBMODULES_THAT_ARE_NOT_CEX_TYPES = config_values["CONNECTOR_SUBMODULES_THAT_ARE_NOT_CEX_TYPES"]
 
 
 class ConnectorType(Enum):
