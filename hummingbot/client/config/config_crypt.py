@@ -1,6 +1,8 @@
 import binascii
 import json
+import os
 from abc import ABC, abstractmethod
+from os.path import exists
 
 from eth_account import Account
 from eth_keyfile.keyfile import (
@@ -19,10 +21,35 @@ from eth_keyfile.keyfile import (
 )
 from pydantic import SecretStr
 
+from hummingbot import root_path
 from hummingbot.client.settings import CONF_DIR_PATH
 
-PASSWORD_VERIFICATION_WORD = "HummingBot"
-PASSWORD_VERIFICATION_PATH = CONF_DIR_PATH / ".password_verification"
+
+# Global static values
+def load_security_config_values():
+    config_file_path = str(root_path() / "conf" / "settings_conf_client.yml")
+    if exists(config_file_path):
+        with open(config_file_path, "r") as file:
+            config_data = json.load(file)
+    else:
+        config_data = {}
+
+    return {
+        "PASSWORD_VERIFICATION_WORD": config_data.get(
+            "PASSWORD_VERIFICATION_WORD", os.environ.get("PASSWORD_VERIFICATION_WORD", "HummingBot")
+        ),
+        "PASSWORD_VERIFICATION_PATH": config_data.get(
+            "PASSWORD_VERIFICATION_PATH",
+            os.environ.get("PASSWORD_VERIFICATION_PATH", str(CONF_DIR_PATH / ".password_verification")),
+        ),
+    }
+
+
+security_config_values = load_security_config_values()
+
+# Security Configs
+PASSWORD_VERIFICATION_WORD = security_config_values["PASSWORD_VERIFICATION_WORD"]
+PASSWORD_VERIFICATION_PATH = security_config_values["PASSWORD_VERIFICATION_PATH"]
 
 
 class BaseSecretsManager(ABC):
@@ -90,21 +117,21 @@ def _create_v3_keyfile_json(message_to_encrypt, password, kdf="pbkdf2", work_fac
     if work_factor is None:
         work_factor = get_default_work_factor_for_kdf(kdf)
 
-    if kdf == 'pbkdf2':
+    if kdf == "pbkdf2":
         derived_key = _pbkdf2_hash(
             password,
-            hash_name='sha256',
+            hash_name="sha256",
             salt=salt,
             iterations=work_factor,
             dklen=DKLEN,
         )
         kdfparams = {
-            'c': work_factor,
-            'dklen': DKLEN,
-            'prf': 'hmac-sha256',
-            'salt': encode_hex_no_prefix(salt),
+            "c": work_factor,
+            "dklen": DKLEN,
+            "prf": "hmac-sha256",
+            "salt": encode_hex_no_prefix(salt),
         }
-    elif kdf == 'scrypt':
+    elif kdf == "scrypt":
         derived_key = _scrypt_hash(
             password,
             salt=salt,
@@ -114,11 +141,11 @@ def _create_v3_keyfile_json(message_to_encrypt, password, kdf="pbkdf2", work_fac
             n=work_factor,
         )
         kdfparams = {
-            'dklen': DKLEN,
-            'n': work_factor,
-            'r': SCRYPT_R,
-            'p': SCRYPT_P,
-            'salt': encode_hex_no_prefix(salt),
+            "dklen": DKLEN,
+            "n": work_factor,
+            "r": SCRYPT_R,
+            "p": SCRYPT_P,
+            "salt": encode_hex_no_prefix(salt),
         }
     else:
         raise NotImplementedError("KDF not implemented: {0}".format(kdf))
@@ -129,16 +156,16 @@ def _create_v3_keyfile_json(message_to_encrypt, password, kdf="pbkdf2", work_fac
     mac = keccak(derived_key[16:32] + ciphertext)
 
     return {
-        'crypto': {
-            'cipher': 'aes-128-ctr',
-            'cipherparams': {
-                'iv': encode_hex_no_prefix(int_to_big_endian(iv)),
+        "crypto": {
+            "cipher": "aes-128-ctr",
+            "cipherparams": {
+                "iv": encode_hex_no_prefix(int_to_big_endian(iv)),
             },
-            'ciphertext': encode_hex_no_prefix(ciphertext),
-            'kdf': kdf,
-            'kdfparams': kdfparams,
-            'mac': encode_hex_no_prefix(mac),
+            "ciphertext": encode_hex_no_prefix(ciphertext),
+            "kdf": kdf,
+            "kdfparams": kdfparams,
+            "mac": encode_hex_no_prefix(mac),
         },
-        'version': 3,
-        'alias': '',  # Add this line to include the 'alias' field with an empty string value
+        "version": 3,
+        "alias": "",  # Add this line to include the 'alias' field with an empty string value
     }
