@@ -35,7 +35,7 @@ from hummingbot.core.utils.gateway_config_utils import (
     native_tokens,
     search_configs,
 )
-from hummingbot.core.utils.ssl_cert import create_self_sign_certs
+from hummingbot.core.utils.ssl_cert import generate_certs
 
 if TYPE_CHECKING:
     from hummingbot.client.hummingbot_application import HummingbotApplication  # noqa: F401
@@ -127,7 +127,6 @@ class GatewayCommand(GatewayChainApiManager):
             self,       # type: HummingbotApplication
             from_client_password: bool = False,
     ):
-
         certs_path: str = get_gateway_paths(
             self.client_config_map).local_certs_path.as_posix()
 
@@ -143,7 +142,8 @@ class GatewayCommand(GatewayChainApiManager):
                     self.notify("Error: Invalid pass phrase")
         else:
             pass_phase = Security.secrets_manager.password.get_secret_value()
-        create_self_sign_certs(pass_phase, certs_path)
+        
+        generate_certs(pass_phase, certs_path)
         self.notify(
             f"Gateway SSL certification files are created in {certs_path}.")
         self._get_gateway_instance().reload_certs(self.client_config_map)

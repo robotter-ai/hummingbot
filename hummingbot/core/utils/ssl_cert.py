@@ -184,20 +184,25 @@ def certs_files_exist(client_config_map: "ClientConfigAdapter") -> bool:
     return all(elem in file_list for elem in required_certs)
 
 
-def create_self_sign_certs(pass_phase: str, cert_path: str):
+def generate_certs(pass_phase: str, cert_path: str, ca_filename: str = "ca", server_filename: str = "server", client_filename: str = "client"):
     """
-    Create self-sign CA Cert
+    Generate self-signed certificates for secure communication.
+    
+    :param pass_phase: Password for encrypting the private keys
+    :param cert_path: Path where the certificate files will be saved
+    :param ca_filename: Base filename for CA certificate (default: "ca")
+    :param server_filename: Base filename for server certificate (default: "server")
+    :param client_filename: Base filename for client certificate (default: "client")
     """
-
     filepath_list = {
-        'ca_key': join(cert_path, ca_key_filename),
-        'ca_cert': join(cert_path, ca_cert_filename),
-        'server_key': join(cert_path, server_key_filename),
-        'server_cert': join(cert_path, server_cert_filename),
-        'server_csr': join(cert_path, server_csr_filename),
-        'client_key': join(cert_path, client_key_filename),
-        'client_cert': join(cert_path, client_cert_filename),
-        'client_csr': join(cert_path, client_csr_filename)
+        'ca_key': join(cert_path, f"{ca_filename}_key.pem"),
+        'ca_cert': join(cert_path, f"{ca_filename}_cert.pem"),
+        'server_key': join(cert_path, f"{server_filename}_key.pem"),
+        'server_cert': join(cert_path, f"{server_filename}_cert.pem"),
+        'server_csr': join(cert_path, f"{server_filename}_csr.pem"),
+        'client_key': join(cert_path, f"{client_filename}_key.pem"),
+        'client_cert': join(cert_path, f"{client_filename}_cert.pem"),
+        'client_csr': join(cert_path, f"{client_filename}_csr.pem")
     }
 
     # Create CA Private & Public Keys for signing
@@ -236,3 +241,5 @@ def create_self_sign_certs(pass_phase: str, cert_path: str):
     sign_csr(server_csr, ca_cert, ca_key, filepath_list['server_cert'])
     # Sign Client Cert with CSR
     sign_csr(client_csr, ca_cert, ca_key, filepath_list['client_cert'])
+
+    return filepath_list
