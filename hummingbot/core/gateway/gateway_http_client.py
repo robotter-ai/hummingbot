@@ -320,13 +320,13 @@ class GatewayHttpClient:
             "network": network,
             "fail_silently": fail_silently})
 
-    async def get_ton_assets(
+    async def get_polkadot_assets(
             self,
             network: str,
             fail_silently: bool = True
     ) -> Dict[str, Any]:
         return await self.get_tokens(**{
-            "chain": "ton",
+            "chain": "polkadot",
             "network": network,
             "fail_silently": fail_silently})
 

@@ -23,7 +23,7 @@ native_tokens = {
     "telos": "TLOS",
     "ethereum-classic": "ETC",
     "solana": "SOL",
-    "ton": "TON"
+    "polkadot": "DOT"
 }
 
 SUPPORTED_CHAINS = set(native_tokens.keys())

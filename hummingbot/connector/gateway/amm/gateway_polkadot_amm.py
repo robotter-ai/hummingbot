@@ -26,7 +26,7 @@ s_decimal_NaN = Decimal("nan")
 _milliseconds_nonce_provider = NonceCreator.for_milliseconds()
 
 
-class GatewayTonAMM(GatewayEVMAMM):
+class GatewayPolkadotAMM(GatewayEVMAMM):
     """
     Defines basic functions common to connectors that interact with Gateway.
     """
@@ -69,7 +69,7 @@ class GatewayTonAMM(GatewayEVMAMM):
         :param trading_required: Whether actual trading is needed. Useful for some functionalities or commands like the balance command
         """
         super().__init__(client_config_map=client_config_map, connector_name=connector_name, chain=chain, network=network, address=address, trading_pairs=trading_pairs, trading_required=trading_required)
-        self._native_currency = "TON"
+        self._native_currency = "DOT"
         self._default_fee = Decimal("0.001")
         self._network_transaction_fee: Optional[TokenAmount] = TokenAmount(token=self._native_currency, amount=self._default_fee)
 
@@ -94,7 +94,7 @@ class GatewayTonAMM(GatewayEVMAMM):
         Calls the tokens endpoint on Gateway.
         """
         try:
-            tokens = await GatewayHttpClient.get_instance().get_ton_tokens(network=self._network)
+            tokens = await GatewayHttpClient.get_instance().get_polkadot_tokens(network=self._network)
             token_symbols = [t["symbol"] for t in tokens["assets"]]
             trading_pairs = []
             for base, quote in it.permutations(token_symbols, 2):
@@ -108,7 +108,7 @@ class GatewayTonAMM(GatewayEVMAMM):
         return f"{side.name.lower()}-{trading_pair}-{_milliseconds_nonce_provider.get_tracking_nonce()}"
 
     async def load_token_data(self):
-        tokens = await GatewayHttpClient.get_instance().get_ton_assets(network=self._network)
+        tokens = await GatewayHttpClient.get_instance().get_polkadot_assets(network=self._network)
         for t in tokens.get("assets", []):
             self._amount_quantum_dict[t["symbol"]] = Decimal(str(10 ** -t["decimals"]))
 
@@ -243,18 +243,18 @@ class GatewayTonAMM(GatewayEVMAMM):
 
     async def cancel_all(self, timeout_seconds: float) -> List[CancellationResult]:
         """
-        This is intentionally left blank, because cancellation is not supported for ton blockchains.
+        This is intentionally left blank, because cancellation is not supported for polkadot blockchains.
         """
         return []
 
     async def _execute_cancel(self, order_id: str, cancel_age: int) -> Optional[str]:
         """
-        This is intentionally left blank, because cancellation is not supported for ton blockchains.
+        This is intentionally left blank, because cancellation is not supported for polkadot blockchains.
         """
         pass
 
     async def cancel_outdated_orders(self, cancel_age: int) -> List[CancellationResult]:
         """
-        This is intentionally left blank, because cancellation is not supported for ton blockchains.
+        This is intentionally left blank, because cancellation is not supported for polkadot blockchains.
         """
         return []
