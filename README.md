@@ -56,12 +56,12 @@ We are grateful for the following exchanges that support the development and mai
 ### Other Exchange Connectors
 
 Currently, the master branch of Hummingbot also includes the following exchange connectors, which are maintained and updated through the Hummingbot Foundation governance process. See [Governance](https://hummingbot.org/governance/) for more information.
-
+https://hummingbot.org/exchanges/balancer/
 | Connector ID | Exchange | CEX/DEX | Type | Docs | Discount |
 |----|------|-------|------|------|----------|
 | `ascend_ex` | AscendEx | CEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/ascendex/) | - |
-| `balancer` | BingX | CEX | AMM | [Docs](https://hummingbot.org/exchanges/bing_x/#i-exchange-info) | - |
-| `bing_x` |  | DEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/balancer/) | - |
+| `balancer` | Balancer | CEX | AMM | [Docs](https://hummingbot.org/exchanges/balancer/) | - |
+| `bing_x` | BingX | DEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/bing_x/#i-exchange-info) | - |
 | `bitget_perpetual` | Bitget | CEX | CLOB Perp | [Docs](https://hummingbot.org/exchanges/bitget-perpetual/) | - |
 | `bitmart` | BitMart | CEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/bitmart/) | - |
 | `bitrue` | Bitrue | CEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/bitrue/) | - |
