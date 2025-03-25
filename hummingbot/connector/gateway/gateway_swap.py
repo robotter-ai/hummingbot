@@ -2,6 +2,7 @@ import asyncio
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
+from hummingbot.connector.gateway.common_types import ConnectorType, get_connector_type
 from hummingbot.connector.gateway.gateway_base import GatewayBase
 from hummingbot.connector.gateway.gateway_in_flight_order import GatewayInFlightOrder
 from hummingbot.core.data_type.common import OrderType, TradeType
@@ -24,7 +25,8 @@ class GatewaySwap(GatewayBase):
             trading_pair: str,
             is_buy: bool,
             amount: Decimal,
-            slippage_pct: Optional[Decimal] = None
+            slippage_pct: Optional[Decimal] = None,
+            pool_address: Optional[str] = None
     ) -> Optional[Decimal]:
         """
         Retrieves the volume weighted average price. For an AMM DEX connectors, this is the swap price for a given amount.
@@ -38,9 +40,15 @@ class GatewaySwap(GatewayBase):
         base, quote = trading_pair.split("-")
         side: TradeType = TradeType.BUY if is_buy else TradeType.SELL
 
+        # Add connector type check
+        connector_type = get_connector_type(self.connector_name)
+        if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is None:
+            self.logger().error(f"Pool address required for {connector_type.value} connector")
+            return None
+
         # Pull the price from gateway.
         try:
-            resp: Dict[str, Any] = await self._get_gateway_instance().get_price(
+            resp: Dict[str, Any] = await self._get_gateway_instance().quote_swap(
                 network=self.network,
                 connector=self.connector_name,
                 base_asset=base,
@@ -48,6 +56,7 @@ class GatewaySwap(GatewayBase):
                 amount=amount,
                 side=side,
                 slippage_pct=slippage_pct,
+                pool_address=pool_address
             )
             return self.parse_price_response(base, quote, amount, side, price_response=resp)
         except asyncio.CancelledError:
@@ -97,8 +106,8 @@ class GatewaySwap(GatewayBase):
                 self.logger().info(f"Missing data from price result. Incomplete return result for ({price_response.keys()})")
         else:
             gas_price_token: str = self._native_currency
-            gas_cost: Decimal = Decimal(price_response["gasCost"])
-            price: Decimal = Decimal(price_response["price"])
+            gas_cost: Decimal = Decimal(str(price_response["gasCost"]))
+            price: Decimal = Decimal(str(price_response["price"]))
             gas_limit: int = int(price_response["gasLimit"])
             # self.network_transaction_fee = TokenAmount(gas_price_token, gas_cost)
             if process_exception is True:
@@ -123,7 +132,7 @@ class GatewaySwap(GatewayBase):
                     )
                 if len(exceptions) > 0:
                     return None
-            return Decimal(str(price))
+            return price
         return None
 
     def buy(self, trading_pair: str, amount: Decimal, order_type: OrderType, price: Decimal, **kwargs) -> str:
@@ -177,16 +186,12 @@ class GatewaySwap(GatewayBase):
         :param order_id: Internal order id (also called client_order_id)
         :param trading_pair: The market to place order
         :param amount: The order amount (in base token value)
-        :param price: The order price
+        :param price: The order price (TO-DO: add limit_price to Gateway execute-swap schema)
         """
-        pool_id = None
 
         amount = self.quantize_order_amount(trading_pair, amount)
         price = self.quantize_order_price(trading_pair, price)
-        try:
-            trading_pair, pool_id = trading_pair.split("_")
-        except Exception:
-            pass
+
         base, quote = trading_pair.split("-")
         self.start_tracking_order(order_id=order_id,
                                   trading_pair=trading_pair,
@@ -194,8 +199,7 @@ class GatewaySwap(GatewayBase):
                                   price=price,
                                   amount=amount)
         try:
-            order_result: Dict[str, Any] = await self._get_gateway_instance().amm_trade(
-                self.chain,
+            order_result: Dict[str, Any] = await self._get_gateway_instance().execute_swap(
                 self.network,
                 self.connector_name,
                 self.address,
@@ -203,13 +207,11 @@ class GatewaySwap(GatewayBase):
                 quote,
                 trade_type,
                 amount,
-                price,
-                pool_id=pool_id,
+                # limit_price=price,
                 **request_args
             )
-            transaction_hash: Optional[str] = order_result.get("txHash")
+            transaction_hash: Optional[str] = order_result.get("signature")
             if transaction_hash is not None and transaction_hash != "":
-                # self.network_transaction_fee = TokenAmount(gas_price_token, gas_cost)
 
                 order_update: OrderUpdate = OrderUpdate(
                     client_order_id=order_id,
@@ -219,9 +221,9 @@ class GatewaySwap(GatewayBase):
                     new_state=OrderState.OPEN,  # Assume that the transaction has been successfully mined.
                     misc_updates={
                         "nonce": order_result.get("nonce", 0),  # Default to 0 if nonce is not present
-                        "gas_price": Decimal(order_result.get("gasPrice")),
-                        "gas_limit": int(order_result.get("gasLimit")),
-                        "gas_cost": Decimal(order_result.get("gasCost")),
+                        "gas_price": Decimal(order_result.get("gasPrice", 0)),
+                        "gas_limit": int(order_result.get("gasLimit", 0)),
+                        "gas_cost": Decimal(order_result.get("fee", 0)),
                         "gas_price_token": self._native_currency,
                         "fee_asset": self._native_currency
                     }
