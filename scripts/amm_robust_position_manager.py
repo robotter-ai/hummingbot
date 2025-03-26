@@ -2,6 +2,7 @@ import os
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Union
 
+# noinspection PyUnresolvedReferences
 from pydantic import Field
 
 from hummingbot.client.config.config_data_types import BaseClientModel
@@ -26,7 +27,7 @@ configuration: Dict[str, Any] = {
             "chain": "polkadot",
             "network": "mainnet",
             "connector": "hydration",
-            "pool": "0x1234567890123456789012345678901234567890",
+            "pool_address": "0x1234567890123456789012345678901234567890",
             "base_tokens": ["DOT", "HDX"],
             "quote_tokens": ["USDC", "USDT"]
         }
@@ -36,10 +37,13 @@ configuration: Dict[str, Any] = {
 
 class AMMRobustPositionManagerConfiguration(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
+    pools: List[Dict[str, Any]] = Field(default=configuration["pools"])
 
 
+# noinspection PyShadowingNames
 class AMMRobustPositionManager(ScriptStrategyBase):
 
+    configuration = None
     gateway_is_ready = False
     gateway_http_client: Optional[GatewayHttpClient] = None
 
@@ -51,15 +55,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self.initialize(configuration)
 
     def initialize(self, configuration: AMMRobustPositionManagerConfiguration):
-        self.initialize_configuration(configuration)
-
-        self.log_initialization()
-
-    def initialize_configuration(self, configuration: AMMRobustPositionManagerConfiguration):
         self.configuration = configuration
 
-        for key, value in self.configuration.items():
-            setattr(self.configuration, key, value)
+        self.log_initialization()
 
     def log_initialization(self):
         self.logger().info(f"Starting {self.__class__.__name__} strategy")
@@ -72,8 +70,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _check_gateway_status(self):
         """Check if Gateway server is online and verify wallet connections for multiple pools"""
-        # Skip if gateway is already verified as ready
-        if not self.gateway_is_ready:
+        # Skip if gateway is already verified as not ready
+        if self.gateway_is_ready:
             return
 
         self.logger().info("Checking Gateway server status...")
@@ -153,19 +151,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             # Get pool info to get token information
             pool["information"] = await self.get_pool_information(pool)
 
-    async def get_fetch_pools(self, chain: str, connector: str, network: str):
+    async def get_fetch_pools(self, _chain: str, connector: str, network: str):
         """
         Fetch all available pools for a connector.
 
         Args:
-            chain: Chain identifier
+            _chain: Chain identifier
             connector: Connector identifier
             network: Network identifier
 
         Returns:
             Dictionary containing pools information
         """
-        # Assume there's an amm_fetch_pools method in GatewayHttpClient
         return await self.gateway_http_client.amm_fetch_pools(connector, network)
 
     async def get_pool_information(self, pool: Dict[str, Any]):
@@ -185,7 +182,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        # This would be similar to clmm_pool_info method
         return await self.gateway_http_client.amm_pool_info(connector, network, pool_address)
 
     async def get_quote_swap(self, pool: Dict[str, Any], base_token: str, quote_token: str,
@@ -245,14 +241,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        # Assume there's an amm_quote_liquidity method in GatewayHttpClient
         return await self.gateway_http_client.amm_quote_liquidity(
             connector=connector,
             network=network,
             pool_address=pool_address,
-            base_token_amount=base_token_amount,
-            quote_token_amount=quote_token_amount,
-            slippage_pct=slippage_percentage
+            base_token_amount=float(base_token_amount) if base_token_amount else None,
+            quote_token_amount=float(quote_token_amount) if quote_token_amount else None,
+            slippage_pct=float(slippage_percentage) if slippage_percentage else None
         )
 
     async def post_execute_swap(self, pool: Dict[str, Any], base_token: str, quote_token: str,
@@ -315,15 +310,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        # Assume there's an amm_add_liquidity method in GatewayHttpClient
         return await self.gateway_http_client.amm_add_liquidity(
             connector=connector,
             network=network,
             wallet_address=wallet_address,
             pool_address=pool_address,
-            base_token_amount=base_token_amount,
-            quote_token_amount=quote_token_amount,
-            slippage_pct=slippage_percentage
+            base_token_amount=float(base_token_amount) if base_token_amount else None,
+            quote_token_amount=float(quote_token_amount) if quote_token_amount else None,
+            slippage_pct=float(slippage_percentage) if slippage_percentage else None
         )
 
     async def post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: str):
@@ -345,13 +339,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        # Assume there's an amm_remove_liquidity method in GatewayHttpClient
         return await self.gateway_http_client.amm_remove_liquidity(
             connector=connector,
             network=network,
             wallet_address=wallet_address,
             pool_address=pool_address,
-            percentage_to_remove=percentage_to_remove
+            percentage_to_remove=float(percentage_to_remove)
         )
 
     async def get_root_status(self):
@@ -431,7 +424,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing operation result
         """
-        # Assuming there's a method to remove wallet in GatewayHttpClient or will be added
         return await self.gateway_http_client.remove_wallet(chain, address)
 
     async def get_chain_status(self, chain: str, network: str):
@@ -488,7 +480,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing token balances
         """
-        return await self.gateway_http_client.get_balances(chain, network, address, token_symbols)
+        return await self.gateway_http_client.get_balances(chain, network, address, token_symbols if isinstance(token_symbols, list) else [])
 
     def format_status(self) -> str:
         return ""
