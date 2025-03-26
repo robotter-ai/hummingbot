@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from pydantic import Field
 
@@ -31,8 +31,8 @@ configuration: Dict[str, Any] = {
     ]
 }
 
-class AMMRobustPositionManagerConfiguration(BaseClientModel):
 
+class AMMRobustPositionManagerConfiguration(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
 
 
@@ -41,12 +41,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     def __init__(self, connectors: Dict[str, ConnectorBase], configuration: AMMRobustPositionManagerConfiguration):
         super().__init__(connectors)
 
+        self.gateway_is_ready = False
+
         self.initialize(configuration)
 
-    def initialize(self):
-        self.initialize_configuration()
-
-        self.gateway_is_ready = False
+    def initialize(self, configuration: AMMRobustPositionManagerConfiguration):
+        self.initialize_configuration(configuration)
 
         self.log_initialization()
 
@@ -65,12 +65,15 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     async def async_on_tick(self):
         await self._check_gateway_status()
 
+    async def get_pool_information(self, pool: Dict[str, Any]):
+        pass
+
     async def _check_gateway_status(self):
         """Check if Gateway server is online and verify wallet connections for multiple pools"""
         # Skip if gateway is already verified as ready
         if not self.gateway_is_ready:
             return
-            
+
         self.logger().info("Checking Gateway server status...")
         try:
             if await GatewayHttpClient.get_instance().ping_gateway():
@@ -80,15 +83,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
                 await self._verify_wallet_connections()
             else:
-                self._set_gateway_as_not_ready("Gateway server is offline! Make sure Gateway is running before using this strategy.")
+                self._set_gateway_as_not_ready(
+                    "Gateway server is offline! Make sure Gateway is running before using this strategy.")
         except Exception as exception:
             self._set_gateway_as_not_ready(f"Error connecting to Gateway server: {str(exception)}")
-    
+
     def _set_gateway_as_not_ready(self, error_message: str):
         """Set gateway as not ready with appropriate error message"""
         self.gateway_is_ready = False
         self.logger().error(error_message)
-    
+
     async def _verify_wallet_connections(self):
         """Verify wallet connections for all configured pools"""
         all_gateway_connections = GatewayConnectionSetting.load()
@@ -104,10 +108,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             self.logger().error("No pools configured. Please add pool configurations.")
 
             return
-            
+
         for pool in pools:
             await self._verify_pool_wallet(pool, all_gateway_connections)
-    
+
     async def _verify_pool_wallet(self, pool: Dict[str, Any], all_gateway_connections: List[Dict[str, Any]]):
         """Verify wallet connection for a specific pool configuration"""
         chain = pool.get("chain")
@@ -119,37 +123,36 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         required_fields = {
             "chain": chain,
-            "network": network, 
+            "network": network,
             "connector": connector,
             "pool_address": pool_address,
             "base_tokens": base_tokens,
             "quote_tokens": quote_tokens
         }
         missing_fields = [field for field, value in required_fields.items() if not value]
-        
+
         if missing_fields:
             self.logger().error(f"Invalid pool configuration. Missing required fields: {', '.join(missing_fields)}")
             return
 
         gateway_connection = [
             gateway_connection for gateway_connection in all_gateway_connections
-                 if gateway_connection["chain"] == chain and 
-                    gateway_connection["connector"] == connector and 
-                    gateway_connection["network"] == network
+            if gateway_connection["chain"] == chain and gateway_connection["connector"] == connector and gateway_connection["network"] == network
         ]
 
         if not gateway_connection:
-            self.logger().error(f"""No gateway connection found for "{chain}/{connector}/{network}:{wallet_address}". Please connect using 'gateway connect'.""")
+            self.logger().error(
+                f"""No gateway connection found for "{chain}/{connector}/{network}". Please connect using 'gateway connect'.""")
         else:
             wallet_address = gateway_connection[0]["wallet_address"]
-            
+
             self.logger().info(f"""Found wallet connection for "{chain}/{connector}/{network}:{wallet_address}""")
-            
+
             # Store wallet address in pool config for later use
             pool["wallet_address"] = wallet_address
-            
+
             # Get pool info to get token information
-            pool["info"] = await self.fetch_pool_info(chain, network, connector, wallet_address, pool_address)
+            pool["information"] = await self.get_pool_information(pool)
 
     def format_status(self) -> str:
         return ""
