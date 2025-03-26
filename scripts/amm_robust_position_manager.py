@@ -52,14 +52,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         AMMRobustPositionManager.gateway_http_client = GatewayHttpClient.get_instance()
 
-        self.initialize(configuration)
+        self._initialize(configuration)
 
-    def initialize(self, configuration: AMMRobustPositionManagerConfiguration):
+    def _initialize(self, configuration: AMMRobustPositionManagerConfiguration):
         self.configuration = configuration
 
-        self.log_initialization()
+        self._log_initialization()
 
-    def log_initialization(self):
+    def _log_initialization(self):
         self.logger().info(f"Starting {self.__class__.__name__} strategy")
 
     def on_tick(self):
