@@ -1,4 +1,3 @@
-import logging
 import re
 import ssl
 from decimal import Decimal
@@ -6,15 +5,15 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import aiohttp
-from aiohttp import ContentTypeError
+from aiohttp import ContentTypeError  # type: ignore
 
-from hummingbot.client.config.security import Security
-from hummingbot.connector.gateway.common_types import ConnectorType, get_connector_type
-from hummingbot.core.event.events import TradeType
-from hummingbot.logger import HummingbotLogger
+from hummingbot.client.config.security import Security  # type: ignore
+from hummingbot.connector.gateway.common_types import ConnectorType, get_connector_type  # type: ignore
+from hummingbot.core.event.events import TradeType  # type: ignore
+from hummingbot.logger import HummingbotLogger  # type: ignore
 
 if TYPE_CHECKING:
-    from hummingbot.client.config.config_helpers import ClientConfigAdapter
+    from hummingbot.client.config.config_helpers import ClientConfigAdapter  # type: ignore
 
 
 class GatewayError(Enum):
@@ -42,6 +41,13 @@ class GatewayError(Enum):
     SwapRouteFetchError = 1025
 
 
+def _transform_connector_route(connector: str) -> str:
+    if "_" in connector:
+        main, sub = connector.split("_", 1)
+        return f"{main}/{sub}"
+    return connector
+
+
 class GatewayHttpClient:
     """
     An HTTP client for making requests to the gateway API.
@@ -61,7 +67,7 @@ class GatewayHttpClient:
 
     def __init__(self, client_config_map: Optional["ClientConfigAdapter"] = None):
         if client_config_map is None:
-            from hummingbot.client.hummingbot_application import HummingbotApplication
+            from hummingbot.client.hummingbot_application import HummingbotApplication  # type: ignore
             client_config_map = HummingbotApplication.main_application().client_config_map
         api_host = client_config_map.gateway.gateway_api_host
         api_port = client_config_map.gateway.gateway_api_port
@@ -73,7 +79,7 @@ class GatewayHttpClient:
     @classmethod
     def logger(cls) -> HummingbotLogger:
         if cls._ghc_logger is None:
-            cls._ghc_logger = logging.getLogger(__name__)
+            cls._ghc_logger = HummingbotLogger(__name__)
         return cls._ghc_logger
 
     @classmethod
@@ -84,9 +90,11 @@ class GatewayHttpClient:
         if cls._shared_client is None or re_init:
             cert_path = client_config_map.certs_path
             ssl_ctx = ssl.create_default_context(cafile=f"{cert_path}/ca_cert.pem")
-            ssl_ctx.load_cert_chain(certfile=f"{cert_path}/client_cert.pem",
-                                    keyfile=f"{cert_path}/client_key.pem",
-                                    password=Security.secrets_manager.password.get_secret_value())
+            ssl_ctx.load_cert_chain(
+                certfile=f"{cert_path}/client_cert.pem",
+                keyfile=f"{cert_path}/client_key.pem",
+                password=Security.secrets_manager.password.get_secret_value()
+            )
             conn = aiohttp.TCPConnector(ssl_context=ssl_ctx)
             cls._shared_client = aiohttp.ClientSession(connector=conn)
         return cls._shared_client
@@ -115,15 +123,18 @@ class GatewayHttpClient:
         error_code: Optional[int] = resp.get("errorCode") if isinstance(resp, dict) else None
         if error_code is not None:
             if error_code == GatewayError.Network.value:
-                self.logger().network("Gateway had a network error. Make sure it is still able to communicate with the node.")
+                self.logger().network(
+                    "Gateway had a network error. Make sure it is still able to communicate with the node.")
             elif error_code == GatewayError.RateLimit.value:
                 self.logger().network("Gateway was unable to communicate with the node because of rate limiting.")
             elif error_code == GatewayError.OutOfGas.value:
                 self.logger().network("There was an out of gas error. Adjust the gas limit in the gateway config.")
             elif error_code == GatewayError.TransactionGasPriceTooLow.value:
-                self.logger().network("The gas price provided by gateway was too low to create a blockchain operation. Consider increasing the gas price.")
+                self.logger().network(
+                    "The gas price provided by gateway was too low to create a blockchain operation. Consider increasing the gas price.")
             elif error_code == GatewayError.LoadWallet.value:
-                self.logger().network("Gateway failed to load your wallet. Try running 'gateway connect' with the correct wallet settings.")
+                self.logger().network(
+                    "Gateway failed to load your wallet. Try running 'gateway connect' with the correct wallet settings.")
             elif error_code == GatewayError.TokenNotSupported.value:
                 self.logger().network("Gateway tried to use an unsupported token.")
             elif error_code == GatewayError.TradeFailed.value:
@@ -135,11 +146,14 @@ class GatewayHttpClient:
             elif error_code == GatewayError.ServiceUnitialized.value:
                 self.logger().network("Some values was uninitialized. Please contact dev@hummingbot.io ")
             elif error_code == GatewayError.SwapPriceExceedsLimitPrice.value:
-                self.logger().network("The swap price is greater than your limit buy price. The market may be too volatile or your slippage rate is too low. Try adjusting the strategy's allowed slippage rate.")
+                self.logger().network(
+                    "The swap price is greater than your limit buy price. The market may be too volatile or your slippage rate is too low. Try adjusting the strategy's allowed slippage rate.")
             elif error_code == GatewayError.SwapPriceLowerThanLimitPrice.value:
-                self.logger().network("The swap price is lower than your limit sell price. The market may be too volatile or your slippage rate is too low. Try adjusting the strategy's allowed slippage rate.")
+                self.logger().network(
+                    "The swap price is lower than your limit sell price. The market may be too volatile or your slippage rate is too low. Try adjusting the strategy's allowed slippage rate.")
             elif error_code == GatewayError.UnknownChainError.value:
-                self.logger().network("An unknown chain error has occurred on gateway. Make sure your gateway settings are correct.")
+                self.logger().network(
+                    "An unknown chain error has occurred on gateway. Make sure your gateway settings are correct.")
             elif error_code == GatewayError.InsufficientBaseBalance.value:
                 self.logger().network("Insufficient base token balance needed to execute the trade.")
             elif error_code == GatewayError.InsufficientQuoteBalance.value:
@@ -149,9 +163,11 @@ class GatewayHttpClient:
             elif error_code == GatewayError.SwapRouteFetchError.value:
                 self.logger().network("Failed to fetch swap route.")
             elif error_code == GatewayError.UnknownError.value:
-                self.logger().network("An unknown error has occurred on gateway. Please send your logs to operations@hummingbot.org.")
+                self.logger().network(
+                    "An unknown error has occurred on gateway. Please send your logs to operations@hummingbot.org.")
             else:
-                self.logger().network("An unknown error has occurred on gateway. Please send your logs to operations@hummingbot.org.")
+                self.logger().network(
+                    "An unknown error has occurred on gateway. Please send your logs to operations@hummingbot.org.")
 
     @staticmethod
     def is_timeout_error(e) -> bool:
@@ -171,7 +187,7 @@ class GatewayHttpClient:
             self,
             method: str,
             path_url: str,
-            params: Dict[str, Any] = {},
+            params=None,
             fail_silently: bool = False,
             use_body: bool = False,
     ) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
@@ -184,6 +200,8 @@ class GatewayHttpClient:
         :param use_body: used to determine if the request should sent the parameters in the body or as query string
         :returns A response in json format.
         """
+        if params is None:
+            params = {}
         url = f"{self.base_url}/{path_url}"
         client = self._http_client(self._client_config_map)
 
@@ -213,11 +231,11 @@ class GatewayHttpClient:
                 except ContentTypeError:
                     parsed_response = await response.text()
                 if response.status != 200 and \
-                   not fail_silently and \
-                   not self.is_timeout_error(parsed_response):
+                        not fail_silently and \
+                        not self.is_timeout_error(parsed_response):
                     self.log_error_codes(parsed_response)
 
-                    if "error" in parsed_response:
+                    if isinstance(parsed_response, dict) and "error" in parsed_response:
                         raise ValueError(f"Error on {method.upper()} {url} Error: {parsed_response['error']}")
                     else:
                         raise ValueError(f"Error on {method.upper()} {url} Error: {parsed_response}")
@@ -228,7 +246,7 @@ class GatewayHttpClient:
                     self.logger().network(f"The network call to {url} has timed out.")
                 else:
                     self.logger().network(
-                        e,
+                        'e',
                         exc_info=True,
                         app_warning_msg=f"Call to {url} failed. See logs for more details."
                     )
@@ -240,10 +258,19 @@ class GatewayHttpClient:
         try:
             response: Dict[str, Any] = await self.api_request("get", "", fail_silently=True)
             return response["status"] == "ok"
-        except Exception:
+        except (KeyError, TypeError):
+            return False
+        except aiohttp.ClientError:
             return False
 
-    async def get_gateway_status(self, fail_silently: bool = False) -> List[Dict[str, Any]]:
+    async def get_root(self) -> Dict[str, Any]:
+        """
+        Gets the root endpoint information from the gateway.
+        Returns basic information about the gateway service.
+        """
+        return await self.api_request("get", "")
+
+    async def get_gateway_status(self, fail_silently: bool = False) -> dict[str, Any] | list[dict[str, Any]] | None:
         """
         Calls the status endpoint on Gateway to know basic info about connected networks.
         """
@@ -274,15 +301,26 @@ class GatewayHttpClient:
     async def get_wallets(self, fail_silently: bool = False) -> List[Dict[str, Any]]:
         return await self.api_request("get", "wallet", fail_silently=fail_silently)
 
-    async def add_wallet(
-        self, chain: str, network: str, private_key: str, **kwargs
-    ) -> Dict[str, Any]:
+    async def add_wallet(self, chain: str, network: str, private_key: str, **kwargs) -> Dict[str, Any]:
         request = {"chain": chain, "network": network, "privateKey": private_key}
         request.update(kwargs)
         return await self.api_request(method="post", path_url="wallet/add", params=request)
 
-    async def get_configuration(self, chain: str = None, fail_silently: bool = False) -> Dict[str, Any]:
-        params = {"chainOrConnector": chain} if chain is not None else {}
+    async def remove_wallet(self, chain: str, address: str) -> Dict[str, Any]:
+        """
+        Remove a wallet from the Gateway.
+        :param chain: The blockchain network (e.g., "solana", "ethereum")
+        :param address: The wallet address to remove
+        :return: Response from the Gateway API
+        """
+        url = f"{self.base_url}/wallet/remove"
+        data = {"chain": chain, "address": address}
+
+        return await self.api_request("DELETE", url, data)
+
+    async def get_configuration(self, chain: str = None, connector: str = None, fail_silently: bool = False) -> Dict[
+        str, Any]:
+        params = {"chainOrConnector": chain} if chain is not None or connector is not None else {}
         return await self.api_request("get", "config", params=params, fail_silently=fail_silently)
 
     async def get_balances(
@@ -291,6 +329,7 @@ class GatewayHttpClient:
             network: str,
             address: str,
             token_symbols: List[str],
+            wallet_public_key: str,
             fail_silently: bool = False,
     ) -> Dict[str, Any]:
         if isinstance(token_symbols, list):
@@ -299,6 +338,7 @@ class GatewayHttpClient:
                 "network": network,
                 "address": address,
                 "tokenSymbols": token_symbols,
+                "walletPublicKey": wallet_public_key
             }
             return await self.api_request(
                 method="post",
@@ -319,6 +359,94 @@ class GatewayHttpClient:
         return await self.api_request("get", f"{chain}/tokens", {
             "network": network
         }, fail_silently=fail_silently)
+
+    async def get_chain_token_info(
+            self,
+            chain: str,
+            network: str,
+            token_symbol: str,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets detailed information about a specific token on a chain.
+
+        :param chain: The blockchain network (e.g., "solana", "ethereum")
+        :param network: The network to use (e.g., "mainnet-beta")
+        :param token_symbol: The symbol of the token to query (e.g., "SOL", "ETH")
+        :param fail_silently: Whether to fail silently on error
+        :return: Detailed token information including address, decimals, and other metadata
+        """
+        params = {
+            "network": network,
+            "tokenSymbols": token_symbol
+        }
+
+        return await self.api_request(
+            "get",
+            f"{chain}/tokens",
+            params=params,
+            fail_silently=fail_silently
+        )
+
+    async def get_chain_tokens(
+            self,
+            chain: str,
+            network: str,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets information about all tokens on a specific chain and network.
+
+        :param chain: The blockchain network (e.g., "solana", "ethereum")
+        :param network: The network to use (e.g., "mainnet-beta")
+        :param fail_silently: Whether to fail silently on error
+        :return: Dictionary containing information about all tokens on the chain
+        """
+        params = {
+            "network": network
+        }
+
+        return await self.api_request(
+            "get",
+            f"{chain}/tokens",
+            params=params,
+            fail_silently=fail_silently
+        )
+
+    async def get_chain_multiple_tokens(
+            self,
+            chain: str,
+            network: str,
+            native_token_symbol: str,
+            base_token_symbol: str,
+            quote_token_symbol: str,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets information about multiple tokens on a chain using the native, base and quote token symbols.
+
+        :param chain: The blockchain network (e.g., "solana", "ethereum")
+        :param network: The network to use (e.g., "mainnet-beta")
+        :param native_token_symbol: The native token symbol (e.g., "SOL", "ETH")
+        :param base_token_symbol: The base token symbol (e.g., "USDC")
+        :param quote_token_symbol: The quote token symbol (e.g., "USDT")
+        :param fail_silently: Whether to fail silently on error
+        :return: Dictionary containing information about the specified tokens
+        """
+        # Join token symbols with comma for the API request
+        token_symbols = f"{native_token_symbol},{base_token_symbol},{quote_token_symbol}"
+
+        params = {
+            "network": network,
+            "tokenSymbols": token_symbols
+        }
+
+        return await self.api_request(
+            "get",
+            f"{chain}/tokens",
+            params=params,
+            fail_silently=fail_silently
+        )
 
     async def get_network_status(
             self,
@@ -362,7 +490,7 @@ class GatewayHttpClient:
 
     async def get_allowances(
             self,
-            chain: str,
+            # chain: str,
             network: str,
             address: str,
             token_symbols: List[str],
@@ -390,11 +518,11 @@ class GatewayHttpClient:
         return await self.api_request("post", f"{chain}/poll", request, fail_silently=fail_silently)
 
     async def wallet_sign(
-        self,
-        chain: str,
-        network: str,
-        address: str,
-        message: str,
+            self,
+            chain: str,
+            network: str,
+            address: str,
+            message: str,
     ) -> Dict[str, Any]:
         request = {
             "chain": chain,
@@ -406,7 +534,7 @@ class GatewayHttpClient:
 
     async def get_evm_nonce(
             self,
-            chain: str,
+            # chain: str,
             network: str,
             address: str,
             fail_silently: bool = False
@@ -418,7 +546,7 @@ class GatewayHttpClient:
 
     async def cancel_evm_transaction(
             self,
-            chain: str,
+            # chain: str,
             network: str,
             address: str,
             nonce: int
@@ -428,12 +556,6 @@ class GatewayHttpClient:
             "address": address,
             "nonce": nonce
         })
-
-    def _transform_connector_route(self, connector: str) -> str:
-        if "_" in connector:
-            main, sub = connector.split("_", 1)
-            return f"{main}/{sub}"
-        return connector
 
     async def quote_swap(
             self,
@@ -466,24 +588,24 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "get",
-            f"{self._transform_connector_route(connector)}/quote-swap",
+            f"{_transform_connector_route(connector)}/quote-swap",
             request_payload,
             fail_silently=fail_silently
         )
 
     async def execute_swap(
-        self,
-        network: str,
-        connector: str,
-        address: str,
-        base_asset: str,
-        quote_asset: str,
-        side: TradeType,
-        amount: Decimal,
-        slippage_pct: Optional[Decimal] = None,
-        pool_address: Optional[str] = None,
-        # limit_price: Optional[Decimal] = None,
-        nonce: Optional[int] = None,
+            self,
+            network: str,
+            connector: str,
+            address: str,
+            base_asset: str,
+            quote_asset: str,
+            side: TradeType,
+            amount: Decimal,
+            slippage_pct: Optional[Decimal] = None,
+            pool_address: Optional[str] = None,
+            # limit_price: Optional[Decimal] = None,
+            nonce: Optional[int] = None,
     ) -> Dict[str, Any]:
         if side not in [TradeType.BUY, TradeType.SELL]:
             raise ValueError("Only BUY and SELL prices are supported.")
@@ -508,7 +630,7 @@ class GatewayHttpClient:
             request_payload["poolAddress"] = pool_address
         return await self.api_request(
             "post",
-            f"{self._transform_connector_route(connector)}/execute-swap",
+            f"{_transform_connector_route(connector)}/execute-swap",
             request_payload
         )
 
@@ -523,6 +645,245 @@ class GatewayHttpClient:
             "network": network,
             "gasLimit": gas_limit
         })
+
+    async def amm_pool_info(
+            self,
+            connector: str,
+            network: str,
+            pool_address: str,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets information about a regular AMM pool
+        :param connector: The connector/protocol (e.g., "hydration")
+        :param network: The network to use (e.g., "mainnet")
+        :param pool_address: The address of the pool
+        :param fail_silently: Whether to fail silently on error
+        :return: Pool information including price, liquidity, reserves, and fees
+        """
+        query_params = {
+            "network": network,
+            "poolAddress": pool_address,
+        }
+        return await self.api_request(
+            "get",
+            f"{connector}/amm/pool-info",
+            params=query_params,
+            fail_silently=fail_silently,
+        )
+
+    async def amm_add_liquidity(
+            self,
+            connector: str,
+            network: str,
+            wallet_address: str,
+            pool_address: str,
+            base_token_amount: Optional[float] = None,
+            quote_token_amount: Optional[float] = None,
+            slippage_pct: float = 0.5,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Adds liquidity to a regular AMM pool
+        :param connector: The connector/protocol (e.g., "hydration")
+        :param network: The network to use (e.g., "mainnet")
+        :param wallet_address: The wallet address adding liquidity
+        :param pool_address: The address of the pool
+        :param base_token_amount: The amount of base token to add (optional)
+        :param quote_token_amount: The amount of quote token to add (optional)
+        :param slippage_pct: Allowed slippage percentage (default: 0.5%)
+        :param fail_silently: Whether to fail silently on error
+        :return: Details of the liquidity addition including amounts and fees
+        """
+        request_payload = {
+            "network": network,
+            "walletAddress": wallet_address,
+            "poolAddress": pool_address,
+            "slippagePct": slippage_pct,
+        }
+
+        if base_token_amount is not None:
+            request_payload["baseTokenAmount"] = base_token_amount
+        if quote_token_amount is not None:
+            request_payload["quoteTokenAmount"] = quote_token_amount
+
+        return await self.api_request(
+            "post",
+            f"{connector}/amm/add-liquidity",
+            request_payload,
+            fail_silently=fail_silently,
+        )
+
+    async def amm_remove_liquidity(
+            self,
+            connector: str,
+            network: str,
+            wallet_address: str,
+            pool_address: str,
+            percentage_to_remove: float = 100.0,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Removes liquidity from a regular AMM pool
+        :param connector: The connector/protocol (e.g., "hydration")
+        :param network: The network to use (e.g., "mainnet")
+        :param wallet_address: The wallet address removing liquidity
+        :param pool_address: The address of the pool
+        :param percentage_to_remove: Percentage of liquidity to remove (default: 100%)
+        :param fail_silently: Whether to fail silently on error
+        :return: Details of the liquidity removal including amounts and fees
+        """
+        request_payload = {
+            "network": network,
+            "walletAddress": wallet_address,
+            "poolAddress": pool_address,
+            "percentageToRemove": percentage_to_remove,
+        }
+
+        return await self.api_request(
+            "post",
+            f"{connector}/amm/remove-liquidity",
+            request_payload,
+            fail_silently=fail_silently,
+        )
+
+    async def post_amm_execute_swap(
+            self,
+            connector: str,
+            network: str,
+            wallet_address: str,
+            base_token: str,
+            quote_token: str,
+            amount: float,
+            side: str,
+            pool_address: str,
+            slippage_pct: float,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Executes a swap in an AMM pool.
+
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet-beta")
+        :param wallet_address: The wallet address executing the swap
+        :param base_token: The token to swap from
+        :param quote_token: The token to swap to
+        :param amount: The amount to swap
+        :param side: The side of the trade (buy/sell)
+        :param pool_address: The address of the pool
+        :param slippage_pct: The allowed slippage percentage
+        :param fail_silently: Whether to fail silently on error
+        :return: Transaction details including hash and status
+        """
+        request_payload = {
+            "network": network,
+            "walletAddress": wallet_address,
+            "baseToken": base_token,
+            "quoteToken": quote_token,
+            "amount": str(amount),
+            "side": side,
+            "poolAddress": pool_address,
+            "slippagePct": str(slippage_pct)
+        }
+        return await self.api_request(
+            "post",
+            f"{connector}/amm/execute-swap",
+            request_payload,
+            fail_silently=fail_silently
+        )
+
+    async def get_amm_quote_liquidity(
+            self,
+            connector: str,
+            network: str,
+            pool_address: str,
+            base_token_amount: float,
+            quote_token_amount: float,
+            slippage_pct: float,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets a quote for adding liquidity to an AMM pool.
+
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet-beta")
+        :param pool_address: The address of the pool
+        :param base_token_amount: The amount of base token to add
+        :param quote_token_amount: The amount of quote token to add
+        :param slippage_pct: The allowed slippage percentage
+        :param fail_silently: Whether to fail silently on error
+        :return: Quote information including expected pool tokens and price impact
+        """
+        params = {
+            "network": network,
+            "poolAddress": pool_address,
+            "baseTokenAmount": base_token_amount,
+            "quoteTokenAmount": quote_token_amount,
+            "slippagePct": slippage_pct
+        }
+        return await self.api_request(
+            "get",
+            f"{connector}/amm/quote-liquidity",
+            params=params,
+            fail_silently=fail_silently
+        )
+
+    async def get_amm_quote_swap(
+            self,
+            connector: str,
+            network: str,
+            base_token: str,
+            quote_token: str,
+            amount: float,
+            side: str,
+            pool_address: str,
+            slippage_pct: float,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets a quote for swapping tokens in an AMM pool.
+
+        :param connector: The connector/protocol (e.g., "raydium", "hydration")
+        :param network: The network to use (e.g., "mainnet-beta")
+        :param base_token: The token to swap from
+        :param quote_token: The token to swap to
+        :param amount: The amount to swap
+        :param side: The side of the trade (buy/sell)
+        :param pool_address: The address of the pool
+        :param slippage_pct: The allowed slippage percentage
+        :param fail_silently: Whether to fail silently on error
+        :return: Dictionary containing quote information including:
+                - expected output amount
+                - price impact
+                - minimum received amount
+                - fee information
+        """
+        request_payload = {
+            "network": network,
+            "baseToken": base_token,
+            "quoteToken": quote_token,
+            "amount": amount,
+            "side": side,
+            "poolAddress": pool_address,
+            "slippagePct": slippage_pct
+        }
+
+        try:
+            response = await self.api_request(
+                "get",
+                f"{connector}/amm/quote-swap",
+                request_payload,
+                fail_silently=fail_silently
+            )
+            return response
+        except Exception as e:
+            if not fail_silently:
+                self.logger().network(
+                    f"Failed to get swap quote for {connector} on {network}",
+                    exc_info=True,
+                    app_warning_msg=str(e)
+                )
+            raise e
 
     async def clmm_pool_info(
             self,
@@ -634,7 +995,7 @@ class GatewayHttpClient:
             wallet_address: str,
             position_address: str,
             fail_silently: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
         """
         Closes an existing concentrated liquidity position
         :param connector: The connector/protocol (e.g., "meteora")
@@ -656,198 +1017,90 @@ class GatewayHttpClient:
             fail_silently=fail_silently,
         )
 
-    # AMM methods
+        # async def amm_fetch_pools(
+        #         self,
+        #         connector: str,
+        #         network: str,
+        #         fail_silently: bool = False
+        # ) -> Dict[str, Any]:
+        #     """
+        #     Fetches all available AMM pools for a given connector and network
+        #     :param connector: The connector/protocol (e.g., "raydium")
+        #     :param network: The network to use (e.g., "mainnet")
+        #     :param fail_silently: Whether to fail silently on error
+        #     :return: List of available pools with their information
+        #     """
+        #         query_params = {
+        #             "network": network,
+        #         }
+        #         return await self.api_request(
+        #             "get",
+        #             f"{connector}/amm/pools",
+        #             params=query_params,
+        #             fail_silently=fail_silently,
+        #         )
 
-    async def amm_pool_info(
-            self,
-            connector: str,
-            network: str,
-            pool_address: str,
-            fail_silently: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Gets information about an AMM liquidity pool
-        :param connector: The connector/protocol (e.g., "raydium")
-        :param network: The network to use (e.g., "mainnet")
-        :param pool_address: The address of the pool
-        :param fail_silently: Whether to fail silently on error
-        :return: Pool information including token reserves and prices
-        """
-        query_params = {
-            "network": network,
-            "poolAddress": pool_address,
-        }
-        return await self.api_request(
-            "get",
-            f"{connector}/amm/pool-info",
-            params=query_params,
-            fail_silently=fail_silently,
-        )
+        # def __getattr__(self, name: str) -> Any:
+        #     """
+        #     Magic method to dynamically handle method calls based on naming convention.
+        #     Format: {http_method}_{route_path} where underscores in route_path become slashes
+        #     Example: get_network_status converts to GET /network/status
 
-    async def amm_quote_liquidity(
-            self,
-            connector: str,
-            network: str,
-            pool_address: str,
-            base_token_amount: Optional[float] = None,
-            quote_token_amount: Optional[float] = None,
-            slippage_pct: Optional[float] = None,
-            fail_silently: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Gets a quote for adding liquidity to an AMM pool
-        :param connector: The connector/protocol (e.g., "raydium")
-        :param network: The network to use (e.g., "mainnet")
-        :param pool_address: The address of the pool
-        :param base_token_amount: The amount of base token to add
-        :param quote_token_amount: The amount of quote token to add
-        :param slippage_pct: Allowed slippage percentage
-        :param fail_silently: Whether to fail silently on error
-        :return: Quote information for adding liquidity
-        """
-        query_params = {
-            "network": network,
-            "poolAddress": pool_address,
-        }
-        if base_token_amount is not None:
-            query_params["baseTokenAmount"] = base_token_amount
-        if quote_token_amount is not None:
-            query_params["quoteTokenAmount"] = quote_token_amount
-        if slippage_pct is not None:
-            query_params["slippagePct"] = slippage_pct
+        #     :param name: The method name being called
+        #     :return: An async function that makes the appropriate API request
+        #     """
 
-        return await self.api_request(
-            "get",
-            f"{connector}/amm/quote-liquidity",
-            params=query_params,
-            fail_silently=fail_silently,
-        )
+        #     async def dynamic_api_request(**kwargs) -> Dict[str, Any]:
+        #         # Split the method name to extract HTTP method and route path
+        #         parts = name.split('_')
+        #         if not parts:
+        #             raise ValueError(f"Invalid method name: {name}")
 
-    async def amm_add_liquidity(
-            self,
-            connector: str,
-            network: str,
-            wallet_address: str,
-            pool_address: str,
-            base_token_amount: Optional[float] = None,
-            quote_token_amount: Optional[float] = None,
-            slippage_pct: Optional[float] = None,
-            fail_silently: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Adds liquidity to an AMM pool
-        :param connector: The connector/protocol (e.g., "raydium")
-        :param network: The network to use (e.g., "mainnet")
-        :param wallet_address: The wallet address adding liquidity
-        :param pool_address: The address of the pool
-        :param base_token_amount: The amount of base token to add
-        :param quote_token_amount: The amount of quote token to add
-        :param slippage_pct: Allowed slippage percentage
-        :param fail_silently: Whether to fail silently on error
-        :return: Result of the liquidity addition transaction
-        """
-        request_payload = {
-            "network": network,
-            "walletAddress": wallet_address,
-            "poolAddress": pool_address,
-        }
-        if base_token_amount is not None:
-            request_payload["baseTokenAmount"] = base_token_amount
-        if quote_token_amount is not None:
-            request_payload["quoteTokenAmount"] = quote_token_amount
-        if slippage_pct is not None:
-            request_payload["slippagePct"] = slippage_pct
+        #         # Extract the HTTP method (first part)
+        #         http_method = parts[0].lower()
+        #         if http_method not in ["get", "post", "put", "delete"]:
+        #             raise ValueError(f"Unsupported HTTP method: {http_method}")
 
-        return await self.api_request(
-            "post",
-            f"{connector}/amm/add-liquidity",
-            request_payload,
-            fail_silently=fail_silently,
-        )
+        #         # Convert remaining parts to route path with slashes
+        #         route_path = '/'.join(parts[1:])
 
-    async def amm_remove_liquidity(
-            self,
-            connector: str,
-            network: str,
-            wallet_address: str,
-            pool_address: str,
-            percentage_to_remove: float,
-            fail_silently: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Removes liquidity from an AMM pool
-        :param connector: The connector/protocol (e.g., "raydium")
-        :param network: The network to use (e.g., "mainnet")
-        :param wallet_address: The wallet address removing liquidity
-        :param pool_address: The address of the pool
-        :param percentage_to_remove: Percentage of LP tokens to remove (1-100)
-        :param fail_silently: Whether to fail silently on error
-        :return: Result of the liquidity removal transaction
-        """
-        request_payload = {
-            "network": network,
-            "walletAddress": wallet_address,
-            "poolAddress": pool_address,
-            "percentageToRemove": percentage_to_remove
-        }
+        #         # Extract fail_silently if provided, default to False
+        #         fail_silently = kwargs.pop('fail_silently', False)
 
-        return await self.api_request(
-            "post",
-            f"{connector}/amm/remove-liquidity",
-            request_payload,
-            fail_silently=fail_silently,
-        )
+        #         # Make the API request
+        #         return await self.api_request(http_method, route_path, kwargs, fail_silently=fail_silently)
 
-    async def amm_fetch_pools(
-            self,
-            connector: str,
-            network: str,
-            fail_silently: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Fetches all available AMM pools for a given connector and network
-        :param connector: The connector/protocol (e.g., "raydium")
-        :param network: The network to use (e.g., "mainnet")
-        :param fail_silently: Whether to fail silently on error
-        :return: List of available pools with their information
-        """
-        query_params = {
-            "network": network,
-        }
-        return await self.api_request(
-            "get",
-            f"{connector}/amm/pools",
-            params=query_params,
-            fail_silently=fail_silently,
-        )
+        #     return dynamic_api_request
 
-    def __getattr__(self, name: str) -> Any:
-        """
-        Magic method to dynamically handle method calls based on naming convention.
-        Format: {http_method}_{route_path} where underscores in route_path become slashes
-        Example: get_network_status converts to GET /network/status
-
-        :param name: The method name being called
-        :return: An async function that makes the appropriate API request
-        """
-        async def dynamic_api_request(**kwargs) -> Dict[str, Any]:
-            # Split the method name to extract HTTP method and route path
-            parts = name.split('_')
-            if not parts:
-                raise ValueError(f"Invalid method name: {name}")
-
-            # Extract the HTTP method (first part)
-            http_method = parts[0].lower()
-            if http_method not in ["get", "post", "put", "delete"]:
-                raise ValueError(f"Unsupported HTTP method: {http_method}")
-
-            # Convert remaining parts to route path with slashes
-            route_path = '/'.join(parts[1:])
-
-            # Extract fail_silently if provided, default to False
-            fail_silently = kwargs.pop('fail_silently', False)
-
-            # Make the API request
-            return await self.api_request(http_method, route_path, kwargs, fail_silently=fail_silently)
-
-        return dynamic_api_request
+        # def __getattr__(self, name: str) -> Any:
+        #     """
+        #     Magic method to dynamically handle method calls based on naming convention.
+        #     Format: {http_method}_{route_path} where underscores in route_path become slashes
+        #     Example: get_network_status converts to GET /network/status
+        #
+        #     :param name: The method name being called
+        #     :return: An async function that makes the appropriate API request
+        #     """
+        #
+        #     async def dynamic_api_request(**kwargs) -> Dict[str, Any]:
+        #         # Split the method name to extract HTTP method and route path
+        #         parts = name.split('_')
+        #         if not parts:
+        #             raise ValueError(f"Invalid method name: {name}")
+        #
+        #         # Extract the HTTP method (first part)
+        #         http_method = parts[0].lower()
+        #         if http_method not in ["get", "post", "put", "delete"]:
+        #             raise ValueError(f"Unsupported HTTP method: {http_method}")
+        #
+        #         # Convert remaining parts to route path with slashes
+        #         route_path = '/'.join(parts[1:])
+        #
+        #         # Extract fail_silently if provided, default to False
+        #         fail_silently = kwargs.pop('fail_silently', False)
+        #
+        #         # Make the API request
+        #         return await self.api_request(http_method, route_path, kwargs, fail_silently=fail_silently)
+        #
+        #     return dynamic_api_request
+        #
