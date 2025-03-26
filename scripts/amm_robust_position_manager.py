@@ -163,7 +163,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing pools information
         """
-        return await self.gateway_http_client.amm_fetch_pools(connector, network)
+        return await self.gateway_http_client.amm_pools(connector, network)
 
     async def get_pool_information(self, pool: Dict[str, Any]):
         """
@@ -209,7 +209,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         trade_type = TradeType.BUY if side.upper() == "BUY" else TradeType.SELL
 
-        return await self.gateway_http_client.quote_swap(
+        return await self.gateway_http_client.amm_quote_swap(
             network=network,
             connector=connector,
             base_asset=base_token,
@@ -276,7 +276,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         trade_type = TradeType.BUY if side.upper() == "BUY" else TradeType.SELL
 
-        return await self.gateway_http_client.execute_swap(
+        return await self.gateway_http_client.amm_execute_swap(
             network=network,
             connector=connector,
             address=wallet_address,
@@ -399,32 +399,32 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_wallets()
 
-    async def post_wallet_add(self, chain: str, network: str, private_key: str):
-        """
-        Add a wallet to Gateway.
-
-        Args:
-            chain: Chain identifier
-            network: Network identifier
-            private_key: Private key or mnemonic for the wallet
-
-        Returns:
-            Dictionary containing operation result
-        """
-        return await self.gateway_http_client.add_wallet(chain, network, private_key)
-
-    async def delete_wallet_remove(self, chain: str, address: str):
-        """
-        Remove a wallet from Gateway.
-
-        Args:
-            chain: Chain identifier
-            address: Wallet address to remove
-
-        Returns:
-            Dictionary containing operation result
-        """
-        return await self.gateway_http_client.remove_wallet(chain, address)
+    # async def post_wallet_add(self, chain: str, network: str, private_key: str):
+    #     """
+    #     Add a wallet to Gateway.
+    #
+    #     Args:
+    #         chain: Chain identifier
+    #         network: Network identifier
+    #         private_key: Private key or mnemonic for the wallet
+    #
+    #     Returns:
+    #         Dictionary containing operation result
+    #     """
+    #     return await self.gateway_http_client.add_wallet(chain, network, private_key)
+    #
+    # async def delete_wallet_remove(self, chain: str, address: str):
+    #     """
+    #     Remove a wallet from Gateway.
+    #
+    #     Args:
+    #         chain: Chain identifier
+    #         address: Wallet address to remove
+    #
+    #     Returns:
+    #         Dictionary containing operation result
+    #     """
+    #     return await self.gateway_http_client.remove_wallet(chain, address)
 
     async def get_chain_status(self, chain: str, network: str):
         """

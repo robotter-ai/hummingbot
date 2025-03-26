@@ -429,13 +429,43 @@ class GatewayHttpClient:
             "nonce": nonce
         })
 
-    def _transform_connector_route(self, connector: str) -> str:
-        if "_" in connector:
-            main, sub = connector.split("_", 1)
-            return f"{main}/{sub}"
-        return connector
+    async def amm_quote_swap(
+        self,
+        network: str,
+        connector: str,
+        base_asset: str,
+        quote_asset: str,
+        amount: Decimal,
+        side: TradeType,
+        slippage_pct: Optional[Decimal] = None,
+        pool_address: Optional[str] = None,
+        fail_silently: bool = False,
+    ) -> Dict[str, Any]:
+        if side not in [TradeType.BUY, TradeType.SELL]:
+            raise ValueError("Only BUY and SELL prices are supported.")
 
-    async def quote_swap(
+        connector_type = get_connector_type(connector)
+
+        request_payload = {
+            "network": network,
+            "baseToken": base_asset,
+            "quoteToken": quote_asset,
+            "amount": float(amount),
+            "side": side.name
+        }
+        if slippage_pct is not None:
+            request_payload["slippagePct"] = float(slippage_pct)
+        if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
+            request_payload["poolAddress"] = pool_address
+
+        return await self.api_request(
+            "get",
+            f"{connector}/amm/quote-swap",
+            request_payload,
+            fail_silently=fail_silently
+        )
+
+    async def clmm_quote_swap(
             self,
             network: str,
             connector: str,
@@ -466,12 +496,12 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "get",
-            f"{self._transform_connector_route(connector)}/quote-swap",
+            f"{connector}/amm/quote-swap",
             request_payload,
             fail_silently=fail_silently
         )
 
-    async def execute_swap(
+    async def clmm_execute_swap(
         self,
         network: str,
         connector: str,
@@ -508,7 +538,48 @@ class GatewayHttpClient:
             request_payload["poolAddress"] = pool_address
         return await self.api_request(
             "post",
-            f"{self._transform_connector_route(connector)}/execute-swap",
+            f"{connector}/clmm/execute-swap",
+            request_payload
+        )
+
+    async def amm_execute_swap(
+        self,
+        network: str,
+        connector: str,
+        address: str,
+        base_asset: str,
+        quote_asset: str,
+        side: TradeType,
+        amount: Decimal,
+        slippage_pct: Optional[Decimal] = None,
+        pool_address: Optional[str] = None,
+        # limit_price: Optional[Decimal] = None,
+        nonce: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        if side not in [TradeType.BUY, TradeType.SELL]:
+            raise ValueError("Only BUY and SELL prices are supported.")
+
+        connector_type = get_connector_type(connector)
+
+        request_payload: Dict[str, Any] = {
+            "network": network,
+            "walletAddress": address,
+            "baseToken": base_asset,
+            "quoteToken": quote_asset,
+            "amount": float(amount),
+            "side": side.name,
+        }
+        if slippage_pct is not None:
+            request_payload["slippagePct"] = float(slippage_pct)
+        # if limit_price is not None:
+        #     request_payload["limitPrice"] = float(limit_price)
+        if nonce is not None:
+            request_payload["nonce"] = int(nonce)
+        if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
+            request_payload["poolAddress"] = pool_address
+        return await self.api_request(
+            "post",
+            f"{connector}/execute-swap",
             request_payload
         )
 
@@ -545,7 +616,7 @@ class GatewayHttpClient:
         }
         return await self.api_request(
             "get",
-            f"{connector}/pool-info",
+            f"{connector}/clmm/pool-info",
             params=query_params,
             fail_silently=fail_silently,
         )
@@ -798,7 +869,7 @@ class GatewayHttpClient:
             fail_silently=fail_silently,
         )
 
-    async def amm_fetch_pools(
+    async def amm_pools(
             self,
             connector: str,
             network: str,

@@ -48,7 +48,7 @@ class GatewaySwap(GatewayBase):
 
         # Pull the price from gateway.
         try:
-            resp: Dict[str, Any] = await self._get_gateway_instance().quote_swap(
+            resp: Dict[str, Any] = await self._get_gateway_instance().clmm_quote_swap(
                 network=self.network,
                 connector=self.connector_name,
                 base_asset=base,
