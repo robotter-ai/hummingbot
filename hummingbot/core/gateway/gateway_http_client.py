@@ -313,6 +313,7 @@ class GatewayHttpClient:
             self,
             chain: str,
             network: str,
+            _token_symbols: Optional[Union[str, List[str]]] = None,
             fail_silently: bool = True
     ) -> Dict[str, Any]:
         return await self.api_request("get", f"{chain}/tokens", {
@@ -654,3 +655,199 @@ class GatewayHttpClient:
             request_payload,
             fail_silently=fail_silently,
         )
+
+    # AMM methods
+
+    async def amm_pool_info(
+            self,
+            connector: str,
+            network: str,
+            pool_address: str,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets information about an AMM liquidity pool
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet")
+        :param pool_address: The address of the pool
+        :param fail_silently: Whether to fail silently on error
+        :return: Pool information including token reserves and prices
+        """
+        query_params = {
+            "network": network,
+            "poolAddress": pool_address,
+        }
+        return await self.api_request(
+            "get",
+            f"{connector}/amm/pool-info",
+            params=query_params,
+            fail_silently=fail_silently,
+        )
+
+    async def amm_quote_liquidity(
+            self,
+            connector: str,
+            network: str,
+            pool_address: str,
+            base_token_amount: Optional[float] = None,
+            quote_token_amount: Optional[float] = None,
+            slippage_pct: Optional[float] = None,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Gets a quote for adding liquidity to an AMM pool
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet")
+        :param pool_address: The address of the pool
+        :param base_token_amount: The amount of base token to add
+        :param quote_token_amount: The amount of quote token to add
+        :param slippage_pct: Allowed slippage percentage
+        :param fail_silently: Whether to fail silently on error
+        :return: Quote information for adding liquidity
+        """
+        query_params = {
+            "network": network,
+            "poolAddress": pool_address,
+        }
+        if base_token_amount is not None:
+            query_params["baseTokenAmount"] = base_token_amount
+        if quote_token_amount is not None:
+            query_params["quoteTokenAmount"] = quote_token_amount
+        if slippage_pct is not None:
+            query_params["slippagePct"] = slippage_pct
+
+        return await self.api_request(
+            "get",
+            f"{connector}/amm/quote-liquidity",
+            params=query_params,
+            fail_silently=fail_silently,
+        )
+
+    async def amm_add_liquidity(
+            self,
+            connector: str,
+            network: str,
+            wallet_address: str,
+            pool_address: str,
+            base_token_amount: Optional[float] = None,
+            quote_token_amount: Optional[float] = None,
+            slippage_pct: Optional[float] = None,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Adds liquidity to an AMM pool
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet")
+        :param wallet_address: The wallet address adding liquidity
+        :param pool_address: The address of the pool
+        :param base_token_amount: The amount of base token to add
+        :param quote_token_amount: The amount of quote token to add
+        :param slippage_pct: Allowed slippage percentage
+        :param fail_silently: Whether to fail silently on error
+        :return: Result of the liquidity addition transaction
+        """
+        request_payload = {
+            "network": network,
+            "walletAddress": wallet_address,
+            "poolAddress": pool_address,
+        }
+        if base_token_amount is not None:
+            request_payload["baseTokenAmount"] = base_token_amount
+        if quote_token_amount is not None:
+            request_payload["quoteTokenAmount"] = quote_token_amount
+        if slippage_pct is not None:
+            request_payload["slippagePct"] = slippage_pct
+
+        return await self.api_request(
+            "post",
+            f"{connector}/amm/add-liquidity",
+            request_payload,
+            fail_silently=fail_silently,
+        )
+
+    async def amm_remove_liquidity(
+            self,
+            connector: str,
+            network: str,
+            wallet_address: str,
+            pool_address: str,
+            percentage_to_remove: float,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Removes liquidity from an AMM pool
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet")
+        :param wallet_address: The wallet address removing liquidity
+        :param pool_address: The address of the pool
+        :param percentage_to_remove: Percentage of LP tokens to remove (1-100)
+        :param fail_silently: Whether to fail silently on error
+        :return: Result of the liquidity removal transaction
+        """
+        request_payload = {
+            "network": network,
+            "walletAddress": wallet_address,
+            "poolAddress": pool_address,
+            "percentageToRemove": percentage_to_remove
+        }
+
+        return await self.api_request(
+            "post",
+            f"{connector}/amm/remove-liquidity",
+            request_payload,
+            fail_silently=fail_silently,
+        )
+
+    async def amm_fetch_pools(
+            self,
+            connector: str,
+            network: str,
+            fail_silently: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Fetches all available AMM pools for a given connector and network
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet")
+        :param fail_silently: Whether to fail silently on error
+        :return: List of available pools with their information
+        """
+        query_params = {
+            "network": network,
+        }
+        return await self.api_request(
+            "get",
+            f"{connector}/amm/pools",
+            params=query_params,
+            fail_silently=fail_silently,
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        """
+        Magic method to dynamically handle method calls based on naming convention.
+        Format: {http_method}_{route_path} where underscores in route_path become slashes
+        Example: get_network_status converts to GET /network/status
+
+        :param name: The method name being called
+        :return: An async function that makes the appropriate API request
+        """
+        async def dynamic_api_request(**kwargs) -> Dict[str, Any]:
+            # Split the method name to extract HTTP method and route path
+            parts = name.split('_')
+            if not parts:
+                raise ValueError(f"Invalid method name: {name}")
+
+            # Extract the HTTP method (first part)
+            http_method = parts[0].lower()
+            if http_method not in ["get", "post", "put", "delete"]:
+                raise ValueError(f"Unsupported HTTP method: {http_method}")
+
+            # Convert remaining parts to route path with slashes
+            route_path = '/'.join(parts[1:])
+
+            # Extract fail_silently if provided, default to False
+            fail_silently = kwargs.pop('fail_silently', False)
+
+            # Make the API request
+            return await self.api_request(http_method, route_path, kwargs, fail_silently=fail_silently)
+
+        return dynamic_api_request
