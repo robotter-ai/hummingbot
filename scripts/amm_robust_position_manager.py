@@ -63,9 +63,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self.logger().info(f"Starting {self.__class__.__name__} strategy")
 
     def on_tick(self):
-        safe_ensure_future(self.async_on_tick())
+        safe_ensure_future(self._async_on_tick())
 
-    async def async_on_tick(self):
+    async def _async_on_tick(self):
         await self._check_gateway_status()
 
     async def _check_gateway_status(self):
@@ -149,9 +149,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool["wallet_address"] = wallet_address
 
             # Get pool info to get token information
-            pool["information"] = await self.get_pool_information(pool)
+            pool["information"] = await self._get_pool_information(pool)
 
-    async def get_fetch_pools(self, _chain: str, connector: str, network: str):
+    async def _get_pools(self, _chain: str, connector: str, network: str):
         """
         Fetch all available pools for a connector.
 
@@ -165,7 +165,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.amm_pools(connector, network)
 
-    async def get_pool_information(self, pool: Dict[str, Any]):
+    async def _get_pool_information(self, pool: Dict[str, Any]):
         """
         Get detailed information about a liquidity pool.
 
@@ -184,8 +184,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return await self.gateway_http_client.amm_pool_info(connector, network, pool_address)
 
-    async def get_quote_swap(self, pool: Dict[str, Any], base_token: str, quote_token: str,
-                             amount: str, side: str, slippage_percentage: str = "0.5"):
+    async def _get_quote_swap(self, pool: Dict[str, Any], base_token: str, quote_token: str,
+                              amount: str, side: str, slippage_percentage: str = "0.5"):
         """
         Get a quote for swapping tokens in a pool.
 
@@ -220,8 +220,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool_address=pool_address
         )
 
-    async def get_quote_liquidity(self, pool: Dict[str, Any], base_token_amount: str,
-                                  quote_token_amount: str, slippage_percentage: str = "0.5"):
+    async def _get_quote_liquidity(self, pool: Dict[str, Any], base_token_amount: str,
+                                   quote_token_amount: str, slippage_percentage: str = "0.5"):
         """
         Get a quote for adding liquidity to a pool.
 
@@ -250,8 +250,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             slippage_pct=float(slippage_percentage) if slippage_percentage else None
         )
 
-    async def post_execute_swap(self, pool: Dict[str, Any], base_token: str, quote_token: str,
-                                amount: str, side: str, slippage_percentage: str = "0.5"):
+    async def _post_execute_swap(self, pool: Dict[str, Any], base_token: str, quote_token: str,
+                                 amount: str, side: str, slippage_percentage: str = "0.5"):
         """
         Execute a token swap in the specified pool.
 
@@ -288,8 +288,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool_address=pool_address
         )
 
-    async def post_add_liquidity(self, pool: Dict[str, Any], base_token_amount: str,
-                                 quote_token_amount: str, slippage_percentage: str = "0.5"):
+    async def _post_add_liquidity(self, pool: Dict[str, Any], base_token_amount: str,
+                                  quote_token_amount: str, slippage_percentage: str = "0.5"):
         """
         Add liquidity to the specified pool.
 
@@ -320,7 +320,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             slippage_pct=float(slippage_percentage) if slippage_percentage else None
         )
 
-    async def post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: str):
+    async def _post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: str):
         """
         Remove liquidity from the specified pool.
 
@@ -347,7 +347,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             percentage_to_remove=float(percentage_to_remove)
         )
 
-    async def get_root_status(self):
+    async def _get_root_status(self):
         """
         Get the status of the Gateway server.
 
@@ -356,7 +356,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_gateway_status()
 
-    async def get_config(self, chain_or_connector: Optional[str] = None):
+    async def _get_config(self, chain_or_connector: Optional[str] = None):
         """
         Get Gateway configuration settings.
 
@@ -368,7 +368,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_configuration(chain_or_connector)
 
-    async def post_config_update(self, config_path: str, config_value: Any):
+    async def _post_config_update(self, config_path: str, config_value: Any):
         """
         Update Gateway configuration setting.
 
@@ -381,7 +381,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.update_config(config_path, config_value)
 
-    async def get_connectors(self):
+    async def _get_connectors(self):
         """
         Get all available connectors from Gateway.
 
@@ -390,7 +390,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_connectors()
 
-    async def get_wallet(self):
+    async def _get_wallet(self):
         """
         Get wallet information for all connected chains.
 
@@ -399,7 +399,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_wallets()
 
-    # async def post_wallet_add(self, chain: str, network: str, private_key: str):
+    # async def _post_wallet_add(self, chain: str, network: str, private_key: str):
     #     """
     #     Add a wallet to Gateway.
     #
@@ -413,7 +413,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     #     """
     #     return await self.gateway_http_client.add_wallet(chain, network, private_key)
     #
-    # async def delete_wallet_remove(self, chain: str, address: str):
+    # async def _delete_wallet_remove(self, chain: str, address: str):
     #     """
     #     Remove a wallet from Gateway.
     #
@@ -426,7 +426,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     #     """
     #     return await self.gateway_http_client.remove_wallet(chain, address)
 
-    async def get_chain_status(self, chain: str, network: str):
+    async def _get_chain_status(self, chain: str, network: str):
         """
         Get chain status.
 
@@ -439,7 +439,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_network_status(chain, network)
 
-    async def post_chain_poll(self, chain: str, network: str, tx_hash: str):
+    async def _post_chain_poll(self, chain: str, network: str, tx_hash: str):
         """
         Poll for transaction status.
 
@@ -453,7 +453,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_transaction_status(chain, network, tx_hash)
 
-    async def get_chain_tokens(self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None):
+    async def _get_chain_tokens(self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None):
         """
         Get token information.
 
@@ -467,7 +467,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         return await self.gateway_http_client.get_tokens(chain, network, token_symbols)
 
-    async def post_chain_balances(self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None):
+    async def _post_chain_balances(self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None):
         """
         Get token balances for a wallet address.
 
