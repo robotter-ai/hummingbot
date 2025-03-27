@@ -20,6 +20,7 @@ Here are the current chain connectors in the codebase:
 | [BNB Chain](/chains/bnb-chain) | EVM |
 | [Polygon](/chains/polygon) | EVM |
 | [Algorand](/chains/algorand) | Non-EVM |
+| [Polkadot](/chains/polkadot) | Non-EVN |
 | [Cosmos](/chains/cosmos) | Non-EVM |
 | [Cronos](/chains/cronos) | Non-EVM |
 | [Harmony](/chains/harmony) | EVM |
