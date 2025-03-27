@@ -1,11 +1,13 @@
 # `algorand`
 
-`algorand` is a [Chain](/chains) connector in Hummingbot Gateway that helps users connect to DEXs on various networks on the Algorand blockchain.
+`algorand` is a [Chain](/chains) connector in Hummingbot Gateway that helps users connect to DEXs on various networks on
+the Algorand blockchain.
 
 ## 📁 Connector Info
 
 * Folder: [/gateway/src/chains/algorand](https://github.com/hummingbot/gateway/tree/development/src/chains/algorand)
-* Configs: [/gateway/src/templates/algorand.yml](https://github.com/hummingbot/gateway/tree/development/src/templates/algorand.yml)
+*
+Configs: [/gateway/src/templates/algorand.yml](https://github.com/hummingbot/gateway/tree/development/src/templates/algorand.yml)
 * Maintainer: [CoinAlpha](https://coinalpha.com)
 
 ## ℹ️ Chain Info
@@ -17,8 +19,8 @@
 
 ## 🕸️ Supported Networks
 
-| Network | Type    |
-|---------|---------|
+| Network   | Type    |
+|-----------|---------|
 | `mainnet` | mainnet |
 | `testnet` | testnet |
 

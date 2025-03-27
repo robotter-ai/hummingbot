@@ -1,7 +1,8 @@
 ## 📁 Connector Info
 
 * Folder: [/gateway/src/chains/solana](https://github.com/hummingbot/gateway/tree/development/src/chains/solana)
-* Configs: [/gateway/src/templates/solana.yml](https://github.com/hummingbot/gateway/tree/development/src/templates/solana.yml)
+*
+Configs: [/gateway/src/templates/solana.yml](https://github.com/hummingbot/gateway/tree/development/src/templates/solana.yml)
 
 ## ℹ️ Chain Info
 
@@ -12,7 +13,7 @@
 
 ## 🕸️ Supported Networks
 
-| Network | Type |
-|---------|---------|
+| Network        | Type    |
+|----------------|---------|
 | `mainnet-beta` | mainnet |
-| `devnet` | testnet |
+| `devnet`       | testnet |

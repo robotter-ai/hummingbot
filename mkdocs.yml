@@ -36,8 +36,8 @@ theme:
         icon: material/brightness-5
         name: "Switch to dark mode"
   font:
-      text: Noto Sans
-      code: Roboto Mono
+    text: Noto Sans
+    code: Roboto Mono
   features:
     - navigation.instant
     - navigation.instant.prefetch
@@ -79,19 +79,19 @@ extra:
     provider: google
     property: G-DVHHGW7W9R
     feedback:
-          title: Was this page helpful?
-          ratings:
-            - icon: material/thumb-up-outline
-              name: This page was helpful
-              data: 1
-              note: >-
-                Thanks for your feedback!
-            - icon: material/thumb-down-outline
-              name: This page could be improved
-              data: 0
-              note: >- 
-                Thanks for your feedback! Help us improve this page by
-                <a href="https://github.com/hummingbot/hummingbot-site/issues/new?title=[Feedback]+{title}+-+{url}" target="_blank" rel="noopener">filing an issue</a>.
+      title: Was this page helpful?
+      ratings:
+        - icon: material/thumb-up-outline
+          name: This page was helpful
+          data: 1
+          note: >-
+            Thanks for your feedback!
+        - icon: material/thumb-down-outline
+          name: This page could be improved
+          data: 0
+          note: >-
+            Thanks for your feedback! Help us improve this page by
+            <a href="https://github.com/hummingbot/hummingbot-site/issues/new?title=[Feedback]+{title}+-+{url}" target="_blank" rel="noopener">filing an issue</a>.
   social:
     - icon: fontawesome/brands/discord
       link: https://discord.gg/hummingbot
@@ -131,8 +131,8 @@ markdown_extensions:
   - pymdownx.critic
   - pymdownx.details
   - pymdownx.emoji:
-        emoji_index: !!python/name:material.extensions.emoji.twemoji
-        emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.keys
   # - pymdownx.magiclink:
   #     user: hummingbot
@@ -164,251 +164,251 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Documentation:
-    - Documentation: docs/index.md
-    - Installation:
-      - Installation: installation/index.md
-      - Install via Docker: installation/docker.md
-      - Install via Source: installation/source.md
-      - Post-Installation: installation/post-installation.md
-    - Strategies V2:
-      - Strategies V2: strategies/index.md
-      - Architecture: v2-strategies/index.md
-      - Scripts:
-        - Scripts: scripts/index.md
-        - Sample Scripts: scripts/examples.md
-        - Scripts Cheatsheat: scripts/cheatsheet.md
-      - Market Data Provider:
-        - Market Data Provider: v2-strategies/data/index.md
-        - Candles: v2-strategies/candles/index.md
-      - Executors: 
-        - Executors: v2-strategies/executors/index.md   
-        - Position Executor: v2-strategies/executors/positionexecutor.md
-        - Grid Executor: v2-strategies/executors/gridexecutor.md
-        - DCA Executor: v2-strategies/executors/dcaexecutor.md
-        - Arbitrage Executor: v2-strategies/executors/arbitrage-executor.md
-        - XEMM Executor: v2-strategies/executors/xemm-executor.md
-        - TWAP Executor: v2-strategies/executors/twapexecutor.md
-      - Controllers:
-        - Controllers: v2-strategies/controllers/index.md
-    - Strategies V1:
-      - Strategies V1: v1-strategies/index.md
-      - Pure Market Making (PMM): strategies/pure-market-making.md
-      - PMM Configs:
-        - PMM Configs: strategy-configs/index.md
-        - Add Transaction Costs: strategy-configs/add-transaction-costs.md
-        - Order Levels: strategy-configs/order-levels.md
-        - Filled Order Delay: strategy-configs/filled-order-delay.md
-        - Hanging Orders: strategy-configs/hanging-orders.md
-        - Minimum Spread: strategy-configs/minimum-spread.md
-        - Order Refresh Tolerance: strategy-configs/order-refresh-tolerance.md
-        - Order Optimization: strategy-configs/order-optimization.md
-        - Inventory Skew: strategy-configs/inventory-skew.md
-        - Max Order Age: strategy-configs/max-order-age.md
-        - Order Override: strategy-configs/order-override.md
-        - Price Band: strategy-configs/price-band.md
-        - Price Source: strategy-configs/external-price-source.md
-        - Ping Pong: strategy-configs/ping-pong.md
-      - Cross-Exchange Market Making (XEMM): strategies/cross-exchange-market-making.md
-      - AMM Arbitrage: strategies/amm-arbitrage.md
-      - AMM-V3 LP: strategies/amm-v3-lp.md
-      - Avellaneda Market Making: strategies/avellaneda-market-making.md
-      - Cross-Exchange Mining: strategies/cross-exchange-mining.md
-      - Hedge: strategies/hedge.md
-      - Liquidity Mining: strategies/liquidity-mining.md
-      - Perpetual Market Making: strategies/perpetual-market-making.md
-      - Spot Perpetual Arbitrage: strategies/spot-perpetual-arbitrage.md
-      - TWAP: strategies/twap.md
-    - CLOB Connectors:
-      - CLOB Connectors: exchanges/index.md
-      - AscendEx : exchanges/ascendex/index.md
-      - Binance: exchanges/binance/index.md
-      - Bitstamp: exchanges/bitstamp/index.md
-      - Bitrue: exchanges/bitrue.md
-      - Bitget: exchanges/bitget-perpetual.md
-      - BingX: exchanges/bing_x/index.md
-      - Bitmart: exchanges/bitmart/index.md
-      - Bybit: exchanges/bybit.md
-      - BTC Markets: exchanges/btc-markets.md
-      - Coinbase: exchanges/coinbase.md
-      - Cube: exchanges/cube/index.md
-      - Derive: exchanges/derive/index.md
-      - Dexalot: exchanges/dexalot.md
-      - dYdX: exchanges/dydx.md
-      - Gate.io: exchanges/gate-io/index.md
-      - Hashkey: exchanges/hashkey/index.md
-      - Hyperliquid: exchanges/hyperliquid.md
-      - HTX: exchanges/htx/index.md
-      - Kraken: exchanges/kraken/index.md
-      - Kucoin: exchanges/kucoin/index.md
-      - Injective Helix: exchanges/injective.md
-      - Polkadex: exchanges/polkadex.md
-      - MEXC: exchanges/mexc/index.md
-      - NDAX: exchanges/ndax.md
-      - OKX: exchanges/okx/okx.md
-      - Tegro: exchanges/tegro/index.md
-      - Vertex: exchanges/vertex.md
-      - XRP Ledger: exchanges/xrpl.md
-    - AMM Connectors:
-      - AMM Connectors: dex-connectors/index.md
-      - Balancer: exchanges/balancer.md
-      - ETCSwap: exchanges/etcSwap.md
-      - Mad Meerkat: exchanges/mad-meerkat.md
-      - Curve: exchanges/curve.md
-      - Carbon: exchanges/carbon.md
-      - Jupiter: exchanges/jupiter.md
-      - OpenOcean: exchanges/openocean.md
-      - Osmosis: exchanges/osmosis.md
-      - Pancakeswap : exchanges/pancakeswap.md
-      - Pangolin: exchanges/pangolin.md
-      - Quickswap: exchanges/quickswap.md
-      - Sushiswap: exchanges/sushiswap.md
-      - Tinyman: exchanges/tinyman.md
-      - Telos: exchanges/telos.md
-      - TraderJoe: exchanges/traderjoe.md
-      - Uniswap : exchanges/uniswap.md
-      - VVS: exchanges/vvs.md
-      - XSwap: exchanges/xswap.md
-    - Hummingbot Client:
-      - Hummingbot Client: client/index.md
-      - User Interface: client/user-interface.md
-      - Commands and Shortcuts: client/commands-shortcuts.md
-      - Launch/Exit Hummingbot: client/launch-exit.md
-      - Create/Delete Password: client/password.md
-      - Connect Exchange API Keys: client/connect.md
-      - Config Files: client/config-files.md
-      - Check Balances: client/balance.md
-      - Start Strategies and Scripts: client/start-stop.md
-      - Check Bot/Market Status: client/status.md
-      - Check Performance: client/history.md
-      - Find Log Files: client/log-files.md
-      - Export Trades/Keys: client/export.md
-      - Advanced Features:
-        - Adding Commands: developers/commands.md
-        - Balance Limit: global-configs/balance-limit.md
-        - Clock Tick Size: global-configs/clock-tick.md 
-        - Command Line Autostart: global-configs/strategy-autostart.md
-        - Color Settings: global-configs/color-settings.md
-        - Connect External Database: global-configs/external-db.md
-        - Debug Console: developers/debug.md
-        - Kill Switch: global-configs/kill-switch.md
-        - Market Data Collector: global-configs/data-collector.md
-        - Override Fees: global-configs/override-fees.md
-        - Paper Trade: global-configs/paper-trade.md
-        - Rate Oracle: strategy-configs/rate-oracle.md
-        - Rate Limits: global-configs/rate-limits-share-pct.md
-        - Telegram Integration: global-configs/telegram.md
-    - Hummingbot Dashboard:
-      - Hummingbot Dashboard: dashboard/index.md
-      - Adding Credentials: dashboard/credentials.md
-      - Viewing Portfolio: dashboard/portfolio.md
-      - Configuring Strategies: dashboard/config.md
-      - Backtesting Strategies: dashboard/backtest.md
-      - Deploying Instances: dashboard/deploy.md
-      - Managing Instances: dashboard/instances.md
-    - Gateway AMM Middleware:
-      - Gateway AMM Middleware: gateway/index.md
-      - Installation: gateway/installation.md
-      - Testing Gateway: gateway/testing.md
-      - Setting up Gateway: gateway/setup.md
-      - Working with Tokens: gateway/tokens.md
-      - Running Strategies and Scripts: gateway/running-dex-bots.md
-    - Community:
-      - Community: community/index.md
-      - Discord Support Program: community/support.md
-      - Affiliate Program: about/affiliate.md
-      - Upcoming Events ↗️: https://lu.ma/hummingbot
-    - FAQ: faq.md
-    - Glossary: glossary/index.md
-    - Reported Volumes: reporting.md
+      - Documentation: docs/index.md
+      - Installation:
+          - Installation: installation/index.md
+          - Install via Docker: installation/docker.md
+          - Install via Source: installation/source.md
+          - Post-Installation: installation/post-installation.md
+      - Strategies V2:
+          - Strategies V2: strategies/index.md
+          - Architecture: v2-strategies/index.md
+          - Scripts:
+              - Scripts: scripts/index.md
+              - Sample Scripts: scripts/examples.md
+              - Scripts Cheatsheat: scripts/cheatsheet.md
+          - Market Data Provider:
+              - Market Data Provider: v2-strategies/data/index.md
+              - Candles: v2-strategies/candles/index.md
+          - Executors:
+              - Executors: v2-strategies/executors/index.md
+              - Position Executor: v2-strategies/executors/positionexecutor.md
+              - Grid Executor: v2-strategies/executors/gridexecutor.md
+              - DCA Executor: v2-strategies/executors/dcaexecutor.md
+              - Arbitrage Executor: v2-strategies/executors/arbitrage-executor.md
+              - XEMM Executor: v2-strategies/executors/xemm-executor.md
+              - TWAP Executor: v2-strategies/executors/twapexecutor.md
+          - Controllers:
+              - Controllers: v2-strategies/controllers/index.md
+      - Strategies V1:
+          - Strategies V1: v1-strategies/index.md
+          - Pure Market Making (PMM): strategies/pure-market-making.md
+          - PMM Configs:
+              - PMM Configs: strategy-configs/index.md
+              - Add Transaction Costs: strategy-configs/add-transaction-costs.md
+              - Order Levels: strategy-configs/order-levels.md
+              - Filled Order Delay: strategy-configs/filled-order-delay.md
+              - Hanging Orders: strategy-configs/hanging-orders.md
+              - Minimum Spread: strategy-configs/minimum-spread.md
+              - Order Refresh Tolerance: strategy-configs/order-refresh-tolerance.md
+              - Order Optimization: strategy-configs/order-optimization.md
+              - Inventory Skew: strategy-configs/inventory-skew.md
+              - Max Order Age: strategy-configs/max-order-age.md
+              - Order Override: strategy-configs/order-override.md
+              - Price Band: strategy-configs/price-band.md
+              - Price Source: strategy-configs/external-price-source.md
+              - Ping Pong: strategy-configs/ping-pong.md
+          - Cross-Exchange Market Making (XEMM): strategies/cross-exchange-market-making.md
+          - AMM Arbitrage: strategies/amm-arbitrage.md
+          - AMM-V3 LP: strategies/amm-v3-lp.md
+          - Avellaneda Market Making: strategies/avellaneda-market-making.md
+          - Cross-Exchange Mining: strategies/cross-exchange-mining.md
+          - Hedge: strategies/hedge.md
+          - Liquidity Mining: strategies/liquidity-mining.md
+          - Perpetual Market Making: strategies/perpetual-market-making.md
+          - Spot Perpetual Arbitrage: strategies/spot-perpetual-arbitrage.md
+          - TWAP: strategies/twap.md
+      - CLOB Connectors:
+          - CLOB Connectors: exchanges/index.md
+          - AscendEx: exchanges/ascendex/index.md
+          - Binance: exchanges/binance/index.md
+          - Bitstamp: exchanges/bitstamp/index.md
+          - Bitrue: exchanges/bitrue.md
+          - Bitget: exchanges/bitget-perpetual.md
+          - BingX: exchanges/bing_x/index.md
+          - Bitmart: exchanges/bitmart/index.md
+          - Bybit: exchanges/bybit.md
+          - BTC Markets: exchanges/btc-markets.md
+          - Coinbase: exchanges/coinbase.md
+          - Cube: exchanges/cube/index.md
+          - Derive: exchanges/derive/index.md
+          - Dexalot: exchanges/dexalot.md
+          - dYdX: exchanges/dydx.md
+          - Gate.io: exchanges/gate-io/index.md
+          - Hashkey: exchanges/hashkey/index.md
+          - Hyperliquid: exchanges/hyperliquid.md
+          - HTX: exchanges/htx/index.md
+          - Kraken: exchanges/kraken/index.md
+          - Kucoin: exchanges/kucoin/index.md
+          - Injective Helix: exchanges/injective.md
+          - Polkadex: exchanges/polkadex.md
+          - MEXC: exchanges/mexc/index.md
+          - NDAX: exchanges/ndax.md
+          - OKX: exchanges/okx/okx.md
+          - Tegro: exchanges/tegro/index.md
+          - Vertex: exchanges/vertex.md
+          - XRP Ledger: exchanges/xrpl.md
+      - AMM Connectors:
+          - AMM Connectors: dex-connectors/index.md
+          - Balancer: exchanges/balancer.md
+          - ETCSwap: exchanges/etcSwap.md
+          - Mad Meerkat: exchanges/mad-meerkat.md
+          - Curve: exchanges/curve.md
+          - Carbon: exchanges/carbon.md
+          - Jupiter: exchanges/jupiter.md
+          - OpenOcean: exchanges/openocean.md
+          - Osmosis: exchanges/osmosis.md
+          - Pancakeswap: exchanges/pancakeswap.md
+          - Pangolin: exchanges/pangolin.md
+          - Quickswap: exchanges/quickswap.md
+          - Sushiswap: exchanges/sushiswap.md
+          - Tinyman: exchanges/tinyman.md
+          - Telos: exchanges/telos.md
+          - TraderJoe: exchanges/traderjoe.md
+          - Uniswap: exchanges/uniswap.md
+          - VVS: exchanges/vvs.md
+          - XSwap: exchanges/xswap.md
+      - Hummingbot Client:
+          - Hummingbot Client: client/index.md
+          - User Interface: client/user-interface.md
+          - Commands and Shortcuts: client/commands-shortcuts.md
+          - Launch/Exit Hummingbot: client/launch-exit.md
+          - Create/Delete Password: client/password.md
+          - Connect Exchange API Keys: client/connect.md
+          - Config Files: client/config-files.md
+          - Check Balances: client/balance.md
+          - Start Strategies and Scripts: client/start-stop.md
+          - Check Bot/Market Status: client/status.md
+          - Check Performance: client/history.md
+          - Find Log Files: client/log-files.md
+          - Export Trades/Keys: client/export.md
+          - Advanced Features:
+              - Adding Commands: developers/commands.md
+              - Balance Limit: global-configs/balance-limit.md
+              - Clock Tick Size: global-configs/clock-tick.md
+              - Command Line Autostart: global-configs/strategy-autostart.md
+              - Color Settings: global-configs/color-settings.md
+              - Connect External Database: global-configs/external-db.md
+              - Debug Console: developers/debug.md
+              - Kill Switch: global-configs/kill-switch.md
+              - Market Data Collector: global-configs/data-collector.md
+              - Override Fees: global-configs/override-fees.md
+              - Paper Trade: global-configs/paper-trade.md
+              - Rate Oracle: strategy-configs/rate-oracle.md
+              - Rate Limits: global-configs/rate-limits-share-pct.md
+              - Telegram Integration: global-configs/telegram.md
+      - Hummingbot Dashboard:
+          - Hummingbot Dashboard: dashboard/index.md
+          - Adding Credentials: dashboard/credentials.md
+          - Viewing Portfolio: dashboard/portfolio.md
+          - Configuring Strategies: dashboard/config.md
+          - Backtesting Strategies: dashboard/backtest.md
+          - Deploying Instances: dashboard/deploy.md
+          - Managing Instances: dashboard/instances.md
+      - Gateway AMM Middleware:
+          - Gateway AMM Middleware: gateway/index.md
+          - Installation: gateway/installation.md
+          - Testing Gateway: gateway/testing.md
+          - Setting up Gateway: gateway/setup.md
+          - Working with Tokens: gateway/tokens.md
+          - Running Strategies and Scripts: gateway/running-dex-bots.md
+      - Community:
+          - Community: community/index.md
+          - Discord Support Program: community/support.md
+          - Affiliate Program: about/affiliate.md
+          - Upcoming Events ↗️: https://lu.ma/hummingbot
+      - FAQ: faq.md
+      - Glossary: glossary/index.md
+      - Reported Volumes: reporting.md
   - Certification:
-    - Certification: certification/index.md
-    - Certifications List: certification/list.md
-    - Botcamp ↗️: https://www.botcamp.xyz
-    - Botcamp FAQ: botcamp/faq.md
+      - Certification: certification/index.md
+      - Certifications List: certification/list.md
+      - Botcamp ↗️: https://www.botcamp.xyz
+      - Botcamp FAQ: botcamp/faq.md
   - Developers:
-    - Developers: developers/index.md
-    - Contribution Guidelines: developers/contributions.md
-    - How to Fork Repos: developers/forking.md
-    - Using Debugger Tools: installation/debug.md
-    - Building CLOB Connectors:
-      - Building CLOB Connectors: developers/connectors/index.md
-      - Exchange API Requirements: developers/connectors/build.md
-      - Connector Architecture: developers/connectors/architecture/index.md
-      - Order Lifecycle and Market Events: developers/connectors/architecture/order_lifecycle.md
-      - Handling Rate Limits with API Throttler: developers/connectors/api_throttler.md
-      - Spot Connector Developer Checklist: developers/connectors/spot-connector-checklist.md
-      - Spot Connector QA Checklist: developers/connectors/test.md
-      - Perp Connector Developer Checklist: developers/connectors/perp-connector-checklist.md
-      - Perp Connector QA Checklist:  developers/connectors/test-perp.md
-      - Debugging & Testing Connectors: developers/connectors/debug.md
-    - Building AMM Connectors: gateway/adding-dex-connectors.md
-    - Building Strategies: 
-      - Building Strategies: developers/strategies/index.md
-      - Key Concepts: developers/strategies/key-concepts.md
-      - Strategy Architecture: developers/strategies/architecture.md
-      - Strategy Configs: developers/strategies/config.md
-      - Tutorial: developers/strategies/tutorial.md
-    - Brokers Module: installation/broker.md
-    - How to Earn Bounties: bounties/contributors.md
-    - Bounties Board ↗️: https://github.com/orgs/hummingbot/projects/7/views/1
-  - Releases:
-    - Releases: release-notes/index.md
-    - Release Process: governance/releases.md
-    - 2.4.0: release-notes/2.4.0.md
-    - 2.3.0: release-notes/2.3.0.md
-    - 2.2.0: release-notes/2.2.0.md
-    - 2.1.0: release-notes/2.1.0.md
-    - 2.0.1: release-notes/2.0.1.md
-    - 2.0.0: release-notes/2.0.0.md
-    - 1.28.0: release-notes/1.28.0.md
-    - 1.27.0: release-notes/1.27.0.md
-    - 1.26.0: release-notes/1.26.0.md
-    - 1.25.0: release-notes/1.25.0.md
-    - 1.24.0: release-notes/1.24.0.md
-    - 1.23.0: release-notes/1.23.0.md
-    - 1.22.0: release-notes/1.22.0.md
-    - 1.21.0: release-notes/1.21.0.md
-    - 1.20.0: release-notes/1.20.0.md
-    - 1.19.0: release-notes/1.19.0.md
-    - 1.18.0: release-notes/1.18.0.md
-    - 1.17.0: release-notes/1.17.0.md
-    - 1.16.0: release-notes/1.16.0.md
-    - 1.15.0: release-notes/1.15.0.md
-    - 1.14.0: release-notes/1.14.0.md
-    - 1.13.0: release-notes/1.13.0.md 
-    - 1.12.0: release-notes/1.12.0.md
-    - 1.11.0: release-notes/1.11.0.md
-    - 1.10.0: release-notes/1.10.0.md
-    - 1.9.0: release-notes/1.9.0.md
-    - 1.8.0: release-notes/1.8.0.md
-    - 1.7.0: release-notes/1.7.0.md
-    - 1.6.0: release-notes/1.6.0.md
-    - 1.5.0: release-notes/1.5.0.md
-    - 1.4.0: release-notes/1.4.0.md
-    - 1.3.0: release-notes/1.3.0.md
-    - 1.2.0: release-notes/1.2.0.md
-    - 1.1.1: release-notes/1.1.1.md
-    - 1.1.0: release-notes/1.1.0.md
-    - 1.0.1: release-notes/1.0.1.md
-    - 1.0.0: release-notes/1.0.0.md
-  - Foundation:
-    - Foundation: about/index.md
-    - HBOT Token: about/hbot.md
-    - Board of Directors: about/board.md
-    - Sponsor & Supporters: about/sponsors.md
-    - Affiliate Program: about/affiliate.md
-    - Governance:
-      - Governance: governance/index.md
-      - Polls: governance/polls.md
-      - Proposals: governance/proposals.md
-      - Epochs: governance/epochs.md
-      - Whitepaper: governance/whitepaper.md
-    - Bounties: 
-      - Bounties: bounties/index.md
-      - External Bounties: bounties/external.md
-      - Lifecycle of a Bounty: bounties/lifecycle.md
-      - Bounties FAQ: bounties/faq.md
-      - Bounty Contributors Guide: bounties/contributors.md
+      - Developers: developers/index.md
+      - Contribution Guidelines: developers/contributions.md
+      - How to Fork Repos: developers/forking.md
+      - Using Debugger Tools: installation/debug.md
+      - Building CLOB Connectors:
+          - Building CLOB Connectors: developers/connectors/index.md
+          - Exchange API Requirements: developers/connectors/build.md
+          - Connector Architecture: developers/connectors/architecture/index.md
+          - Order Lifecycle and Market Events: developers/connectors/architecture/order_lifecycle.md
+          - Handling Rate Limits with API Throttler: developers/connectors/api_throttler.md
+          - Spot Connector Developer Checklist: developers/connectors/spot-connector-checklist.md
+          - Spot Connector QA Checklist: developers/connectors/test.md
+          - Perp Connector Developer Checklist: developers/connectors/perp-connector-checklist.md
+          - Perp Connector QA Checklist: developers/connectors/test-perp.md
+          - Debugging & Testing Connectors: developers/connectors/debug.md
+      - Building AMM Connectors: gateway/adding-dex-connectors.md
+      - Building Strategies:
+          - Building Strategies: developers/strategies/index.md
+          - Key Concepts: developers/strategies/key-concepts.md
+          - Strategy Architecture: developers/strategies/architecture.md
+          - Strategy Configs: developers/strategies/config.md
+          - Tutorial: developers/strategies/tutorial.md
+      - Brokers Module: installation/broker.md
+      - How to Earn Bounties: bounties/contributors.md
       - Bounties Board ↗️: https://github.com/orgs/hummingbot/projects/7/views/1
-  - Blog: 
-    - blog/index.md
+  - Releases:
+      - Releases: release-notes/index.md
+      - Release Process: governance/releases.md
+      - 2.4.0: release-notes/2.4.0.md
+      - 2.3.0: release-notes/2.3.0.md
+      - 2.2.0: release-notes/2.2.0.md
+      - 2.1.0: release-notes/2.1.0.md
+      - 2.0.1: release-notes/2.0.1.md
+      - 2.0.0: release-notes/2.0.0.md
+      - 1.28.0: release-notes/1.28.0.md
+      - 1.27.0: release-notes/1.27.0.md
+      - 1.26.0: release-notes/1.26.0.md
+      - 1.25.0: release-notes/1.25.0.md
+      - 1.24.0: release-notes/1.24.0.md
+      - 1.23.0: release-notes/1.23.0.md
+      - 1.22.0: release-notes/1.22.0.md
+      - 1.21.0: release-notes/1.21.0.md
+      - 1.20.0: release-notes/1.20.0.md
+      - 1.19.0: release-notes/1.19.0.md
+      - 1.18.0: release-notes/1.18.0.md
+      - 1.17.0: release-notes/1.17.0.md
+      - 1.16.0: release-notes/1.16.0.md
+      - 1.15.0: release-notes/1.15.0.md
+      - 1.14.0: release-notes/1.14.0.md
+      - 1.13.0: release-notes/1.13.0.md
+      - 1.12.0: release-notes/1.12.0.md
+      - 1.11.0: release-notes/1.11.0.md
+      - 1.10.0: release-notes/1.10.0.md
+      - 1.9.0: release-notes/1.9.0.md
+      - 1.8.0: release-notes/1.8.0.md
+      - 1.7.0: release-notes/1.7.0.md
+      - 1.6.0: release-notes/1.6.0.md
+      - 1.5.0: release-notes/1.5.0.md
+      - 1.4.0: release-notes/1.4.0.md
+      - 1.3.0: release-notes/1.3.0.md
+      - 1.2.0: release-notes/1.2.0.md
+      - 1.1.1: release-notes/1.1.1.md
+      - 1.1.0: release-notes/1.1.0.md
+      - 1.0.1: release-notes/1.0.1.md
+      - 1.0.0: release-notes/1.0.0.md
+  - Foundation:
+      - Foundation: about/index.md
+      - HBOT Token: about/hbot.md
+      - Board of Directors: about/board.md
+      - Sponsor & Supporters: about/sponsors.md
+      - Affiliate Program: about/affiliate.md
+      - Governance:
+          - Governance: governance/index.md
+          - Polls: governance/polls.md
+          - Proposals: governance/proposals.md
+          - Epochs: governance/epochs.md
+          - Whitepaper: governance/whitepaper.md
+      - Bounties:
+          - Bounties: bounties/index.md
+          - External Bounties: bounties/external.md
+          - Lifecycle of a Bounty: bounties/lifecycle.md
+          - Bounties FAQ: bounties/faq.md
+          - Bounty Contributors Guide: bounties/contributors.md
+          - Bounties Board ↗️: https://github.com/orgs/hummingbot/projects/7/views/1
+  - Blog:
+      - blog/index.md
