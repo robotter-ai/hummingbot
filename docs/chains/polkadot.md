@@ -6,7 +6,7 @@
 
 * Folder: [/gateway/src/chains/polkadot](https://github.com/hummingbot/gateway/tree/development/src/chains/polkadot)
 * Configs: [/gateway/src/templates/polkadot.yml](https://github.com/hummingbot/gateway/tree/development/src/templates/polkadot.yml)
-* Maintainer: [CoinAlpha](https://coinalpha.com)
+
 
 ## ℹ️ Chain Info
 
