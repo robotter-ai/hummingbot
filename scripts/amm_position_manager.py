@@ -13,31 +13,127 @@ from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
-configuration: Dict[str, Any] = {
-    "pools": [
-        {
-            "chain": "solana",
-            "network": "mainnet-beta",
-            "connector": "raydium",
-            "pool_address": "0x1234567890123456789012345678901234567890",
-            "base_tokens": ["ETH", "SOL"],
-            "quote_tokens": ["USDC", "USDT"]
+database: Dict[str, Any] = {
+    "globals": {
+        "maximum_slippage_percentage": "0.5", # 1 means 1%, or 0.01, in the code
+        "minimum_profit_percentage": "1", # 1 means 1%, or 0.01, in the code
+    },
+    "targets": {
+        "connections": {
+            "polkadot": {
+                "mainnet": {
+                    "hydration": {
+                        "wallets": [
+                            "<wallet_address>",
+                            "<wallet_address>",
+                            "<wallet_address>",
+                        ],
+                        "pools": [
+                            "<pool_address>", # XyK / Isolated pool
+                            "<pool_address>", # Omni pool
+                            "<pool_address>", # Stable pool
+                            "<pool_address>", # LBP pool
+                        ]
+                    }
+                },
+            },
+            "solana": {
+                "mainnet-beta": {
+                    "raydium": {
+                        "wallets": [
+                            "<wallet_address>",
+                            "<wallet_address>",
+                            "<wallet_address>",
+                        ],
+                        "pools": [
+                            "<pool_address>", # XyK / Isolated pool
+                            "<pool_address>", # Omni pool
+                            "<pool_address>", # Stable pool
+                            "<pool_address>", # LBP pool
+                        ]
+                    }
+                }
+            }
         },
-        {
-            "chain": "polkadot",
-            "network": "mainnet",
-            "connector": "hydration",
-            "pool_address": "0x1234567890123456789012345678901234567890",
-            "base_tokens": ["DOT", "HDX"],
-            "quote_tokens": ["USDC", "USDT"]
+        "tokens": [
+            "<token_symbol>",
+            "<token_symbol>",
+            "<token_symbol>",
+            "<token_symbol>",
+        ]
+    },
+    "connections": { # Filled automatically (example structure)
+        "polkadot": {
+            "mainnet": {
+                "hydration": {
+                    "wallets": {
+                        "<wallet_address>": {
+                            "tokens": {
+                                "<token_symbol>": {
+                                    "balances": {
+                                        "free": "<free_token_balance>",
+                                        "locked": {
+                                            "total": "<locked_token_balance>",
+                                            "liquidity": {
+                                                "total": "<liquidity_token_balance>",
+                                                "pools": {
+                                                    "<pool_address>": "<pool_token_balance>"
+                                                }
+                                            }
+                                        },
+                                        "total": "<token_balance>"
+                                    }
+                                }
+                            },
+                            "pools": {
+                                "<pool_address>": {
+                                    "shares": "<pool_shares>",
+                                    "tokens": {
+                                        "<token_symbol>": "<pool_token_balance>",
+                                    },
+                                    "impermanent_loss": "<pool_impermanent_loss>",
+                                }
+                            }
+                        }
+                    },
+                    "tokens": {
+                        "<token_symbol>": {
+                            "address": "<token_address>",
+                            "symbol": "<token_symbol>",
+                            "name": "<token_name>",
+                            "decimals": "<token_decimals>",
+                            "price": "<token_price>"
+                        }
+                    },
+                    "pools": {
+                        "<pool_address>": {
+                            "address": "<pool_address>",
+                            "type": "<pool_type>",
+                            "tokens": {
+                                "<token_symbol>": {
+                                    "price": "<token_price>",
+                                },
+                                "<token_symbol>": {
+                                    "price": "<token_price>",
+                                },
+                            },
+                            "annual_percentage_rate": "<pool_annual_percentage_rate>",
+                            "total_value_locked": "<pool_total_value_locked>",
+                            "volume": {
+                                "24h": "<pool_24h_volume>",
+                            }
+                        }
+                    }
+                },
+            }
         }
-    ]
+    }
 }
 
 
 class AMMRobustPositionManagerConfiguration(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
-    pools: List[Dict[str, Any]] = Field(default=configuration["pools"])
+    pools: List[Dict[str, Any]] = Field(default=database["pools"])
 
 
 # noinspection PyShadowingNames
