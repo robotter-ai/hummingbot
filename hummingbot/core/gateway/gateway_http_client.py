@@ -328,7 +328,6 @@ class GatewayHttpClient:
             network: str,
             address: str,
             token_symbols: List[str],
-            wallet_public_key: str,
             fail_silently: bool = False,
     ) -> Dict[str, Any]:
         if isinstance(token_symbols, list):
@@ -336,8 +335,7 @@ class GatewayHttpClient:
             request_params = {
                 "network": network,
                 "address": address,
-                "tokenSymbols": token_symbols,
-                "walletPublicKey": wallet_public_key
+                "tokenSymbols": token_symbols
             }
             return await self.api_request(
                 method="post",
