@@ -36,8 +36,8 @@ theme:
         icon: material/brightness-5
         name: "Switch to dark mode"
   font:
-    text: Noto Sans
-    code: Roboto Mono
+      text: Noto Sans
+      code: Roboto Mono
   features:
     - navigation.instant
     - navigation.instant.prefetch
@@ -79,19 +79,19 @@ extra:
     provider: google
     property: G-DVHHGW7W9R
     feedback:
-      title: Was this page helpful?
-      ratings:
-        - icon: material/thumb-up-outline
-          name: This page was helpful
-          data: 1
-          note: >-
-            Thanks for your feedback!
-        - icon: material/thumb-down-outline
-          name: This page could be improved
-          data: 0
-          note: >-
-            Thanks for your feedback! Help us improve this page by
-            <a href="https://github.com/hummingbot/hummingbot-site/issues/new?title=[Feedback]+{title}+-+{url}" target="_blank" rel="noopener">filing an issue</a>.
+          title: Was this page helpful?
+          ratings:
+            - icon: material/thumb-up-outline
+              name: This page was helpful
+              data: 1
+              note: >-
+                Thanks for your feedback!
+            - icon: material/thumb-down-outline
+              name: This page could be improved
+              data: 0
+              note: >- 
+                Thanks for your feedback! Help us improve this page by
+                <a href="https://github.com/hummingbot/hummingbot-site/issues/new?title=[Feedback]+{title}+-+{url}" target="_blank" rel="noopener">filing an issue</a>.
   social:
     - icon: fontawesome/brands/discord
       link: https://discord.gg/hummingbot
@@ -131,8 +131,8 @@ markdown_extensions:
   - pymdownx.critic
   - pymdownx.details
   - pymdownx.emoji:
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
-      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+        emoji_index: !!python/name:material.extensions.emoji.twemoji
+        emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.keys
   # - pymdownx.magiclink:
   #     user: hummingbot
@@ -220,7 +220,7 @@ nav:
           - TWAP: strategies/twap.md
       - CLOB Connectors:
           - CLOB Connectors: exchanges/index.md
-          - AscendEx: exchanges/ascendex/index.md
+          - AscendEx : exchanges/ascendex/index.md
           - Binance: exchanges/binance/index.md
           - Bitstamp: exchanges/bitstamp/index.md
           - Bitrue: exchanges/bitrue.md
@@ -251,6 +251,7 @@ nav:
       - AMM Connectors:
           - AMM Connectors: dex-connectors/index.md
           - Balancer: exchanges/balancer.md
+          - Hydration: exchanges/hydration.md
           - ETCSwap: exchanges/etcSwap.md
           - Mad Meerkat: exchanges/mad-meerkat.md
           - Curve: exchanges/curve.md
@@ -258,14 +259,14 @@ nav:
           - Jupiter: exchanges/jupiter.md
           - OpenOcean: exchanges/openocean.md
           - Osmosis: exchanges/osmosis.md
-          - Pancakeswap: exchanges/pancakeswap.md
+          - Pancakeswap : exchanges/pancakeswap.md
           - Pangolin: exchanges/pangolin.md
           - Quickswap: exchanges/quickswap.md
           - Sushiswap: exchanges/sushiswap.md
           - Tinyman: exchanges/tinyman.md
           - Telos: exchanges/telos.md
           - TraderJoe: exchanges/traderjoe.md
-          - Uniswap: exchanges/uniswap.md
+          - Uniswap : exchanges/uniswap.md
           - VVS: exchanges/vvs.md
           - XSwap: exchanges/xswap.md
       - Hummingbot Client:
@@ -339,7 +340,7 @@ nav:
           - Spot Connector Developer Checklist: developers/connectors/spot-connector-checklist.md
           - Spot Connector QA Checklist: developers/connectors/test.md
           - Perp Connector Developer Checklist: developers/connectors/perp-connector-checklist.md
-          - Perp Connector QA Checklist: developers/connectors/test-perp.md
+          - Perp Connector QA Checklist:  developers/connectors/test-perp.md
           - Debugging & Testing Connectors: developers/connectors/debug.md
       - Building AMM Connectors: gateway/adding-dex-connectors.md
       - Building Strategies:
