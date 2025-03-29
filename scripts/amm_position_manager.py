@@ -551,22 +551,33 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             network = connection.get("network")
             connector = connection.get("connector")
             
-            # Skip incomplete connections
             if not all([chain, network, connector]):
                 continue
                 
-            # Initialize pools if not exists
             if "pools" not in database["connections"][chain][network][connector]:
                 database["connections"][chain][network][connector]["pools"] = {}
                 
-            # Get all pools from the connector
             pools_info = await self._get_pools(chain, connector, network)
             
             if not pools_info:
                 continue
                 
-            # Update pool information in database
-            for pool_address, pool_info in pools_info.items():
+            # Check if pools_info is a list
+            if not isinstance(pools_info, list):
+              
+                continue
+                
+            # Update pool information in database for each pool
+            for pool in pools_info:
+                if not isinstance(pool, dict):
+                  
+                    continue
+                    
+                pool_address = pool.get("address")
+                if not pool_address:
+                    self.logger().error(f"pool doesn't have an address: {pool}")
+                    continue
+                    
                 # Get detailed pool information
                 detailed_pool_info = await self._get_pool_information({
                     "network": network,
@@ -579,7 +590,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     
                 database["connections"][chain][network][connector]["pools"][pool_address] = {
                     "address": pool_address,
-                    "type": detailed_pool_info.get("poolType", "unknown"),
+                    "type": pool.get("type", "unknown"),
                     "tokens": {},
                     "annual_percentage_rate": detailed_pool_info.get("apr"),
                     "total_value_locked": detailed_pool_info.get("tvl"),
