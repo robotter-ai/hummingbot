@@ -149,20 +149,21 @@ class AMMRobustPositionManagerConfiguration(BaseClientModel):
     pools: List[Dict[str, Any]] = Field(default=database["pools"])
 
 
+
 # noinspection PyShadowingNames
 class AMMRobustPositionManager(ScriptStrategyBase):
-
+    markets: Dict[str, Any] = {}
     configuration = None
     gateway_is_ready = False
     gateway_http_client: Optional[GatewayHttpClient] = None
     last_arbitrage_check_time = 0
 
-    def __init__(self, connectors: Dict[str, ConnectorBase], configuration: AMMRobustPositionManagerConfiguration):
+    def __init__(self, connectors: Dict[str, ConnectorBase]):
         super().__init__(connectors)
 
         AMMRobustPositionManager.gateway_http_client = GatewayHttpClient.get_instance()
 
-        self._initialize(configuration)
+        self._initialize({})
 
     def _initialize(self, configuration: AMMRobustPositionManagerConfiguration):
         self.configuration = configuration
