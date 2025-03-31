@@ -13,13 +13,11 @@ def start(self):
     market_1 = amm_arb_config_map.get("market_1").value
     connector_2 = amm_arb_config_map.get("connector_2").value.lower()
     market_2 = amm_arb_config_map.get("market_2").value
-    pool_id = "_" + amm_arb_config_map.get("pool_id").value
     order_amount = amm_arb_config_map.get("order_amount").value
     min_profitability = amm_arb_config_map.get("min_profitability").value / Decimal("100")
     market_1_slippage_buffer = amm_arb_config_map.get("market_1_slippage_buffer").value / Decimal("100")
     market_2_slippage_buffer = amm_arb_config_map.get("market_2_slippage_buffer").value / Decimal("100")
     concurrent_orders_submission = amm_arb_config_map.get("concurrent_orders_submission").value
-    gateway_transaction_cancel_interval = amm_arb_config_map.get("gateway_transaction_cancel_interval").value
     rate_oracle_enabled = amm_arb_config_map.get("rate_oracle_enabled").value
     quote_conversion_rate = amm_arb_config_map.get("quote_conversion_rate").value
     gas_token = amm_arb_config_map.get("gas_token").value
@@ -34,10 +32,10 @@ def start(self):
     is_connector_2_gateway = connector_2 in sorted(AllConnectorSettings.get_gateway_amm_connector_names())
 
     market_info_1 = MarketTradingPairTuple(
-        self.markets[connector_1], market_1 if not is_connector_1_gateway else market_1 + pool_id, base_1, quote_1
+        self.markets[connector_1], market_1 if not is_connector_1_gateway else market_1, base_1, quote_1
     )
     market_info_2 = MarketTradingPairTuple(
-        self.markets[connector_2], market_2 if not is_connector_2_gateway else market_2 + pool_id, base_2, quote_2
+        self.markets[connector_2], market_2 if not is_connector_2_gateway else market_2, base_2, quote_2
     )
     self.market_trading_pair_tuples = [market_info_1, market_info_2]
 
@@ -62,6 +60,5 @@ def start(self):
                               market_1_slippage_buffer=market_1_slippage_buffer,
                               market_2_slippage_buffer=market_2_slippage_buffer,
                               concurrent_orders_submission=concurrent_orders_submission,
-                              gateway_transaction_cancel_interval=gateway_transaction_cancel_interval,
                               rate_source=rate_source,
                               )

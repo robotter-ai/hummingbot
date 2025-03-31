@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Dict, Tuple, Union
 
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic.v1 import BaseModel, Field, root_validator, validator
 
 import hummingbot.client.settings as settings
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientConfigEnum, ClientFieldData
@@ -332,18 +332,6 @@ class CrossExchangeMarketMakingConfigMap(BaseTradingStrategyMakerTakerConfigMap)
             prompt=lambda mi: (
                 "How much buffer do you want to add to the price to account for slippage for taker orders "
                 "Enter 1 to indicate 1%"
-            ),
-            prompt_on_new=True,
-        ),
-    )
-    gateway_transaction_cancel_interval: int = Field(
-        default= 600,
-        description="Gateway transaction cancellation timeout.",
-        ge=1,
-        client_data=ClientFieldData(
-            prompt=lambda mi: (
-                "After what time should blockchain transactions be cancelled if they are not included in a block? "
-                "(this only affects decentralized exchanges) (Enter time in seconds)"
             ),
             prompt_on_new=True,
         ),
