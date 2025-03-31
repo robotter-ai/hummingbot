@@ -3,6 +3,7 @@
 
 # .idea
 /.idea
+*.iml
 
 # CMake
 cmake-build-debug/
