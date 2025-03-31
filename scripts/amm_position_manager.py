@@ -27,15 +27,13 @@ configuration: Dict[str, Any] = {
             "mainnet": {
                 "hydration": {
                     "wallets": [
-                        "<wallet_address>",
-                        "<wallet_address>",
-                        "<wallet_address>",
+                        "5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt",
                     ],
                     "pools": [
-                        "<pool_address>",  # XyK / Isolated pool
-                        "<pool_address>",  # Omni pool
-                        "<pool_address>",  # Stable pool
-                        "<pool_address>",  # LBP pool
+                        "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
+                        # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
+                        # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
+                        # "<pool_address>",  # LBP pool
                     ],
                 }
             },
@@ -44,26 +42,19 @@ configuration: Dict[str, Any] = {
             "mainnet-beta": {
                 "raydium": {
                     "wallets": [
-                        "<wallet_address>",
-                        "<wallet_address>",
-                        "<wallet_address>",
+                        "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
                     ],
                     "pools": [
-                        "<pool_address>",  # XyK / Isolated pool
-                        "<pool_address>",  # Omni pool
-                        "<pool_address>",  # Stable pool
-                        "<pool_address>",  # LBP pool
+                        "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
+                        # "<pool_address>",  # Omni pool
+                        # "<pool_address>",  # Stable pool
+                        # "<pool_address>",  # LBP pool
                     ],
                 }
             }
         },
     },
-    "tokens": [
-        "<token_symbol>",
-        "<token_symbol>",
-        "<token_symbol>",
-        "<token_symbol>",
-    ],
+    "tokens": ["DOT", "SOL", "USDC", "USDT"],
 }
 
 ## Example structure)
@@ -162,9 +153,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         AMMRobustPositionManager.gateway_http_client = GatewayHttpClient.get_instance()
 
-        self._initialize({})
+        self._initialize()
 
-    def _initialize(self, configuration: AMMRobustPositionManagerConfiguration):
+    def _initialize(self, configuration: AMMRobustPositionManagerConfiguration = None):
         self.configuration = configuration
 
         self._log_initialization()
@@ -579,8 +570,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     continue
 
                 pool_address = pool.get("address")
-                if not pool_address:
-                    self.logger().error(f"pool doesn't have an address: {pool}")
+                if (
+                    not pool_address
+                    or pool.get("address") not in configuration["connections"][chain][network][connector]["pools"]
+                ):
                     continue
 
                 # Get detailed pool information
@@ -594,13 +587,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 database["connections"][chain][network][connector]["pools"][pool_address] = {
                     "address": pool_address,
                     "type": pool.get("type", "unknown"),
-                    "tokens": {},
+                    "tokens": {},  # TODO fix, it is needed to call the tokens before!!!
                     "annual_percentage_rate": detailed_pool_info.get("apr"),
                     "total_value_locked": detailed_pool_info.get("tvl"),
                     "volume": {"24h": detailed_pool_info.get("volume24h")},
                 }
 
-                # !!! TODO: Update token information in the pool
+                # TODO Update token information in the pool!!!
                 for token_symbol in detailed_pool_info.get("tokens", {}):
                     token_info = detailed_pool_info["tokens"].get(token_symbol, {})
 
