@@ -2,7 +2,7 @@ import asyncio
 import os
 import time
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 # noinspection PyUnresolvedReferences
 from pydantic import Field
@@ -18,7 +18,7 @@ from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 configuration: Dict[str, Any] = {
     "globals": {
         "maximum_slippage_percentage": "0.5",  # 1 means 1%, or 0.01, in the code
-        "minimum_profit_percentage": "1",  # 1 means 1%, or 0.01, in the code
+        "minimum_profitability_percentage": "1",  # 1 means 1%, or 0.01, in the code
         "arbitrage_check_interval_seconds": "30",  # Time between arbitrage checks
         "minimum_trade_amount": "10",  # Minimum amount to consider for a trade
     },
@@ -57,7 +57,7 @@ configuration: Dict[str, Any] = {
     "tokens": ["DOT", "HDX", "USDC", "USDT"],
 }
 
-## Example structure)
+# Example structure)
 # database: Dict[str, Any] = {
 #     "connections": {
 #         "polkadot": {
@@ -68,17 +68,17 @@ configuration: Dict[str, Any] = {
 #                             "tokens": {
 #                                 "<token_symbol>": {
 #                                     "balances": {
-#                                         "free": "<free_token_balance>",
+#                                         "free": "<free_quote_token_balance>",
 #                                         "locked": {
-#                                             "total": "<locked_token_balance>",
+#                                             "total": "<locked_quote_token_balance>",
 #                                             "liquidity": {
-#                                                 "total": "<liquidity_token_balance>",
+#                                                 "total": "<liquidity_quote_token_balance>",
 #                                                 "pools": {
-#                                                     "<pool_address>": "<pool_token_balance>"
+#                                                     "<pool_address>": "<pool_quote_token_balance>"
 #                                                 }
 #                                             }
 #                                         },
-#                                         "total": "<token_balance>"
+#                                         "total": "<quote_token_balance>"
 #                                     }
 #                                 }
 #                             },
@@ -86,7 +86,7 @@ configuration: Dict[str, Any] = {
 #                                 "<pool_address>": {
 #                                     "shares": "<pool_shares>",
 #                                     "tokens": {
-#                                         "<token_symbol>": "<pool_token_balance>",
+#                                         "<token_symbol>": "<pool_quote_token_balance>",
 #                                     },
 #                                     "impermanent_loss": "<pool_impermanent_loss>",
 #                                 }
@@ -95,7 +95,7 @@ configuration: Dict[str, Any] = {
 #                     },
 #                     "tokens": {
 #                         "<token_symbol>": {
-#                             "address": "<token_address>",
+#                             "address": "<base_tokenddress>",
 #                             "symbol": "<token_symbol>",
 #                             "name": "<token_name>",
 #                             "decimals": "<token_decimals>",
@@ -128,8 +128,6 @@ configuration: Dict[str, Any] = {
 # }
 database: Dict[str, Any] = {
     "connections": {},
-    "tokens": {},
-    "pools": {},
     "arbitrage_opportunities": [],
     "execution_history": [],
 }
@@ -137,7 +135,6 @@ database: Dict[str, Any] = {
 
 class AMMRobustPositionManagerConfiguration(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
-    pools: List[Dict[str, Any]] = Field(default=database["pools"])
 
 
 # noinspection PyShadowingNames
@@ -203,48 +200,53 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         opportunities = []
 
         # Get all available tokens and pools from the database
-        tokens = self._get_all_tokens_from_database()
-        pools = self._get_all_pools_from_database()
+        tokens = configuration["tokens"]
 
         # Minimum profit percentage required for arbitrage
-        min_profit_pct = float(configuration["globals"].get("minimum_profit_percentage", 1)) / 100
+        minimum_profitability_percentage = (
+            float(configuration["globals"].get("minimum_profitability_percentage", 1)) / 100.0
+        )
 
         # Iterate through all token pairs and pool combinations
-        for token_a in tokens:
-            for token_b in tokens:
-                if token_a == token_b:
+        for base_token in tokens:
+            for quote_token in tokens:
+                if base_token == quote_token:
                     continue
 
                 # Find pools that contain both tokens
-                relevant_pools = self._find_pools_with_token_pair(pools, token_a, token_b)
+                relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
-                for i, pool_1 in enumerate(relevant_pools):
-                    for j, pool_2 in enumerate(relevant_pools):
-                        if i == j:
+                for pool_1 in relevant_pools:
+                    for pool_2 in relevant_pools:
+                        if pool_1["address"] == pool_2["address"]:
                             continue
 
                         # Calculate price difference between the two pools
-                        price_difference = await self._calculate_price_difference(token_a, token_b, pool_1, pool_2)
+                        price_difference_percentage = await self._calculate_price_difference_percentage(
+                            base_token, quote_token, pool_1, pool_2
+                        )
 
                         # If price difference exceeds minimum profit threshold
-                        if price_difference > min_profit_pct:
+                        if abs(price_difference_percentage) > minimum_profitability_percentage:
                             # Determine which pool to buy from and which to sell to
-                            buy_pool, sell_pool = (pool_1, pool_2) if price_difference > 0 else (pool_2, pool_1)
+                            buy_pool, sell_pool = (
+                                (pool_1, pool_2) if price_difference_percentage > 0 else (pool_2, pool_1)
+                            )
 
                             opportunity = {
-                                "token_a": token_a,
-                                "token_b": token_b,
+                                "base_token": base_token,
+                                "quote_token": quote_token,
                                 "buy_pool": buy_pool,
                                 "sell_pool": sell_pool,
-                                "price_difference_pct": price_difference * 100,
+                                "price_difference_percentage": price_difference_percentage,
                                 "timestamp": time.time(),
                             }
 
                             opportunities.append(opportunity)
 
                             self.logger().info(
-                                f"Found arbitrage opportunity: {token_a}/{token_b} with {price_difference*100:.2f}% difference "
+                                f"Found arbitrage opportunity: {base_token}/{quote_token} with {price_difference_percentage:.2f}% difference "
                                 f"between {buy_pool['address']} and {sell_pool['address']}"
                             )
 
@@ -255,96 +257,98 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _validate_opportunity(self, opportunity: Dict[str, Any]) -> bool:
         """Validate an arbitrage opportunity by checking slippage and available balances"""
-        token_a = opportunity["token_a"]
-        token_b = opportunity["token_b"]
+        base_token = opportunity["base_token"]
+        quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
 
         # Get token balances
-        token_a_balance = await self._get_token_balance(token_a)
+        base_quote_token_balance = await self._get_quote_token_balance(base_token)
 
         # Check if we have enough balance for the trade
         min_trade_amount = float(configuration["globals"].get("minimum_trade_amount", 10))
-        if token_a_balance < min_trade_amount:
-            self.logger().info(f"Insufficient balance of {token_a} for arbitrage: {token_a_balance}")
+        if base_quote_token_balance < min_trade_amount:
+            self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_quote_token_balance}")
             return False
 
         # Calculate optimal trade amount (considering slippage)
-        trade_amount = await self._calculate_optimal_trade_amount(opportunity, token_a_balance)
+        trade_amount = await self._calculate_optimal_trade_amount(opportunity, base_quote_token_balance)
 
         if trade_amount <= 0:
-            self.logger().info(f"Optimal trade amount calculation resulted in zero or negative amount")
+            self.logger().info("Optimal trade amount calculation resulted in zero or negative amount")
             return False
 
         # Check slippage for both trades
-        max_slippage_pct = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
+        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
 
-        # Get quote for buying token_b with token_a in buy_pool
+        # Get quote for buying quote_token with base_token in buy_pool
         buy_quote = await self._get_quote_swap(
             buy_pool,
-            token_a,
-            token_b,
+            base_token,
+            quote_token,
             str(trade_amount),
-            "SELL",  # Selling token_a to buy token_b
-            str(max_slippage_pct),
+            "SELL",  # Selling base_token to buy quote_token
+            str(max_slippage_percentage),
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
-            self.logger().info(f"Failed to get buy quote for {token_a}/{token_b} in pool {buy_pool['address']}")
+            self.logger().info(f"Failed to get buy quote for {base_token}/{quote_token} in pool {buy_pool['address']}")
             return False
 
-        expected_token_b = float(buy_quote["expectedOut"])
+        expected_quote_token = float(buy_quote["expectedOut"])
 
-        # Get quote for selling token_b for token_a in sell_pool
+        # Get quote for selling quote_token for base_token in sell_pool
         sell_quote = await self._get_quote_swap(
             sell_pool,
-            token_b,
-            token_a,
-            str(expected_token_b),
-            "SELL",  # Selling token_b to get back token_a
-            str(max_slippage_pct),
+            quote_token,
+            base_token,
+            str(expected_quote_token),
+            "SELL",  # Selling quote_token to get back base_token
+            str(max_slippage_percentage),
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
-            self.logger().info(f"Failed to get sell quote for {token_b}/{token_a} in pool {sell_pool['address']}")
+            self.logger().info(
+                f"Failed to get sell quote for {quote_token}/{base_token} in pool {sell_pool['address']}"
+            )
             return False
 
-        expected_token_a_return = float(sell_quote["expectedOut"])
+        expected_base_token_return = float(sell_quote["expectedOut"])
 
         # Calculate expected profit
-        expected_profit = expected_token_a_return - trade_amount
-        expected_profit_pct = (expected_profit / trade_amount) * 100
+        expected_profit = expected_base_token_return - trade_amount
+        expected_profit_percentage = (expected_profit / trade_amount) * 100
 
         # Add profit details to the opportunity
         opportunity["trade_amount"] = trade_amount
-        opportunity["expected_token_b"] = expected_token_b
-        opportunity["expected_token_a_return"] = expected_token_a_return
+        opportunity["expected_quote_token"] = expected_quote_token
+        opportunity["expected_base_token_return"] = expected_base_token_return
         opportunity["expected_profit"] = expected_profit
-        opportunity["expected_profit_pct"] = expected_profit_pct
+        opportunity["expected_profit_percentage"] = expected_profit_percentage
 
         # Validate that the opportunity is still profitable after slippage
-        min_profit_pct = float(configuration["globals"].get("minimum_profit_percentage", 1))
-        if expected_profit_pct < min_profit_pct:
+        min_profit_percentage = float(configuration["globals"].get("minimum_profitability_percentage", 1))
+        if expected_profit_percentage < min_profit_percentage:
             self.logger().info(
-                f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_pct:.2f}% < {min_profit_pct}%"
+                f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_percentage:.2f}% < {min_profit_percentage}%"
             )
             return False
 
         self.logger().info(
-            f"Validated arbitrage opportunity: {token_a}/{token_b} with expected profit of {expected_profit_pct:.2f}%"
+            f"Validated arbitrage opportunity: {base_token}/{quote_token} with expected profit of {expected_profit_percentage:.2f}%"
         )
         return True
 
     async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
         """Execute an arbitrage trade"""
-        token_a = opportunity["token_a"]
-        token_b = opportunity["token_b"]
+        base_token = opportunity["base_token"]
+        quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
         trade_amount = opportunity["trade_amount"]
 
-        self.logger().info(f"Executing arbitrage trade: {token_a}/{token_b}")
-        self.logger().info(f"Step 1: Swap {trade_amount} {token_a} for {token_b} in pool {buy_pool['address']}")
+        self.logger().info(f"Executing arbitrage trade: {base_token}/{quote_token}")
+        self.logger().info(f"Step 1: Swap {trade_amount} {base_token} for {quote_token} in pool {buy_pool['address']}")
 
         # Get wallet information
         wallet_address = self._get_wallet_address_for_pool(buy_pool)
@@ -353,22 +357,22 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             return False
 
         # Record initial balance
-        initial_token_a_balance = await self._get_token_balance(token_a)
+        initial_base_quote_token_balance = await self._get_quote_token_balance(base_token)
 
-        # Execute first swap: token_a -> token_b in buy_pool
-        max_slippage_pct = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
+        # Execute first swap: base_token -> quote_token in buy_pool
+        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
 
         first_swap_result = await self._post_execute_swap(
             buy_pool,
-            token_a,
-            token_b,
+            base_token,
+            quote_token,
             str(trade_amount),
-            "SELL",  # Selling token_a to buy token_b
-            str(max_slippage_pct),
+            "SELL",  # Selling base_token to buy quote_token
+            str(max_slippage_percentage),
         )
 
         if not first_swap_result or "signature" not in first_swap_result:
-            self.logger().error(f"First swap failed: {token_a} -> {token_b}")
+            self.logger().error(f"First swap failed: {base_token} -> {quote_token}")
             return False
 
         self.logger().info(f"First swap completed with transaction signature: {first_swap_result['signature']}")
@@ -376,23 +380,25 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Wait for transaction to be confirmed
         await asyncio.sleep(2)
 
-        # Get token_b balance after first swap
-        token_b_balance = await self._get_token_balance(token_b)
+        # Get quote_token balance after first swap
+        quote_token_balance = await self._get_quote_token_balance(quote_token)
 
-        # Execute second swap: token_b -> token_a in sell_pool
-        self.logger().info(f"Step 2: Swap {token_b_balance} {token_b} back to {token_a} in pool {sell_pool['address']}")
+        # Execute second swap: quote_token -> base_token in sell_pool
+        self.logger().info(
+            f"Step 2: Swap {quote_token_balance} {quote_token} back to {base_token} in pool {sell_pool['address']}"
+        )
 
         second_swap_result = await self._post_execute_swap(
             sell_pool,
-            token_b,
-            token_a,
-            str(token_b_balance),
-            "SELL",  # Selling token_b to get back token_a
-            str(max_slippage_pct),
+            quote_token,
+            base_token,
+            str(quote_token_balance),
+            "SELL",  # Selling quote_token to get back base_token
+            str(max_slippage_percentage),
         )
 
         if not second_swap_result or "signature" not in second_swap_result:
-            self.logger().error(f"Second swap failed: {token_b} -> {token_a}")
+            self.logger().error(f"Second swap failed: {quote_token} -> {base_token}")
             return False
 
         self.logger().info(f"Second swap completed with transaction signature: {second_swap_result['signature']}")
@@ -401,21 +407,21 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         await asyncio.sleep(2)
 
         # Calculate actual profit
-        final_token_a_balance = await self._get_token_balance(token_a)
-        actual_profit = final_token_a_balance - initial_token_a_balance
-        actual_profit_pct = (actual_profit / initial_token_a_balance) * 100
+        final_base_quote_token_balance = await self._get_quote_token_balance(base_token)
+        actual_profit = final_base_quote_token_balance - initial_base_quote_token_balance
+        actual_profit_percentage = (actual_profit / initial_base_quote_token_balance) * 100
 
         # Record trade result in execution history
         trade_result = {
             "timestamp": time.time(),
-            "token_a": token_a,
-            "token_b": token_b,
+            "base_token": base_token,
+            "quote_token": quote_token,
             "buy_pool": buy_pool["address"],
             "sell_pool": sell_pool["address"],
-            "initial_amount": initial_token_a_balance,
-            "final_amount": final_token_a_balance,
+            "initial_amount": initial_base_quote_token_balance,
+            "final_amount": final_base_quote_token_balance,
             "profit": actual_profit,
-            "profit_percentage": actual_profit_pct,
+            "profit_percentage": actual_profit_percentage,
             "first_swap_tx": first_swap_result["signature"],
             "second_swap_tx": second_swap_result["signature"],
         }
@@ -424,11 +430,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         if actual_profit > 0:
             self.logger().info(
-                f"Arbitrage trade successful! Profit: {actual_profit} {token_a} ({actual_profit_pct:.2f}%)"
+                f"Arbitrage trade successful! Profit: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
             )
         else:
             self.logger().warning(
-                f"Arbitrage trade completed with loss: {actual_profit} {token_a} ({actual_profit_pct:.2f}%)"
+                f"Arbitrage trade completed with loss: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
             )
 
         return actual_profit > 0
@@ -487,10 +493,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 }
 
             # Update wallet token balances
-            wallet_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
+            wallet_quote_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
 
-            if wallet_token_balances and "balances" in wallet_token_balances:
-                for token_symbol, balance in wallet_token_balances["balances"].items():
+            if wallet_quote_token_balances and "balances" in wallet_quote_token_balances:
+                for token_symbol, balance in wallet_quote_token_balances["balances"].items():
                     if (
                         token_symbol
                         not in database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"]
@@ -596,23 +602,22 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     "tokens": {},
                     "annual_percentage_rate": detailed_pool_info.get("apr"),
                     "total_value_locked": detailed_pool_info.get("tvl"),
+                    "impermanent_loss": 0,
                     "volume": {"24h": detailed_pool_info.get("volume24h")},
                 }
 
-                # TODO Update token information in the pool!!!
                 for token_symbol in pool.get("tokens", {}):
-                    token_info = database["connections"][chain][network][connector]["tokens"].get(token_symbol, {})
-
                     database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
                         token_symbol
                     ] = {
-                        "price": detailed_pool_info.get("price")
-                    }  # TODO fix this!!!
+                        "balance": 0,  # TODO fix this info!!!
+                        "price": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
+                    }
 
         return database
 
-    async def _calculate_price_difference(
-        self, token_a: str, token_b: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
+    async def _calculate_price_difference_percentage(
+        self, base_token: str, quote_token: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
     ) -> float:
         """
         Calculate price difference between two pools for a token pair
@@ -620,42 +625,44 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             float: Price difference as a decimal (0.01 = 1%)
         """
-        # Get price of token_b in terms of token_a in pool_1
-        price_1 = await self._get_token_price_in_pool(token_a, token_b, pool_1)
+        # Get price of quote_token in terms of base_token in pool_1
+        price_1 = await self._get_token_price_in_pool(base_token, quote_token, pool_1)
 
-        # Get price of token_b in terms of token_a in pool_2
-        price_2 = await self._get_token_price_in_pool(token_a, token_b, pool_2)
+        # Get price of quote_token in terms of base_token in pool_2
+        price_2 = await self._get_token_price_in_pool(base_token, quote_token, pool_2)
 
         if price_1 is None or price_2 is None or price_1 == 0:
             return 0
 
         # Calculate price difference
-        price_difference = (price_2 - price_1) / price_1
+        price_difference = 100 * ((price_2 - price_1) / price_1)
 
         return price_difference
 
-    async def _get_token_price_in_pool(self, token_a: str, token_b: str, pool: Dict[str, Any]) -> Optional[float]:
-        """Get the price of token_b in terms of token_a in the given pool"""
+    async def _get_token_price_in_pool(
+        self, base_token: str, quote_token: str, pool: Dict[str, Any]
+    ) -> Optional[float]:
+        """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
         min_trade_amount = float(configuration["globals"].get("minimum_trade_amount", 10))
 
-        quote = await self._get_quote_swap(pool, token_a, token_b, str(min_trade_amount), "SELL", "0.5")
+        quote = await self._get_quote_swap(pool, base_token, quote_token, str(min_trade_amount), "SELL", "0.5")
 
         if not quote or "expectedOut" not in quote:
             return None
 
         expected_out = float(quote["expectedOut"])
 
-        # Calculate price: how much token_b you get for 1 token_a
+        # Calculate price: how much quote_token you get for 1 base_token
         price = expected_out / min_trade_amount
 
         return price
 
     async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: float) -> float:
         """Calculate the optimal amount to trade based on slippage considerations"""
-        token_a = opportunity["token_a"]
-        token_b = opportunity["token_b"]
-        buy_pool = opportunity["buy_pool"]
+        # base_token = opportunity["base_token"]
+        # quote_token = opportunity["quote_token"]
+        # buy_pool = opportunity["buy_pool"]
 
         # Start with a small test amount
         min_trade_amount = float(configuration["globals"].get("minimum_trade_amount", 10))
@@ -671,7 +678,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         ]
 
         best_amount = 0
-        best_profit_pct = 0
+        best_profit_percentage = 0
 
         for amount in test_amounts:
             if amount > max_available:
@@ -681,48 +688,48 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             if best_amount > 0 and abs(amount - best_amount) / best_amount < 0.1:
                 continue
 
-            profit_pct = await self._simulate_arbitrage_profit(opportunity, amount)
+            profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
 
-            if profit_pct > best_profit_pct:
-                best_profit_pct = profit_pct
+            if profit_percentage > best_profit_percentage:
+                best_profit_percentage = profit_percentage
                 best_amount = amount
 
         return best_amount
 
     async def _simulate_arbitrage_profit(self, opportunity: Dict[str, Any], trade_amount: float) -> float:
         """Simulate an arbitrage trade to calculate expected profit percentage"""
-        token_a = opportunity["token_a"]
-        token_b = opportunity["token_b"]
+        base_token = opportunity["base_token"]
+        quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
 
-        max_slippage_pct = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
+        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
 
-        # Simulate first swap: token_a -> token_b in buy_pool
+        # Simulate first swap: base_token -> quote_token in buy_pool
         buy_quote = await self._get_quote_swap(
-            buy_pool, token_a, token_b, str(trade_amount), "SELL", str(max_slippage_pct)
+            buy_pool, base_token, quote_token, str(trade_amount), "SELL", str(max_slippage_percentage)
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
             return 0
 
-        expected_token_b = float(buy_quote["expectedOut"])
+        expected_quote_token = float(buy_quote["expectedOut"])
 
-        # Simulate second swap: token_b -> token_a in sell_pool
+        # Simulate second swap: quote_token -> base_token in sell_pool
         sell_quote = await self._get_quote_swap(
-            sell_pool, token_b, token_a, str(expected_token_b), "SELL", str(max_slippage_pct)
+            sell_pool, quote_token, base_token, str(expected_quote_token), "SELL", str(max_slippage_percentage)
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
             return 0
 
-        expected_token_a_return = float(sell_quote["expectedOut"])
+        expected_base_token_return = float(sell_quote["expectedOut"])
 
         # Calculate expected profit percentage
-        expected_profit = expected_token_a_return - trade_amount
-        expected_profit_pct = (expected_profit / trade_amount) * 100
+        expected_profit = expected_base_token_return - trade_amount
+        expected_profit_percentage = (expected_profit / trade_amount) * 100
 
-        return expected_profit_pct
+        return expected_profit_percentage
 
     def _get_all_tokens_from_database(self) -> List[str]:
         """Get all tokens from the database"""
@@ -754,14 +761,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return pools
 
-    def _find_pools_with_token_pair(
-        self, pools: List[Dict[str, Any]], token_a: str, token_b: str
-    ) -> List[Dict[str, Any]]:
+    def _find_pools_with_token_pair(self, base_token: str, quote_token: str) -> List[Dict[str, Any]]:
         """Find pools that contain both tokens"""
         matching_pools = []
 
+        pools = self._get_all_pools_from_database()
+
         for pool in pools:
-            if "tokens" in pool and token_a in pool["tokens"] and token_b in pool["tokens"]:
+            if "tokens" in pool and base_token in pool["tokens"] and quote_token in pool["tokens"]:
                 matching_pools.append(pool)
 
         return matching_pools
@@ -787,7 +794,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return None
 
-    async def _get_token_balance(self, token_symbol: str) -> float:
+    async def _get_quote_token_balance(self, token_symbol: str) -> float:
         """Get token balance across all wallets"""
         total_balance = 0
 
@@ -801,10 +808,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             if not all([chain, network, wallet_address]):
                 continue
 
-            token_balances = await self._post_chain_balances(chain, network, wallet_address, [token_symbol])
+            quote_token_balances = await self._post_chain_balances(chain, network, wallet_address, [token_symbol])
 
-            if token_balances and "balances" in token_balances:
-                total_balance += float(token_balances["balances"].get(token_symbol, 0))
+            if quote_token_balances and "balances" in quote_token_balances:
+                total_balance += float(quote_token_balances["balances"].get(token_symbol, 0))
 
         return total_balance
 
@@ -967,7 +974,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_asset=quote_token,
             amount=Decimal(amount),
             side=trade_type,
-            slippage_pct=Decimal(slippage_percentage) if slippage_percentage else None,
+            slippage_percentage=Decimal(slippage_percentage) if slippage_percentage else None,
             pool_address=pool_address,
         )
 
@@ -999,7 +1006,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool_address=pool_address,
             base_token_amount=float(base_token_amount) if base_token_amount else None,
             quote_token_amount=float(quote_token_amount) if quote_token_amount else None,
-            slippage_pct=float(slippage_percentage) if slippage_percentage else None,
+            slippage_percentage=float(slippage_percentage) if slippage_percentage else None,
         )
 
     async def _post_execute_swap(
@@ -1043,7 +1050,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_asset=quote_token,
             side=trade_type,
             amount=Decimal(amount),
-            slippage_pct=Decimal(slippage_percentage) if slippage_percentage else None,
+            slippage_percentage=Decimal(slippage_percentage) if slippage_percentage else None,
             pool_address=pool_address,
         )
 
@@ -1077,7 +1084,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool_address=pool_address,
             base_token_amount=float(base_token_amount) if base_token_amount else None,
             quote_token_amount=float(quote_token_amount) if quote_token_amount else None,
-            slippage_pct=float(slippage_percentage) if slippage_percentage else None,
+            slippage_percentage=float(slippage_percentage) if slippage_percentage else None,
         )
 
     async def _post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: str):
@@ -1235,7 +1242,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Format status message
         status = []
-        status.append(f"AMM Arbitrage Strategy Status:")
+        status.append("AMM Arbitrage Strategy Status:")
         status.append(f"Gateway Status: {'Ready' if self.gateway_is_ready else 'Not Ready'}")
         status.append(f"Opportunities Found (last hour): {len(recent_opportunities)}")
         status.append(f"Trades Executed (last hour): {len(recent_executions)}")
@@ -1244,9 +1251,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if recent_executions:
             status.append("\nRecent Trades:")
             for ex in recent_executions[-5:]:  # Show last 5 trades
-                token = ex.get("token_a", "")
+                token = ex.get("base_token", "")
                 profit = ex.get("profit", 0)
-                profit_pct = ex.get("profit_percentage", 0)
-                status.append(f"  {token}: {profit:.4f} ({profit_pct:.2f}%)")
+                profit_percentage = ex.get("profit_percentage", 0)
+                status.append(f"  {token}: {profit:.4f} ({profit_percentage:.2f}%)")
 
         return "\n".join(status)

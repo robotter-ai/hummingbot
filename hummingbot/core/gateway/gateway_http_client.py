@@ -418,7 +418,7 @@ class GatewayHttpClient:
         quote_asset: str,
         amount: Decimal,
         side: TradeType,
-        slippage_pct: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
         pool_address: Optional[str] = None,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
@@ -434,8 +434,8 @@ class GatewayHttpClient:
             "amount": float(amount),
             "side": side.name,
         }
-        if slippage_pct is not None:
-            request_payload["slippagePct"] = float(slippage_pct)
+        if slippage_percentage is not None:
+            request_payload["slippagePct"] = float(slippage_percentage)
         if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
@@ -451,7 +451,7 @@ class GatewayHttpClient:
         quote_asset: str,
         amount: Decimal,
         side: TradeType,
-        slippage_pct: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
         pool_address: Optional[str] = None,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
@@ -467,8 +467,8 @@ class GatewayHttpClient:
             "amount": float(amount),
             "side": side.name,
         }
-        if slippage_pct is not None:
-            request_payload["slippagePct"] = float(slippage_pct)
+        if slippage_percentage is not None:
+            request_payload["slippagePct"] = float(slippage_percentage)
         if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
@@ -485,7 +485,7 @@ class GatewayHttpClient:
         quote_asset: str,
         side: TradeType,
         amount: Decimal,
-        slippage_pct: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
         pool_address: Optional[str] = None,
         # limit_price: Optional[Decimal] = None,
         nonce: Optional[int] = None,
@@ -503,8 +503,8 @@ class GatewayHttpClient:
             "amount": float(amount),
             "side": side.name,
         }
-        if slippage_pct is not None:
-            request_payload["slippagePct"] = float(slippage_pct)
+        if slippage_percentage is not None:
+            request_payload["slippagePct"] = float(slippage_percentage)
         # if limit_price is not None:
         #     request_payload["limitPrice"] = float(limit_price)
         if nonce is not None:
@@ -522,7 +522,7 @@ class GatewayHttpClient:
         quote_asset: str,
         side: TradeType,
         amount: Decimal,
-        slippage_pct: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
         pool_address: Optional[str] = None,
         # limit_price: Optional[Decimal] = None,
         nonce: Optional[int] = None,
@@ -540,8 +540,8 @@ class GatewayHttpClient:
             "amount": float(amount),
             "side": side.name,
         }
-        if slippage_pct is not None:
-            request_payload["slippagePct"] = float(slippage_pct)
+        if slippage_percentage is not None:
+            request_payload["slippagePct"] = float(slippage_percentage)
         # if limit_price is not None:
         #     request_payload["limitPrice"] = float(limit_price)
         if nonce is not None:
@@ -616,7 +616,7 @@ class GatewayHttpClient:
         upper_price: float,
         base_token_amount: Optional[float] = None,
         quote_token_amount: Optional[float] = None,
-        slippage_pct: Optional[float] = None,
+        slippage_percentage: Optional[float] = None,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -629,7 +629,7 @@ class GatewayHttpClient:
         :param upper_price: The upper price bound of the position
         :param base_token_amount: The amount of base token to add (optional)
         :param quote_token_amount: The amount of quote token to add (optional)
-        :param slippage_pct: Allowed slippage percentage (optional)
+        :param slippage_percentage: Allowed slippage percentage (optional)
         :param fail_silently: Whether to fail silently on error
         :return: Details of the opened position
         """
@@ -644,8 +644,8 @@ class GatewayHttpClient:
             request_payload["baseTokenAmount"] = base_token_amount
         if quote_token_amount is not None:
             request_payload["quoteTokenAmount"] = quote_token_amount
-        if slippage_pct is not None:
-            request_payload["slippagePct"] = slippage_pct
+        if slippage_percentage is not None:
+            request_payload["slippagePct"] = slippage_percentage
 
         return await self.api_request(
             "post",
@@ -750,7 +750,7 @@ class GatewayHttpClient:
         pool_address: str,
         base_token_amount: Optional[float] = None,
         quote_token_amount: Optional[float] = None,
-        slippage_pct: Optional[float] = None,
+        slippage_percentage: Optional[float] = None,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -760,7 +760,7 @@ class GatewayHttpClient:
         :param pool_address: The address of the pool
         :param base_token_amount: The amount of base token to add
         :param quote_token_amount: The amount of quote token to add
-        :param slippage_pct: Allowed slippage percentage
+        :param slippage_percentage: Allowed slippage percentage
         :param fail_silently: Whether to fail silently on error
         :return: Quote information for adding liquidity
         """
@@ -772,8 +772,8 @@ class GatewayHttpClient:
             query_params["baseTokenAmount"] = base_token_amount
         if quote_token_amount is not None:
             query_params["quoteTokenAmount"] = quote_token_amount
-        if slippage_pct is not None:
-            query_params["slippagePct"] = slippage_pct
+        if slippage_percentage is not None:
+            query_params["slippagePct"] = slippage_percentage
 
         return await self.api_request(
             "get",
@@ -790,7 +790,7 @@ class GatewayHttpClient:
         pool_address: str,
         base_token_amount: Optional[float] = None,
         quote_token_amount: Optional[float] = None,
-        slippage_pct: Optional[float] = None,
+        slippage_percentage: Optional[float] = None,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -801,7 +801,7 @@ class GatewayHttpClient:
         :param pool_address: The address of the pool
         :param base_token_amount: The amount of base token to add
         :param quote_token_amount: The amount of quote token to add
-        :param slippage_pct: Allowed slippage percentage
+        :param slippage_percentage: Allowed slippage percentage
         :param fail_silently: Whether to fail silently on error
         :return: Result of the liquidity addition transaction
         """
@@ -814,8 +814,8 @@ class GatewayHttpClient:
             request_payload["baseTokenAmount"] = base_token_amount
         if quote_token_amount is not None:
             request_payload["quoteTokenAmount"] = quote_token_amount
-        if slippage_pct is not None:
-            request_payload["slippagePct"] = slippage_pct
+        if slippage_percentage is not None:
+            request_payload["slippagePct"] = slippage_percentage
 
         return await self.api_request(
             "post",
