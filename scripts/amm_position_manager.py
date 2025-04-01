@@ -203,9 +203,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         tokens = configuration["tokens"]
 
         # Minimum profit percentage required for arbitrage
-        minimum_profitability_percentage = (
-            float(configuration["globals"].get("minimum_profitability_percentage", 1)) / 100.0
-        )
+        minimum_profitability_percentage = float(configuration["globals"].get("minimum_profitability_percentage", 1))
 
         # Iterate through all token pairs and pool combinations
         for base_token in tokens:
@@ -228,7 +226,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         )
 
                         # If price difference exceeds minimum profit threshold
-                        if abs(price_difference_percentage) > minimum_profitability_percentage:
+                        if price_difference_percentage > minimum_profitability_percentage:
                             # Determine which pool to buy from and which to sell to
                             buy_pool, sell_pool = (
                                 (pool_1, pool_2) if price_difference_percentage > 0 else (pool_2, pool_1)
