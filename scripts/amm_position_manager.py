@@ -30,7 +30,7 @@ configuration: Dict[str, Any] = {
                         "5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt",
                     ],
                     "pools": [
-                        "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
+                        # "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
                         # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
                         # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
                         # "<pool_address>",  # LBP pool
@@ -54,7 +54,7 @@ configuration: Dict[str, Any] = {
             }
         },
     },
-    "tokens": ["DOT", "SOL", "USDC", "USDT"],
+    "tokens": ["DOT", "HDX", "USDC", "USDT"],
 }
 
 ## Example structure)
@@ -570,10 +570,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     continue
 
                 pool_address = pool.get("address")
-                if (
-                    not pool_address
-                    or pool.get("address") not in configuration["connections"][chain][network][connector]["pools"]
-                ):
+                if not pool_address:
+                    raise ValueError(f"Pool {pool} doesn't have an address")
+
+                should_ignore = False
+                for token in pool.get("tokens", []):
+                    if token not in configuration["tokens"]:
+                        if pool.get("address") not in configuration["connections"][chain][network][connector]["pools"]:
+                            should_ignore = True
+                            break
+                if should_ignore:
                     continue
 
                 # Get detailed pool information
@@ -587,19 +593,23 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 database["connections"][chain][network][connector]["pools"][pool_address] = {
                     "address": pool_address,
                     "type": pool.get("type", "unknown"),
-                    "tokens": {},  # TODO fix, it is needed to call the tokens before!!!
+                    "tokens": {},
                     "annual_percentage_rate": detailed_pool_info.get("apr"),
                     "total_value_locked": detailed_pool_info.get("tvl"),
                     "volume": {"24h": detailed_pool_info.get("volume24h")},
                 }
 
                 # TODO Update token information in the pool!!!
-                for token_symbol in detailed_pool_info.get("tokens", {}):
-                    token_info = detailed_pool_info["tokens"].get(token_symbol, {})
+                for token_symbol in pool.get("tokens", {}):
+                    token_info = database["connections"][chain][network][connector]["tokens"].get(token_symbol, {})
 
                     database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
                         token_symbol
-                    ] = {"price": token_info.get("price")}
+                    ] = {
+                        "price": detailed_pool_info.get("price")
+                    }  # TODO fix this!!!
+
+        return database
 
     async def _calculate_price_difference(
         self, token_a: str, token_b: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
@@ -832,7 +842,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             self.logger().error("No wallet connections found. Please connect a wallet using 'gateway connect'.")
             return
 
-        # Get pools configuration
         pools = getattr(self.configuration, "pools", [])
         if not pools or len(pools) == 0:
             self.logger().error("No pools configured. Please add pool configurations.")
