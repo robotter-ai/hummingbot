@@ -207,14 +207,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Iterate through all token pairs and pool combinations
         for i, base_token in enumerate(tokens):
-            for quote_token in tokens[i + 1:]:
+            for quote_token in tokens[(i + 1):]:
                 # Find pools that contain both tokens
                 # TODO Add a hashtable with the pools to have a immediate access to the pools with the same tokens!!!
                 relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
                 for i, pool_1 in enumerate(relevant_pools):
-                    for pool_2 in relevant_pools[i + 1:]:
+                    for pool_2 in relevant_pools[(i + 1):]:
                         # Calculate price difference between the two pools
                         price_difference_percentage = await self._calculate_price_difference_percentage(
                             base_token, quote_token, pool_1, pool_2
@@ -283,7 +283,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_token,
             quote_token,
             str(trade_amount),
-            "SELL",  # Selling base_token to buy quote_token
+            TradeType.SELL,  # Selling base_token to buy quote_token
             str(max_slippage_percentage),
         )
 
@@ -299,7 +299,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             base_token,
             str(expected_quote_token),
-            "SELL",  # Selling quote_token to get back base_token
+            TradeType.SELL,  # Selling quote_token to get back base_token
             str(max_slippage_percentage),
         )
 
@@ -363,7 +363,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_token,
             quote_token,
             str(trade_amount),
-            "SELL",  # Selling base_token to buy quote_token
+            TradeType.SELL,  # Selling base_token to buy quote_token
             str(max_slippage_percentage),
         )
 
@@ -389,7 +389,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             base_token,
             str(quote_token_balance),
-            "SELL",  # Selling quote_token to get back base_token
+            TradeType.SELL,  # Selling quote_token to get back base_token
             str(max_slippage_percentage),
         )
 
@@ -663,7 +663,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
 
         quote = await self._get_quote_swap(
-            pool, base_token, quote_token, str(minimum_trade_amount), "SELL", max_slippage_percentage
+            pool, base_token, quote_token, str(minimum_trade_amount), TradeType.SELL, max_slippage_percentage
         )
 
         if not quote or "expectedOut" not in quote:
@@ -726,7 +726,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Simulate first swap: base_token -> quote_token in buy_pool
         buy_quote = await self._get_quote_swap(
-            buy_pool, base_token, quote_token, str(trade_amount), "SELL", str(max_slippage_percentage)
+            buy_pool, base_token, quote_token, str(trade_amount), TradeType.SELL, str(max_slippage_percentage)
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
@@ -736,7 +736,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Simulate second swap: quote_token -> base_token in sell_pool
         sell_quote = await self._get_quote_swap(
-            sell_pool, quote_token, base_token, str(expected_quote_token), "SELL", str(max_slippage_percentage)
+            sell_pool, quote_token, base_token, str(expected_quote_token), TradeType.SELL, str(max_slippage_percentage)
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
@@ -956,7 +956,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         base_token: str,
         quote_token: str,
         amount: str,
-        side: str,
+        side: TradeType,
         slippage_percentage: str,
     ):
         """
@@ -980,15 +980,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        trade_type = TradeType.BUY if side.upper() == "BUY" else TradeType.SELL
-
         return await self.gateway_http_client.amm_quote_swap(
             network=network,
             connector=connector,
             base_asset=base_token,
             quote_asset=quote_token,
             amount=Decimal(amount),
-            side=trade_type,
+            side=side,
             slippage_percentage=Decimal(slippage_percentage) if slippage_percentage else None,
             pool_address=pool_address,
         )
@@ -1030,7 +1028,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         base_token: str,
         quote_token: str,
         amount: str,
-        side: str,
+        side: TradeType,
         slippage_percentage: str,
     ):
         """
@@ -1055,15 +1053,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        trade_type = TradeType.BUY if side.upper() == "BUY" else TradeType.SELL
-
         return await self.gateway_http_client.amm_execute_swap(
             network=network,
             connector=connector,
             address=wallet_address,
             base_asset=base_token,
             quote_asset=quote_token,
-            side=trade_type,
+            side=side,
             amount=Decimal(amount),
             slippage_percentage=Decimal(slippage_percentage) if slippage_percentage else None,
             pool_address=pool_address,
