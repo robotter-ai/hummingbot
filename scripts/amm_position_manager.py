@@ -284,7 +284,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             buy_pool,
             base_token,
             quote_token,
-            str(trade_amount),
+            trade_amount,
             TradeType.SELL,  # Selling base_token to buy quote_token
             max_slippage_percentage,
         )
@@ -300,7 +300,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             sell_pool,
             quote_token,
             base_token,
-            str(expected_quote_token),
+            expected_quote_token,
             TradeType.SELL,  # Selling quote_token to get back base_token
             max_slippage_percentage,
         )
@@ -364,7 +364,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             buy_pool,
             base_token,
             quote_token,
-            str(trade_amount),
+            trade_amount,
             TradeType.SELL,  # Selling base_token to buy quote_token
             Decimal(str(max_slippage_percentage)),
         )
@@ -390,7 +390,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             sell_pool,
             quote_token,
             base_token,
-            str(quote_token_balance),
+            quote_token_balance,
             TradeType.SELL,  # Selling quote_token to get back base_token
             Decimal(str(max_slippage_percentage)),
         )
@@ -661,7 +661,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         max_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         quote = await self._get_quote_swap(
-            pool, base_token, quote_token, str(minimum_trade_amount), TradeType.SELL, max_slippage_percentage
+            pool, base_token, quote_token, minimum_trade_amount, TradeType.SELL, max_slippage_percentage
         )
 
         if not quote or "expectedOut" not in quote:
@@ -718,7 +718,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Simulate first swap: base_token -> quote_token in buy_pool
         buy_quote = await self._get_quote_swap(
-            buy_pool, base_token, quote_token, str(trade_amount), TradeType.SELL, max_slippage_percentage
+            buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, max_slippage_percentage
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
@@ -728,7 +728,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Simulate second swap: quote_token -> base_token in sell_pool
         sell_quote = await self._get_quote_swap(
-            sell_pool, quote_token, base_token, str(expected_quote_token), TradeType.SELL, max_slippage_percentage
+            sell_pool, quote_token, base_token, expected_quote_token, TradeType.SELL, max_slippage_percentage
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
@@ -819,7 +819,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         )
 
                         if balances and "balances" in balances:
-                            total_balance += Decimal(str(balances["balances"].get(token_symbol, "0")))
+                            balance = balances["balances"].get(token_symbol)
+                            if balance is not None:
+                                total_balance += Decimal(str(balance))
 
         return total_balance
 
@@ -948,7 +950,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         pool: Dict[str, Any],
         base_token: str,
         quote_token: str,
-        amount: str,
+        amount: Decimal,
         side: TradeType,
         slippage_percentage: Decimal,
     ):
@@ -959,9 +961,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool: Dictionary containing pool configuration parameters
             base_token: Symbol of the base token
             quote_token: Symbol of the quote token
-            amount: Amount to swap
+            amount: Amount to swap as Decimal
             side: Trade side (BUY or SELL)
-            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal('0.5') for 0.5%)
+            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal("0.5") for 0.5%)
 
         Returns:
             Dictionary containing swap quote information
@@ -978,7 +980,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             connector=connector,
             base_asset=base_token,
             quote_asset=quote_token,
-            amount=Decimal(amount),
+            amount=amount,
             side=side,
             slippage_percentage=slippage_percentage,
             pool_address=pool_address,
@@ -1020,7 +1022,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         pool: Dict[str, Any],
         base_token: str,
         quote_token: str,
-        amount: str,
+        amount: Decimal,
         side: TradeType,
         slippage_percentage: Decimal,
     ):
@@ -1031,9 +1033,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool: Dictionary containing pool configuration parameters
             base_token: Symbol of the base token
             quote_token: Symbol of the quote token
-            amount: Amount to swap
+            amount: Amount to swap as Decimal
             side: Trade side (BUY or SELL)
-            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal('0.5') for 0.5%)
+            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal("0.5") for 0.5%)
 
         Returns:
             Dictionary containing swap execution result
@@ -1053,7 +1055,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_asset=base_token,
             quote_asset=quote_token,
             side=side,
-            amount=Decimal(amount),
+            amount=amount,
             slippage_percentage=slippage_percentage,
             pool_address=pool_address,
         )
@@ -1246,7 +1248,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         ]  # Last hour
 
         # Calculate profit statistics
-        total_profit = sum(Decimal(str(ex.get("profit", "0"))) for ex in executions)
+        total_profit = Decimal("0")
+        for ex in executions:
+            profit = ex.get("profit")
+            if profit is not None:
+                total_profit += Decimal(str(profit))
 
         # Format status message
         status = []
@@ -1260,8 +1266,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             status.append("\nRecent Trades:")
             for ex in recent_executions[-5:]:  # Show last 5 trades
                 token = ex.get("base_token", "")
-                profit = Decimal(str(ex.get("profit", "0")))
-                profit_percentage = Decimal(str(ex.get("profit_percentage", "0")))
-                status.append(f"  {token}: {profit:.4f} ({profit_percentage:.2f}%)")
+                profit = ex.get("profit")
+                profit_percentage = ex.get("profit_percentage")
+                if profit is not None and profit_percentage is not None:
+                    profit_decimal = Decimal(str(profit))
+                    profit_percentage_decimal = Decimal(str(profit_percentage))
+                    status.append(f"  {token}: {profit_decimal:.4f} ({profit_percentage_decimal:.2f}%)")
 
         return "\n".join(status)
