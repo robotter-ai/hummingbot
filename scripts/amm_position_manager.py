@@ -224,7 +224,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             continue
 
                         # If price difference exceeds minimum profit threshold
-                        if price_difference_percentage > minimum_profitability_percentage:
+                        if abs(price_difference_percentage) > minimum_profitability_percentage:
                             # Determine which pool to buy from and which to sell to
                             buy_pool, sell_pool = (
                                 (pool_1, pool_2) if price_difference_percentage > 0 else (pool_2, pool_1)
