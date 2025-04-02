@@ -207,15 +207,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         minimum_profitability_percentage = float(configuration["globals"].get("minimum_profitability_percentage"))
 
         # Iterate through all token pairs and pool combinations
-        for i, base_token in enumerate(tokens):
-            for quote_token in tokens[(i + 1) :]:
+        for i, base_token in enumerate(tokens): # TODO change the i variable for another thing!!!
+            for quote_token in tokens[(i + 1) :]: # TODO remove the slide [..:] from here, use a variable index too!!!
                 # Find pools that contain both tokens
-                # TODO Add a hashtable with the pools to have a immediate access to the pools with the same tokens!!!
                 relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
-                for i, pool_1 in enumerate(relevant_pools):
-                    for pool_2 in relevant_pools[(i + 1) :]:
+                for i, pool_1 in enumerate(relevant_pools): # TODO change the i variable for another thing!!!
+                    for pool_2 in relevant_pools[(i + 1) :]: # TODO remove the slide [..:] from here, use a variable index too!!!
                         # Calculate price difference between the two pools
                         price_difference_percentage = await self._calculate_price_difference_percentage(
                             base_token, quote_token, pool_1, pool_2
@@ -783,6 +782,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     def _find_pools_with_token_pair(self, base_token: str, quote_token: str) -> List[Dict[str, Any]]:
         """Find pools that contain both tokens"""
+        # TODO Add a hashtable with the pools to have a immediate access to the pools with the same tokens!!!
         matching_pools = []
 
         pools = self._get_all_pools_from_database()
