@@ -207,16 +207,17 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Iterate through all token pairs and pool combinations
         for base_token in tokens:
-            for quote_token in tokens:
+            for quote_token in tokens:  # TODO change these loops to enumerate to avoid a/b and b/a!!!
                 if base_token == quote_token:
                     continue
 
                 # Find pools that contain both tokens
+                # TODO Add a hashtable with the pools to have a immediate access to the pools with the same tokens!!!
                 relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
                 for pool_1 in relevant_pools:
-                    for pool_2 in relevant_pools:
+                    for pool_2 in relevant_pools:  # TODO change these loops to enumerate to avoid a/b and b/a!!!
                         if pool_1["address"] == pool_2["address"]:
                             continue
 
@@ -224,6 +225,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         price_difference_percentage = await self._calculate_price_difference_percentage(
                             base_token, quote_token, pool_1, pool_2
                         )
+
+                        if price_difference_percentage is None:
+                            continue
 
                         # If price difference exceeds minimum profit threshold
                         if price_difference_percentage > minimum_profitability_percentage:
@@ -264,7 +268,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         base_quote_token_balance = await self._get_quote_token_balance(base_token)
 
         # Check if we have enough balance for the trade
-        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount", 10))
+        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
         if base_quote_token_balance < min_trade_amount:
             self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_quote_token_balance}")
             return False
@@ -629,8 +633,25 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Get price of quote_token in terms of base_token in pool_2
         price_2 = await self._get_token_price_in_pool(base_token, quote_token, pool_2)
 
-        if price_1 is None or price_2 is None or price_1 == 0:
-            return 0
+        if price_1 is None:
+            self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_1['address']}")
+
+            return None
+
+        if price_2 is None:
+            self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_2['address']}")
+
+            return None
+
+        if price_1 == 0:
+            self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_1['address']} is 0")
+
+            return None
+
+        if price_2 == 0:
+            self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_2['address']} is 0")
+
+            return None
 
         # Calculate price difference
         price_difference = 100 * ((price_2 - price_1) / price_1)
@@ -642,7 +663,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     ) -> Optional[float]:
         """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
-        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount", 10))
+        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
 
         quote = await self._get_quote_swap(pool, base_token, quote_token, str(min_trade_amount), "SELL", "0.5")
 
@@ -663,7 +684,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # buy_pool = opportunity["buy_pool"]
 
         # Start with a small test amount
-        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount", 10))
+        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
 
         # Try different trade amounts to find the optimal one
         test_amounts = [
