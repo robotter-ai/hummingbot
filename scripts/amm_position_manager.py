@@ -277,7 +277,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             return False
 
         # Check slippage for both trades
-        max_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
+        maximum_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         # Get quote for buying quote_token with base_token in buy_pool
         buy_quote = await self._get_quote_swap(
@@ -286,7 +286,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             trade_amount,
             TradeType.SELL,  # Selling base_token to buy quote_token
-            max_slippage_percentage,
+            maximum_slippage_percentage,
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
@@ -302,7 +302,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_token,
             expected_quote_token,
             TradeType.SELL,  # Selling quote_token to get back base_token
-            max_slippage_percentage,
+            maximum_slippage_percentage,
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
@@ -358,7 +358,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         initial_base_quote_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
 
         # Execute first swap: base_token -> quote_token in buy_pool
-        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
+        maximum_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
 
         first_swap_result = await self._post_execute_swap(
             buy_pool,
@@ -366,7 +366,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             trade_amount,
             TradeType.SELL,  # Selling base_token to buy quote_token
-            Decimal(str(max_slippage_percentage)),
+            Decimal(str(maximum_slippage_percentage)),
         )
 
         if not first_swap_result or "signature" not in first_swap_result:
@@ -392,7 +392,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_token,
             quote_token_balance,
             TradeType.SELL,  # Selling quote_token to get back base_token
-            Decimal(str(max_slippage_percentage)),
+            Decimal(str(maximum_slippage_percentage)),
         )
 
         if not second_swap_result or "signature" not in second_swap_result:
@@ -658,10 +658,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
         minimum_trade_amount = configuration["globals"].get("minimum_trade_amount")
-        max_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
+        maximum_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         quote = await self._get_quote_swap(
-            pool, base_token, quote_token, minimum_trade_amount, TradeType.SELL, max_slippage_percentage
+            pool, base_token, quote_token, minimum_trade_amount, TradeType.SELL, maximum_slippage_percentage
         )
 
         if not quote or "expectedOut" not in quote:
@@ -714,11 +714,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
 
-        max_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
+        maximum_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         # Simulate first swap: base_token -> quote_token in buy_pool
         buy_quote = await self._get_quote_swap(
-            buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, max_slippage_percentage
+            buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, maximum_slippage_percentage
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
@@ -728,7 +728,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Simulate second swap: quote_token -> base_token in sell_pool
         sell_quote = await self._get_quote_swap(
-            sell_pool, quote_token, base_token, expected_quote_token, TradeType.SELL, max_slippage_percentage
+            sell_pool, quote_token, base_token, expected_quote_token, TradeType.SELL, maximum_slippage_percentage
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
