@@ -22,6 +22,7 @@ configuration: Dict[str, Any] = {
         "arbitrage_check_interval_seconds": Decimal("30"),  # Time between arbitrage checks
         "minimum_trade_amount": Decimal("10"),  # Minimum amount to consider for a trade
         "time_delay_between_arbitrages": Decimal("1"),  # Time delay between arbitrage trades
+        "transaction_confirmation_delay": Decimal("2"),  # Time delay between transaction confirmation
     },
     "connections": {
         "polkadot": {
@@ -325,10 +326,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         opportunity["expected_profit_percentage"] = expected_profit_percentage
 
         # Validate that the opportunity is still profitable after slippage
-        min_profit_percentage = configuration["globals"].get("minimum_profitability_percentage")
-        if expected_profit_percentage < min_profit_percentage:
+        minimum_profitability_percentage = configuration["globals"].get("minimum_profitability_percentage")
+        if expected_profit_percentage < minimum_profitability_percentage:
             self.logger().info(
-                f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_percentage:.2f}% < {min_profit_percentage}%"
+                f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_percentage:.2f}% < {minimum_profitability_percentage}%"
             )
             return False
 
@@ -355,10 +356,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             return False
 
         # Record initial balance
-        initial_base_quote_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
+        initial_base_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
 
         # Execute first swap: base_token -> quote_token in buy_pool
-        maximum_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
+        maximum_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         first_swap_result = await self._post_execute_swap(
             buy_pool,
@@ -366,7 +367,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             trade_amount,
             TradeType.SELL,  # Selling base_token to buy quote_token
-            Decimal(str(maximum_slippage_percentage)),
+            maximum_slippage_percentage
         )
 
         if not first_swap_result or "signature" not in first_swap_result:
@@ -376,7 +377,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self.logger().info(f"First swap completed with transaction signature: {first_swap_result['signature']}")
 
         # Wait for transaction to be confirmed
-        await asyncio.sleep(2)
+        await asyncio.sleep(configuration["globals"].get("transaction_confirmation_delay"))
 
         # Get quote_token balance after first swap
         quote_token_balance = await self._get_total_token_balance_from_all_wallets(quote_token)
@@ -392,7 +393,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_token,
             quote_token_balance,
             TradeType.SELL,  # Selling quote_token to get back base_token
-            Decimal(str(maximum_slippage_percentage)),
+            maximum_slippage_percentage,
         )
 
         if not second_swap_result or "signature" not in second_swap_result:
@@ -402,12 +403,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self.logger().info(f"Second swap completed with transaction signature: {second_swap_result['signature']}")
 
         # Wait for transaction to be confirmed
-        await asyncio.sleep(2)
+        await asyncio.sleep(configuration["globals"].get("transaction_confirmation_delay"))
 
         # Calculate actual profit
         final_base_quote_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
-        actual_profit = final_base_quote_token_balance - initial_base_quote_token_balance
-        actual_profit_percentage = (actual_profit / initial_base_quote_token_balance) * 100
+        actual_profit = final_base_quote_token_balance - initial_base_token_balance
+        actual_profit_percentage = (actual_profit / initial_base_token_balance) * 100
 
         # Record trade result in execution history
         trade_result = {
@@ -416,7 +417,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             "quote_token": quote_token,
             "buy_pool": buy_pool["address"],
             "sell_pool": sell_pool["address"],
-            "initial_amount": initial_base_quote_token_balance,
+            "initial_amount": initial_base_token_balance,
             "final_amount": final_base_quote_token_balance,
             "profit": actual_profit,
             "profit_percentage": actual_profit_percentage,
