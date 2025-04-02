@@ -21,6 +21,7 @@ configuration: Dict[str, Any] = {
         "minimum_profitability_percentage": "1",  # 1 means 1%, or 0.01, in the code
         "arbitrage_check_interval_seconds": "30",  # Time between arbitrage checks
         "minimum_trade_amount": "10",  # Minimum amount to consider for a trade
+        "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
     },
     "connections": {
         "polkadot": {
@@ -176,7 +177,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Check if it's time to run arbitrage check
         current_time = time.time()
-        arbitrage_check_interval = float(configuration["globals"].get("arbitrage_check_interval_seconds", 30))
+        arbitrage_check_interval = float(configuration["globals"].get("arbitrage_check_interval_seconds"))
 
         if current_time - self.last_arbitrage_check_time >= arbitrage_check_interval:
             self.last_arbitrage_check_time = current_time
@@ -193,7 +194,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 await self._execute_arbitrage(opportunity)
 
                 # Add a short delay between trades to prevent transaction collisions
-                await asyncio.sleep(1)
+                await asyncio.sleep(configuration["globals"].get("time_delay_between_arbitrages"))
 
     async def _find_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
         """Find arbitrage opportunities across pools and tokens"""
@@ -203,18 +204,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         tokens = configuration["tokens"]
 
         # Minimum profit percentage required for arbitrage
-        minimum_profitability_percentage = float(configuration["globals"].get("minimum_profitability_percentage", 1))
+        minimum_profitability_percentage = float(configuration["globals"].get("minimum_profitability_percentage"))
 
         # Iterate through all token pairs and pool combinations
         for i, base_token in enumerate(tokens):
-            for quote_token in tokens[(i + 1):]:
+            for quote_token in tokens[(i + 1) :]:
                 # Find pools that contain both tokens
                 # TODO Add a hashtable with the pools to have a immediate access to the pools with the same tokens!!!
                 relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
                 for i, pool_1 in enumerate(relevant_pools):
-                    for pool_2 in relevant_pools[(i + 1):]:
+                    for pool_2 in relevant_pools[(i + 1) :]:
                         # Calculate price difference between the two pools
                         price_difference_percentage = await self._calculate_price_difference_percentage(
                             base_token, quote_token, pool_1, pool_2
@@ -323,7 +324,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         opportunity["expected_profit_percentage"] = expected_profit_percentage
 
         # Validate that the opportunity is still profitable after slippage
-        min_profit_percentage = float(configuration["globals"].get("minimum_profitability_percentage", 1))
+        min_profit_percentage = float(configuration["globals"].get("minimum_profitability_percentage"))
         if expected_profit_percentage < min_profit_percentage:
             self.logger().info(
                 f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_percentage:.2f}% < {min_profit_percentage}%"
@@ -1242,11 +1243,15 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Get recent arbitrage opportunities
         opportunities = database.get("arbitrage_opportunities", [])
-        recent_opportunities = [op for op in opportunities if time.time() - op.get("timestamp", 0) < 3600]  # Last hour
+        recent_opportunities = [
+            opportunity for opportunity in opportunities if time.time() - opportunity.get("timestamp", 0) < 3600
+        ]  # Last hour
 
         # Get recent executions
         executions = database.get("execution_history", [])
-        recent_executions = [ex for ex in executions if time.time() - ex.get("timestamp", 0) < 3600]  # Last hour
+        recent_executions = [
+            execution for execution in executions if time.time() - execution.get("timestamp", 0) < 3600
+        ]  # Last hour
 
         # Calculate profit statistics
         total_profit = sum(ex.get("profit", 0) for ex in executions)
