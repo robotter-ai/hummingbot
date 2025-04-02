@@ -268,8 +268,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         base_quote_token_balance = await self._get_quote_token_balance(base_token)
 
         # Check if we have enough balance for the trade
-        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
-        if base_quote_token_balance < min_trade_amount:
+        minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
+        if base_quote_token_balance < minimum_trade_amount:
             self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_quote_token_balance}")
             return False
 
@@ -613,7 +613,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         token_symbol
                     ] = {
                         "balance": 0,  # TODO fix this info!!!
-                        "price": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
+                        "price": {
+                            f"{pool_address}": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
+                        },
                     }
 
         return database
@@ -663,9 +665,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     ) -> Optional[float]:
         """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
-        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
+        minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
 
-        quote = await self._get_quote_swap(pool, base_token, quote_token, str(min_trade_amount), "SELL", "0.5")
+        quote = await self._get_quote_swap(pool, base_token, quote_token, str(minimum_trade_amount), "SELL", "0.5")
 
         if not quote or "expectedOut" not in quote:
             return None
@@ -673,7 +675,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         expected_out = float(quote["expectedOut"])
 
         # Calculate price: how much quote_token you get for 1 base_token
-        price = expected_out / min_trade_amount
+        price = expected_out / minimum_trade_amount
 
         return price
 
@@ -684,11 +686,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # buy_pool = opportunity["buy_pool"]
 
         # Start with a small test amount
-        min_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
+        minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
 
         # Try different trade amounts to find the optimal one
         test_amounts = [
-            min_trade_amount,
+            minimum_trade_amount,
             max_available * 0.1,
             max_available * 0.25,
             max_available * 0.5,
@@ -817,20 +819,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """Get token balance across all wallets"""
         total_balance = 0
 
-        all_gateway_connections = GatewayConnectionSetting.load()
+        for chain_name, chain in configuration["connections"].items():
+            for network_name, network in chain.items():
+                for _, connector in network.items():
+                    for wallet_address in connector["wallets"].keys():
+                        quote_token_balances = await self._post_chain_balances(
+                            chain_name, network_name, wallet_address, [token_symbol]
+                        )
 
-        for connection in all_gateway_connections:
-            chain = connection.get("chain")
-            network = connection.get("network")
-            wallet_address = connection.get("wallet_address")
-
-            if not all([chain, network, wallet_address]):
-                continue
-
-            quote_token_balances = await self._post_chain_balances(chain, network, wallet_address, [token_symbol])
-
-            if quote_token_balances and "balances" in quote_token_balances:
-                total_balance += float(quote_token_balances["balances"].get(token_symbol, 0))
+                        if quote_token_balances and "balances" in quote_token_balances:
+                            total_balance += float(quote_token_balances["balances"].get(token_symbol, 0))
 
         return total_balance
 
