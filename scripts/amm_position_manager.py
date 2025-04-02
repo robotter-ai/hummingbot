@@ -17,11 +17,11 @@ from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
 configuration: Dict[str, Any] = {
     "globals": {
-        "maximum_slippage_percentage": "0.5",  # 1 means 1%, or 0.01, in the code
-        "minimum_profitability_percentage": "1",  # 1 means 1%, or 0.01, in the code
-        "arbitrage_check_interval_seconds": "30",  # Time between arbitrage checks
-        "minimum_trade_amount": "10",  # Minimum amount to consider for a trade
-        "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
+        "maximum_slippage_percentage": Decimal("0.5"),  # 0.5 means 0.5%, or 0.005, in the code
+        "minimum_profitability_percentage": Decimal("1"),  # 1 means 1%, or 0.01, in the code
+        "arbitrage_check_interval_seconds": Decimal("30"),  # Time between arbitrage checks
+        "minimum_trade_amount": Decimal("10"),  # Minimum amount to consider for a trade
+        "time_delay_between_arbitrages": Decimal("1"),  # Time delay between arbitrage trades
     },
     "connections": {
         "polkadot": {
@@ -207,14 +207,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         minimum_profitability_percentage = float(configuration["globals"].get("minimum_profitability_percentage"))
 
         # Iterate through all token pairs and pool combinations
-        for i, base_token in enumerate(tokens): # TODO change the i variable for another thing!!!
-            for quote_token in tokens[(i + 1) :]: # TODO remove the slide [..:] from here, use a variable index too!!!
+        for i, base_token in enumerate(tokens):  # TODO change the i variable for another thing!!!
+            for quote_token in tokens[(i + 1) :]:  # TODO remove the slide [..:] from here, use a variable index too!!!
                 # Find pools that contain both tokens
                 relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
-                for i, pool_1 in enumerate(relevant_pools): # TODO change the i variable for another thing!!!
-                    for pool_2 in relevant_pools[(i + 1) :]: # TODO remove the slide [..:] from here, use a variable index too!!!
+                for i, pool_1 in enumerate(relevant_pools):  # TODO change the i variable for another thing!!!
+                    for pool_2 in relevant_pools[
+                        (i + 1) :
+                    ]:  # TODO remove the slide [..:] from here, use a variable index too!!!
                         # Calculate price difference between the two pools
                         price_difference_percentage = await self._calculate_price_difference_percentage(
                             base_token, quote_token, pool_1, pool_2
@@ -262,7 +264,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         base_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
 
         # Check if we have enough balance for the trade
-        minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
+        minimum_trade_amount = configuration["globals"].get("minimum_trade_amount")
         if base_token_balance < minimum_trade_amount:
             self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_token_balance}")
             return False
@@ -270,12 +272,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Calculate optimal trade amount (considering slippage)
         trade_amount = await self._calculate_optimal_trade_amount(opportunity, base_token_balance)
 
-        if not trade_amount or trade_amount <= 0:
-            self.logger().info("Optimal trade amount calculation resulted in an invalid,or a non positive amount")
+        if not trade_amount or trade_amount <= Decimal("0"):
+            self.logger().info("Optimal trade amount calculation resulted in an invalid or non-positive amount")
             return False
 
         # Check slippage for both trades
-        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
+        max_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         # Get quote for buying quote_token with base_token in buy_pool
         buy_quote = await self._get_quote_swap(
@@ -284,14 +286,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             str(trade_amount),
             TradeType.SELL,  # Selling base_token to buy quote_token
-            str(max_slippage_percentage),
+            max_slippage_percentage,
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
             self.logger().info(f"Failed to get buy quote for {base_token}/{quote_token} in pool {buy_pool['address']}")
             return False
 
-        expected_quote_token = float(buy_quote["expectedOut"])
+        expected_quote_token = Decimal(str(buy_quote["expectedOut"]))
 
         # Get quote for selling quote_token for base_token in sell_pool
         sell_quote = await self._get_quote_swap(
@@ -300,7 +302,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_token,
             str(expected_quote_token),
             TradeType.SELL,  # Selling quote_token to get back base_token
-            str(max_slippage_percentage),
+            max_slippage_percentage,
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
@@ -309,11 +311,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             )
             return False
 
-        expected_base_token_return = float(sell_quote["expectedOut"])
+        expected_base_token_return = Decimal(str(sell_quote["expectedOut"]))
 
         # Calculate expected profit
         expected_profit = expected_base_token_return - trade_amount
-        expected_profit_percentage = (expected_profit / trade_amount) * 100
+        expected_profit_percentage = (expected_profit / trade_amount) * Decimal("100")
 
         # Add profit details to the opportunity
         opportunity["trade_amount"] = trade_amount
@@ -323,7 +325,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         opportunity["expected_profit_percentage"] = expected_profit_percentage
 
         # Validate that the opportunity is still profitable after slippage
-        min_profit_percentage = float(configuration["globals"].get("minimum_profitability_percentage"))
+        min_profit_percentage = configuration["globals"].get("minimum_profitability_percentage")
         if expected_profit_percentage < min_profit_percentage:
             self.logger().info(
                 f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_percentage:.2f}% < {min_profit_percentage}%"
@@ -364,7 +366,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             str(trade_amount),
             TradeType.SELL,  # Selling base_token to buy quote_token
-            str(max_slippage_percentage),
+            Decimal(str(max_slippage_percentage)),
         )
 
         if not first_swap_result or "signature" not in first_swap_result:
@@ -390,7 +392,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             base_token,
             str(quote_token_balance),
             TradeType.SELL,  # Selling quote_token to get back base_token
-            str(max_slippage_percentage),
+            Decimal(str(max_slippage_percentage)),
         )
 
         if not second_swap_result or "signature" not in second_swap_result:
@@ -616,12 +618,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _calculate_price_difference_percentage(
         self, base_token: str, quote_token: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
-    ) -> float | None:
+    ) -> Optional[Decimal]:
         """
         Calculate price difference between two pools for a token pair
 
         Returns:
-            float: Price difference as a decimal (0.01 = 1%)
+            Decimal: Price difference as a decimal (0.01 = 1%)
         """
         # Get price of quote_token in terms of base_token in pool_1
         price_1 = await self._get_token_price_in_pool(base_token, quote_token, pool_1)
@@ -631,36 +633,32 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         if price_1 is None:
             self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_1['address']}")
-
             return None
 
         if price_2 is None:
             self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_2['address']}")
-
             return None
 
-        if price_1 == 0:
+        if price_1 == Decimal("0"):
             self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_1['address']} is 0")
-
             return None
 
-        if price_2 == 0:
+        if price_2 == Decimal("0"):
             self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_2['address']} is 0")
-
             return None
 
         # Calculate price difference
-        price_difference = 100 * ((price_2 - price_1) / price_1)
+        price_difference = Decimal("100") * ((price_2 - price_1) / price_1)
 
         return price_difference
 
     async def _get_token_price_in_pool(
         self, base_token: str, quote_token: str, pool: Dict[str, Any]
-    ) -> Optional[float]:
+    ) -> Optional[Decimal]:
         """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
-        minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
-        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
+        minimum_trade_amount = configuration["globals"].get("minimum_trade_amount")
+        max_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         quote = await self._get_quote_swap(
             pool, base_token, quote_token, str(minimum_trade_amount), TradeType.SELL, max_slippage_percentage
@@ -669,42 +667,36 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not quote or "expectedOut" not in quote:
             return None
 
-        expected_out = float(quote["expectedOut"])
+        expected_out = Decimal(str(quote["expectedOut"]))
 
         # Calculate price: how much quote_token you get for 1 base_token
         price = expected_out / minimum_trade_amount
 
         return price
 
-    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: float) -> float:
+    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: Decimal) -> Decimal:
         """Calculate the optimal amount to trade based on slippage considerations"""
-        # base_token = opportunity["base_token"]
-        # quote_token = opportunity["quote_token"]
-        # buy_pool = opportunity["buy_pool"]
+        minimum_trade_amount = configuration["globals"].get("minimum_trade_amount")
 
-        # Start with a small test amount
-        minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
-
-        # TODO what's this?!!!
         # Try different trade amounts to find the optimal one
         test_amounts = [
             minimum_trade_amount,
-            max_available * 0.1,
-            max_available * 0.25,
-            max_available * 0.5,
-            max_available * 0.75,
+            max_available * Decimal("0.1"),
+            max_available * Decimal("0.25"),
+            max_available * Decimal("0.5"),
+            max_available * Decimal("0.75"),
             max_available,
         ]
 
-        best_amount = 0
-        best_profit_percentage = 0
+        best_amount = Decimal("0")
+        best_profit_percentage = Decimal("0")
 
         for amount in test_amounts:
             if amount > max_available:
                 continue
 
             # Skip amounts that are too close to previously tested ones
-            if best_amount > 0 and abs(amount - best_amount) / best_amount < 0.1:
+            if best_amount > Decimal("0") and abs(amount - best_amount) / best_amount < Decimal("0.1"):
                 continue
 
             profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
@@ -715,38 +707,38 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return best_amount
 
-    async def _simulate_arbitrage_profit(self, opportunity: Dict[str, Any], trade_amount: float) -> float:
+    async def _simulate_arbitrage_profit(self, opportunity: Dict[str, Any], trade_amount: Decimal) -> Decimal:
         """Simulate an arbitrage trade to calculate expected profit percentage"""
         base_token = opportunity["base_token"]
         quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
 
-        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
+        max_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         # Simulate first swap: base_token -> quote_token in buy_pool
         buy_quote = await self._get_quote_swap(
-            buy_pool, base_token, quote_token, str(trade_amount), TradeType.SELL, str(max_slippage_percentage)
+            buy_pool, base_token, quote_token, str(trade_amount), TradeType.SELL, max_slippage_percentage
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
-            return 0
+            return Decimal("0")
 
-        expected_quote_token = float(buy_quote["expectedOut"])
+        expected_quote_token = Decimal(str(buy_quote["expectedOut"]))
 
         # Simulate second swap: quote_token -> base_token in sell_pool
         sell_quote = await self._get_quote_swap(
-            sell_pool, quote_token, base_token, str(expected_quote_token), TradeType.SELL, str(max_slippage_percentage)
+            sell_pool, quote_token, base_token, str(expected_quote_token), TradeType.SELL, max_slippage_percentage
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
-            return 0
+            return Decimal("0")
 
-        expected_base_token_return = float(sell_quote["expectedOut"])
+        expected_base_token_return = Decimal(str(sell_quote["expectedOut"]))
 
         # Calculate expected profit percentage
         expected_profit = expected_base_token_return - trade_amount
-        expected_profit_percentage = (expected_profit / trade_amount) * 100
+        expected_profit_percentage = (expected_profit / trade_amount) * Decimal("100")
 
         return expected_profit_percentage
 
@@ -814,9 +806,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return None
 
-    async def _get_total_token_balance_from_all_wallets(self, token_symbol: str) -> float:
+    async def _get_total_token_balance_from_all_wallets(self, token_symbol: str) -> Decimal:
         """Get token balance across all wallets"""
-        total_balance = 0
+        total_balance = Decimal("0")
 
         for chain_name, chain in configuration["connections"].items():
             for network_name, network in chain.items():
@@ -827,7 +819,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         )
 
                         if balances and "balances" in balances:
-                            total_balance += float(balances["balances"].get(token_symbol, 0))
+                            total_balance += Decimal(str(balances["balances"].get(token_symbol, "0")))
 
         return total_balance
 
@@ -958,7 +950,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         quote_token: str,
         amount: str,
         side: TradeType,
-        slippage_percentage: str,
+        slippage_percentage: Decimal,
     ):
         """
         Get a quote for swapping tokens in a pool.
@@ -969,7 +961,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token: Symbol of the quote token
             amount: Amount to swap
             side: Trade side (BUY or SELL)
-            slippage_percentage: Maximum acceptable slippage as a percentage
+            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal('0.5') for 0.5%)
 
         Returns:
             Dictionary containing swap quote information
@@ -988,7 +980,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_asset=quote_token,
             amount=Decimal(amount),
             side=side,
-            slippage_percentage=Decimal(slippage_percentage) if slippage_percentage else None,
+            slippage_percentage=slippage_percentage,
             pool_address=pool_address,
         )
 
@@ -1030,7 +1022,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         quote_token: str,
         amount: str,
         side: TradeType,
-        slippage_percentage: str,
+        slippage_percentage: Decimal,
     ):
         """
         Execute a token swap in the specified pool.
@@ -1041,7 +1033,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token: Symbol of the quote token
             amount: Amount to swap
             side: Trade side (BUY or SELL)
-            slippage_percentage: Maximum acceptable slippage as a percentage
+            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal('0.5') for 0.5%)
 
         Returns:
             Dictionary containing swap execution result
@@ -1062,7 +1054,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_asset=quote_token,
             side=side,
             amount=Decimal(amount),
-            slippage_percentage=Decimal(slippage_percentage) if slippage_percentage else None,
+            slippage_percentage=slippage_percentage,
             pool_address=pool_address,
         )
 
@@ -1254,7 +1246,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         ]  # Last hour
 
         # Calculate profit statistics
-        total_profit = sum(ex.get("profit", 0) for ex in executions)
+        total_profit = sum(Decimal(str(ex.get("profit", "0"))) for ex in executions)
 
         # Format status message
         status = []
@@ -1268,8 +1260,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             status.append("\nRecent Trades:")
             for ex in recent_executions[-5:]:  # Show last 5 trades
                 token = ex.get("base_token", "")
-                profit = ex.get("profit", 0)
-                profit_percentage = ex.get("profit_percentage", 0)
+                profit = Decimal(str(ex.get("profit", "0")))
+                profit_percentage = Decimal(str(ex.get("profit_percentage", "0")))
                 status.append(f"  {token}: {profit:.4f} ({profit_percentage:.2f}%)")
 
         return "\n".join(status)
