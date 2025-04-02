@@ -265,23 +265,23 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         sell_pool = opportunity["sell_pool"]
 
         # Get token balances
-        base_quote_token_balance = await self._get_quote_token_balance(base_token)
+        base_token_balance = await self._get_quote_token_balance(base_token)
 
         # Check if we have enough balance for the trade
         minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
-        if base_quote_token_balance < minimum_trade_amount:
-            self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_quote_token_balance}")
+        if base_token_balance < minimum_trade_amount:
+            self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_token_balance}")
             return False
 
         # Calculate optimal trade amount (considering slippage)
-        trade_amount = await self._calculate_optimal_trade_amount(opportunity, base_quote_token_balance)
+        trade_amount = await self._calculate_optimal_trade_amount(opportunity, base_token_balance)
 
         if trade_amount <= 0:
             self.logger().info("Optimal trade amount calculation resulted in zero or negative amount")
             return False
 
         # Check slippage for both trades
-        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
+        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
 
         # Get quote for buying quote_token with base_token in buy_pool
         buy_quote = await self._get_quote_swap(
@@ -362,7 +362,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         initial_base_quote_token_balance = await self._get_quote_token_balance(base_token)
 
         # Execute first swap: base_token -> quote_token in buy_pool
-        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
+        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
 
         first_swap_result = await self._post_execute_swap(
             buy_pool,
@@ -666,8 +666,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
         minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
+        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
 
-        quote = await self._get_quote_swap(pool, base_token, quote_token, str(minimum_trade_amount), "SELL", "0.5")
+        quote = await self._get_quote_swap(
+            pool, base_token, quote_token, str(minimum_trade_amount), "SELL", max_slippage_percentage
+        )
 
         if not quote or "expectedOut" not in quote:
             return None
@@ -688,6 +691,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Start with a small test amount
         minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
 
+        # TODO what's this?!!!
         # Try different trade amounts to find the optimal one
         test_amounts = [
             minimum_trade_amount,
@@ -724,7 +728,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
 
-        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage", 0.5))
+        max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
 
         # Simulate first swap: base_token -> quote_token in buy_pool
         buy_quote = await self._get_quote_swap(
@@ -959,7 +963,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         quote_token: str,
         amount: str,
         side: str,
-        slippage_percentage: str = "0.5",
+        slippage_percentage: str,
     ):
         """
         Get a quote for swapping tokens in a pool.
@@ -1033,7 +1037,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         quote_token: str,
         amount: str,
         side: str,
-        slippage_percentage: str = "0.5",
+        slippage_percentage: str,
     ):
         """
         Execute a token swap in the specified pool.
@@ -1072,7 +1076,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         )
 
     async def _post_add_liquidity(
-        self, pool: Dict[str, Any], base_token_amount: str, quote_token_amount: str, slippage_percentage: str = "0.5"
+        self, pool: Dict[str, Any], base_token_amount: str, quote_token_amount: str, slippage_percentage: str
     ):
         """
         Add liquidity to the specified pool.
