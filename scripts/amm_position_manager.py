@@ -30,7 +30,7 @@ configuration: Dict[str, Any] = {
                         "5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt",
                     ],
                     "pools": [
-                        # "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
+                        "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
                         # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
                         # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
                         # "<pool_address>",  # LBP pool
@@ -206,21 +206,15 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         minimum_profitability_percentage = float(configuration["globals"].get("minimum_profitability_percentage", 1))
 
         # Iterate through all token pairs and pool combinations
-        for base_token in tokens:
-            for quote_token in tokens:  # TODO change these loops to enumerate to avoid a/b and b/a!!!
-                if base_token == quote_token:
-                    continue
-
+        for i, base_token in enumerate(tokens):
+            for quote_token in tokens[i + 1:]:
                 # Find pools that contain both tokens
                 # TODO Add a hashtable with the pools to have a immediate access to the pools with the same tokens!!!
                 relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
-                for pool_1 in relevant_pools:
-                    for pool_2 in relevant_pools:  # TODO change these loops to enumerate to avoid a/b and b/a!!!
-                        if pool_1["address"] == pool_2["address"]:
-                            continue
-
+                for i, pool_1 in enumerate(relevant_pools):
+                    for pool_2 in relevant_pools[i + 1:]:
                         # Calculate price difference between the two pools
                         price_difference_percentage = await self._calculate_price_difference_percentage(
                             base_token, quote_token, pool_1, pool_2
