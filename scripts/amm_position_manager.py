@@ -620,7 +620,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _calculate_price_difference_percentage(
         self, base_token: str, quote_token: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
-    ) -> float:
+    ) -> float | None:
         """
         Calculate price difference between two pools for a token pair
 
