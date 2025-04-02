@@ -259,7 +259,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         sell_pool = opportunity["sell_pool"]
 
         # Get token balances
-        base_token_balance = await self._get_quote_token_balance(base_token)
+        base_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
 
         # Check if we have enough balance for the trade
         minimum_trade_amount = float(configuration["globals"].get("minimum_trade_amount"))
@@ -270,8 +270,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Calculate optimal trade amount (considering slippage)
         trade_amount = await self._calculate_optimal_trade_amount(opportunity, base_token_balance)
 
-        if trade_amount <= 0:
-            self.logger().info("Optimal trade amount calculation resulted in zero or negative amount")
+        if not trade_amount or trade_amount <= 0:
+            self.logger().info("Optimal trade amount calculation resulted in an invalid,or a non positive amount")
             return False
 
         # Check slippage for both trades
@@ -353,7 +353,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             return False
 
         # Record initial balance
-        initial_base_quote_token_balance = await self._get_quote_token_balance(base_token)
+        initial_base_quote_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
 
         # Execute first swap: base_token -> quote_token in buy_pool
         max_slippage_percentage = float(configuration["globals"].get("maximum_slippage_percentage"))
@@ -377,7 +377,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         await asyncio.sleep(2)
 
         # Get quote_token balance after first swap
-        quote_token_balance = await self._get_quote_token_balance(quote_token)
+        quote_token_balance = await self._get_total_token_balance_from_all_wallets(quote_token)
 
         # Execute second swap: quote_token -> base_token in sell_pool
         self.logger().info(
@@ -403,7 +403,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         await asyncio.sleep(2)
 
         # Calculate actual profit
-        final_base_quote_token_balance = await self._get_quote_token_balance(base_token)
+        final_base_quote_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
         actual_profit = final_base_quote_token_balance - initial_base_quote_token_balance
         actual_profit_percentage = (actual_profit / initial_base_quote_token_balance) * 100
 
@@ -814,7 +814,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return None
 
-    async def _get_quote_token_balance(self, token_symbol: str) -> float:
+    async def _get_total_token_balance_from_all_wallets(self, token_symbol: str) -> float:
         """Get token balance across all wallets"""
         total_balance = 0
 
@@ -822,12 +822,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             for network_name, network in chain.items():
                 for _, connector in network.items():
                     for wallet_address in connector["wallets"].keys():
-                        quote_token_balances = await self._post_chain_balances(
+                        balances = await self._post_chain_balances(
                             chain_name, network_name, wallet_address, [token_symbol]
                         )
 
-                        if quote_token_balances and "balances" in quote_token_balances:
-                            total_balance += float(quote_token_balances["balances"].get(token_symbol, 0))
+                        if balances and "balances" in balances:
+                            total_balance += float(balances["balances"].get(token_symbol, 0))
 
         return total_balance
 
