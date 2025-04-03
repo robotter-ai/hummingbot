@@ -369,7 +369,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         return True
 
     async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
-        """Execute an arbitrage trade"""
+        """Execute an arbitrage trade for each available wallet"""
         base_token = opportunity["base_token"]
         quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
@@ -377,97 +377,159 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         trade_amount = opportunity["trade_amount"]
 
         self.logger().info(f"Executing arbitrage trade: {base_token}/{quote_token}")
-        self.logger().info(f"Step 1: Swap {trade_amount} {base_token} for {quote_token} in pool {buy_pool['address']}")
 
-        # Get wallet information
-        # TODO Improve the code to correctly handle cases where the pool is available in different wallets!!!
-        wallet_address = self._get_wallet_address_for_pool(buy_pool)
-        if not wallet_address:
+        # Get wallet information for buy pool
+        wallet_addresses = self._get_wallet_addresses_for_pool(buy_pool)
+        if not wallet_addresses:
             self.logger().error(f"No wallet address found for pool {buy_pool['address']}")
             return False
 
-        # Record initial balance
-        initial_base_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
+        # Convert to list if it's a single address
+        if not isinstance(wallet_addresses, list):
+            wallet_addresses = [wallet_addresses]
 
-        # Execute first swap: base_token -> quote_token in buy_pool
+        if len(wallet_addresses) == 0:
+            self.logger().error(f"Empty wallet list for pool {buy_pool['address']}")
+            return False
+
+        # Track overall success
+        overall_success = False
         maximum_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
-        first_swap_result = await self._post_execute_swap(
-            buy_pool,
-            base_token,
-            quote_token,
-            trade_amount,
-            TradeType.SELL,  # Selling base_token to buy quote_token
-            maximum_slippage_percentage,
-        )
+        # Execute trades for each wallet
+        for wallet_address in wallet_addresses:
+            self.logger().info(f"Attempting arbitrage with wallet: {wallet_address}")
 
-        if not first_swap_result or "signature" not in first_swap_result:
-            self.logger().error(f"First swap failed: {base_token} -> {quote_token}")
-            return False
+            try:
+                # Record initial balance for this wallet
+                initial_wallet_balances = await self._post_chain_balances(
+                    buy_pool.get("chain"), buy_pool.get("network"), wallet_address, [base_token]
+                )
 
-        self.logger().info(f"First swap completed with transaction signature: {first_swap_result['signature']}")
+                if not initial_wallet_balances or "balances" not in initial_wallet_balances:
+                    self.logger().error(f"Failed to get initial balance for wallet {wallet_address}")
+                    continue
 
-        # Wait for transaction to be confirmed
-        await asyncio.sleep(configuration["globals"].get("transaction_confirmation_delay"))
+                initial_base_token_balance = Decimal(str(initial_wallet_balances["balances"].get(base_token, 0)))
 
-        # Get quote_token balance after first swap
-        quote_token_balance = await self._get_total_token_balance_from_all_wallets(quote_token)
+                # Check if wallet has sufficient balance
+                if initial_base_token_balance < trade_amount:
+                    self.logger().info(
+                        f"Wallet {wallet_address} has insufficient balance: {initial_base_token_balance} {base_token}"
+                    )
+                    continue
 
-        # Execute second swap: quote_token -> base_token in sell_pool
-        self.logger().info(
-            f"Step 2: Swap {quote_token_balance} {quote_token} back to {base_token} in pool {sell_pool['address']}"
-        )
+                self.logger().info(
+                    f"Step 1: Swap {trade_amount} {base_token} for {quote_token} in pool {buy_pool['address']}"
+                )
 
-        second_swap_result = await self._post_execute_swap(
-            sell_pool,
-            quote_token,
-            base_token,
-            quote_token_balance,
-            TradeType.SELL,  # Selling quote_token to get back base_token
-            maximum_slippage_percentage,
-        )
+                # Execute first swap: base_token -> quote_token in buy_pool
+                first_swap_result = await self._post_execute_swap(
+                    pool=buy_pool,
+                    wallet_address=wallet_address,
+                    base_token=base_token,
+                    quote_token=quote_token,
+                    amount=trade_amount,
+                    side=TradeType.SELL,  # Selling base_token to buy quote_token
+                    slippage_percentage=maximum_slippage_percentage,
+                )
 
-        if not second_swap_result or "signature" not in second_swap_result:
-            self.logger().error(f"Second swap failed: {quote_token} -> {base_token}")
-            return False
+                if not first_swap_result or "signature" not in first_swap_result:
+                    self.logger().error(f"First swap failed for wallet {wallet_address}: {base_token} -> {quote_token}")
+                    continue
 
-        self.logger().info(f"Second swap completed with transaction signature: {second_swap_result['signature']}")
+                self.logger().info(f"First swap completed with transaction signature: {first_swap_result['signature']}")
 
-        # Wait for transaction to be confirmed
-        await asyncio.sleep(configuration["globals"].get("transaction_confirmation_delay"))
+                # Wait for transaction to be confirmed
+                await asyncio.sleep(configuration["globals"].get("transaction_confirmation_delay"))
 
-        # Calculate actual profit
-        final_base_quote_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
-        actual_profit = final_base_quote_token_balance - initial_base_token_balance
-        actual_profit_percentage = (actual_profit / initial_base_token_balance) * 100
+                # Get quote_token balance after first swap
+                updated_wallet_balances = await self._post_chain_balances(
+                    buy_pool.get("chain"), buy_pool.get("network"), wallet_address, [quote_token]
+                )
 
-        # Record trade result in execution history
-        trade_result = {
-            "timestamp": time.time(),
-            "base_token": base_token,
-            "quote_token": quote_token,
-            "buy_pool": buy_pool["address"],
-            "sell_pool": sell_pool["address"],
-            "initial_amount": initial_base_token_balance,
-            "final_amount": final_base_quote_token_balance,
-            "profit": actual_profit,
-            "profit_percentage": actual_profit_percentage,
-            "first_swap_tx": first_swap_result["signature"],
-            "second_swap_tx": second_swap_result["signature"],
-        }
+                if not updated_wallet_balances or "balances" not in updated_wallet_balances:
+                    self.logger().error(f"Failed to get updated balance for wallet {wallet_address}")
+                    continue
 
-        database["execution_history"].append(trade_result)
+                quote_token_balance = Decimal(str(updated_wallet_balances["balances"].get(quote_token, 0)))
 
-        if actual_profit > 0:
-            self.logger().info(
-                f"Arbitrage trade successful! Profit: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
-            )
-        else:
-            self.logger().warning(
-                f"Arbitrage trade completed with loss: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
-            )
+                # Execute second swap: quote_token -> base_token in sell_pool
+                self.logger().info(
+                    f"Step 2: Swap {quote_token_balance} {quote_token} back to {base_token} in pool {sell_pool['address']}"
+                )
 
-        return actual_profit > 0
+                second_swap_result = await self._post_execute_swap(
+                    pool=sell_pool,
+                    wallet_address=wallet_address,
+                    base_token=quote_token,
+                    quote_token=base_token,
+                    amount=quote_token_balance,
+                    side=TradeType.SELL,  # Selling quote_token to get back base_token
+                    slippage_percentage=maximum_slippage_percentage,
+                )
+
+                if not second_swap_result or "signature" not in second_swap_result:
+                    self.logger().error(
+                        f"Second swap failed for wallet {wallet_address}: {quote_token} -> {base_token}"
+                    )
+                    continue
+
+                self.logger().info(
+                    f"Second swap completed with transaction signature: {second_swap_result['signature']}"
+                )
+
+                # Wait for transaction to be confirmed
+                await asyncio.sleep(configuration["globals"].get("transaction_confirmation_delay"))
+
+                # Calculate actual profit
+                final_wallet_balances = await self._post_chain_balances(
+                    buy_pool.get("chain"), buy_pool.get("network"), wallet_address, [base_token]
+                )
+
+                if not final_wallet_balances or "balances" not in final_wallet_balances:
+                    self.logger().error(f"Failed to get final balance for wallet {wallet_address}")
+                    continue
+
+                final_base_token_balance = Decimal(str(final_wallet_balances["balances"].get(base_token, 0)))
+                actual_profit = final_base_token_balance - initial_base_token_balance
+                actual_profit_percentage = (
+                    (actual_profit / initial_base_token_balance) * 100 if initial_base_token_balance > 0 else 0
+                )
+
+                # Record trade result in execution history
+                trade_result = {
+                    "timestamp": time.time(),
+                    "wallet_address": wallet_address,
+                    "base_token": base_token,
+                    "quote_token": quote_token,
+                    "buy_pool": buy_pool["address"],
+                    "sell_pool": sell_pool["address"],
+                    "initial_amount": initial_base_token_balance,
+                    "final_amount": final_base_token_balance,
+                    "profit": actual_profit,
+                    "profit_percentage": actual_profit_percentage,
+                    "first_swap_tx": first_swap_result["signature"],
+                    "second_swap_tx": second_swap_result["signature"],
+                }
+
+                database["execution_history"].append(trade_result)
+
+                if actual_profit > 0:
+                    self.logger().info(
+                        f"Arbitrage trade successful for wallet {wallet_address}! Profit: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
+                    )
+                    overall_success = True
+                else:
+                    self.logger().warning(
+                        f"Arbitrage trade completed with loss for wallet {wallet_address}: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
+                    )
+
+            except Exception as e:
+                self.logger().error(f"Error executing arbitrage for wallet {wallet_address}: {str(e)}")
+                continue
+
+        return overall_success
 
     async def _update_database(self):
         """Update the database with latest information"""
@@ -875,7 +937,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return matching_pools
 
-    def _get_wallet_address_for_pool(self, pool: Dict[str, Any]) -> Optional[str]:
+    def _get_wallet_addresses_for_pool(self, pool: Dict[str, Any]) -> Optional[str]:
         """Get a wallet address that can be used for a specific pool"""
         chain = pool.get("chain")
         network = pool.get("network")
@@ -1110,6 +1172,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     async def _post_execute_swap(
         self,
         pool: Dict[str, Any],
+        wallet_address: str,
         base_token: str,
         quote_token: str,
         amount: Decimal,
@@ -1133,7 +1196,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         network = pool.get("network")
         connector = pool.get("connector")
         pool_address = pool.get("pool_address")
-        wallet_address = pool.get("wallet_address")
 
         if not all([network, connector, pool_address, wallet_address]):
             return None
