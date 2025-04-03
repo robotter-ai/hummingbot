@@ -261,7 +261,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 await self._execute_arbitrage(opportunity)
 
                 # Add a short delay between trades to prevent transaction collisions
-                await asyncio.sleep(self._time_delay_between_arbitrages)
+                await asyncio.sleep(float(self._time_delay_between_arbitrages))
 
     async def _find_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
         """Find arbitrage opportunities across pools and tokens"""
@@ -479,7 +479,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 self.logger().info(f"First swap completed with transaction signature: {first_swap_result['signature']}")
 
                 # Wait for transaction to be confirmed
-                await asyncio.sleep(self._transaction_confirmation_delay)
+                await asyncio.sleep(float(self._transaction_confirmation_delay))
 
                 # Get quote_token balance after first swap
                 updated_wallet_balances = await self._post_chain_balances(
@@ -518,7 +518,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 )
 
                 # Wait for transaction to be confirmed
-                await asyncio.sleep(self._transaction_confirmation_delay)
+                await asyncio.sleep(float(self._transaction_confirmation_delay))
 
                 # Calculate actual profit
                 final_wallet_balances = await self._post_chain_balances(
@@ -764,7 +764,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
                             token_symbol
                         ] = {
-                            "balance": 0,  # TODO a pool doesn't a token balance, but a wallet has inside the tokens and inside the pools informations, check and fix this!!!
+                            "balance": 0,  # TODO a pool doesn't a token balance, but a wallet has inside the tokens and inside the pools information, check and fix this!!!
                             "price": {
                                 f"{pool_address}": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
                             },
@@ -930,6 +930,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return expected_profit_percentage
 
+    # noinspection PyMethodMayBeStatic
     def _get_all_tokens_from_database(self) -> List[str]:
         """Get all tokens from the database"""
         tokens = set()
@@ -942,6 +943,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return list(tokens)
 
+    # noinspection PyMethodMayBeStatic
     def _get_all_pools_from_database(self) -> List[Dict[str, Any]]:
         """Get all pools from the database"""
         pools = []
@@ -970,6 +972,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return matching_pools
 
+    # noinspection PyMethodMayBeStatic
     def _get_wallet_addresses_for_pool(self, pool: Dict[str, Any]) -> Optional[str]:
         """Get a wallet address that can be used for a specific pool"""
         chain = pool.get("chain")
@@ -1448,12 +1451,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 total_profit += Decimal(str(profit))
 
         # Format status message
-        status = []
-        status.append("AMM Arbitrage Strategy Status:")
-        status.append(f"Gateway Status: {'Ready' if self.gateway_is_ready else 'Not Ready'}")
-        status.append(f"Opportunities Found (last hour): {len(recent_opportunities)}")
-        status.append(f"Trades Executed (last hour): {len(recent_executions)}")
-        status.append(f"Total Profit: {total_profit:.4f}")
+        status = [
+            "AMM Arbitrage Strategy Status:",
+            f"Gateway Status: {'Ready' if self.gateway_is_ready else 'Not Ready'}",
+            f"Opportunities Found (last hour): {len(recent_opportunities)}",
+            f"Trades Executed (last hour): {len(recent_executions)}",
+            f"Total Profit: {total_profit:.4f}",
+        ]
 
         if recent_executions:
             status.append("\nRecent Trades:")

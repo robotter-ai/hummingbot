@@ -830,7 +830,7 @@ class GatewayHttpClient:
         network: str,
         wallet_address: str,
         pool_address: str,
-        percentage_to_remove: float,
+        percentage_to_remove: Decimal,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
