@@ -172,6 +172,11 @@ database: Dict[str, Any] = {
     "connections": {},
     "arbitrage_opportunities": [],
     "execution_history": [],
+    "maps": {
+        "pools_by_tokens": {},  # Format: "token1/token2" -> [pool_internal_id1, pool_internal_id2, ...]
+        "wallets_by_pool": {},  # Format: pool_internal_id -> [wallet_internal_id1, wallet_internal_id2, ...]
+        "pools_by_wallet": {},  # Format: wallet_internal_id -> [pool_internal_id1, pool_internal_id2, ...]
+    },
 }
 
 
@@ -416,7 +421,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         self.logger().info(f"Executing arbitrage trade: {base_token}/{quote_token}")
 
-        # Get wallet information for buy pool
+        # Get wallet addresses for buy pool
         wallet_addresses = self._get_wallet_addresses_for_pool(buy_pool)
         if not wallet_addresses:
             self.logger().error(f"No wallet address found for pool {buy_pool['address']}")
@@ -615,10 +620,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             if "wallets" not in database["connections"][chain][network][connector]:
                 database["connections"][chain][network][connector]["wallets"] = {}
 
+            # Create wallet internal_id
+            wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
+
             # Initialize wallet if not exists
             if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
                 database["connections"][chain][network][connector]["wallets"][wallet_address] = {
-                    "internal_id": f"{chain}/{network}/{connector}/{wallet_address}",
+                    "internal_id": wallet_internal_id,
                     "chain": chain,
                     "network": network,
                     "connector": connector,
@@ -629,7 +637,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 # Update existing wallet with missing fields if needed
                 wallet_data = database["connections"][chain][network][connector]["wallets"][wallet_address]
                 if "internal_id" not in wallet_data:
-                    wallet_data["internal_id"] = f"{chain}/{network}/{connector}/{wallet_address}"
+                    wallet_data["internal_id"] = wallet_internal_id
                 if "chain" not in wallet_data:
                     wallet_data["chain"] = chain
                 if "network" not in wallet_data:
@@ -669,6 +677,23 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         else:
                             token_data["balances"]["free"] = balance
                             token_data["balances"]["total"] = balance
+
+            # Update wallet-pool mappings
+            if "pools" in database["connections"][chain][network][connector]:
+                for pool_address, pool_info in database["connections"][chain][network][connector]["pools"].items():
+                    pool_internal_id = pool_info["internal_id"]
+
+                    # Update wallets_by_pool map
+                    if pool_internal_id not in database["maps"]["wallets_by_pool"]:
+                        database["maps"]["wallets_by_pool"][pool_internal_id] = []
+                    if wallet_internal_id not in database["maps"]["wallets_by_pool"][pool_internal_id]:
+                        database["maps"]["wallets_by_pool"][pool_internal_id].append(wallet_internal_id)
+
+                    # Update pools_by_wallet map
+                    if wallet_internal_id not in database["maps"]["pools_by_wallet"]:
+                        database["maps"]["pools_by_wallet"][wallet_internal_id] = []
+                    if pool_internal_id not in database["maps"]["pools_by_wallet"][wallet_internal_id]:
+                        database["maps"]["pools_by_wallet"][wallet_internal_id].append(pool_internal_id)
 
     async def _update_token_information(self):
         """Update token information in the database"""
@@ -732,10 +757,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             if "pools" not in database["connections"][chain][network][connector]:
                 database["connections"][chain][network][connector]["pools"] = {}
 
-            # Initialize pools_by_tokens if not exists
-            if "pools_by_tokens" not in database["connections"][chain][network][connector]:
-                database["connections"][chain][network][connector]["pools_by_tokens"] = {}
-
             pools_info = await self._get_pools(chain, connector, network)
 
             if not pools_info:
@@ -779,11 +800,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     continue
 
                 # Create internal_id for pool
-                internal_id = f"{chain}/{network}/{connector}/{pool_address}"
+                pool_internal_id = f"{chain}/{network}/{connector}/{pool_address}"
 
                 # Initialize the tokens structure in the database
                 database["connections"][chain][network][connector]["pools"][pool_address] = {
-                    "internal_id": internal_id,
+                    "internal_id": pool_internal_id,
                     "chain": chain,
                     "network": network,
                     "connector": connector,
@@ -837,15 +858,17 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         },
                     }
 
-                    # Add to pools_by_tokens
+                    # Add to pools_by_tokens map
                     token_key = f"{base_token}/{quote_token}"
-                    database["connections"][chain][network][connector]["pools_by_tokens"][token_key] = pool_address
+                    if token_key not in database["maps"]["pools_by_tokens"]:
+                        database["maps"]["pools_by_tokens"][token_key] = []
+                    database["maps"]["pools_by_tokens"][token_key].append(pool_internal_id)
 
                     # Also add reverse order for flexibility
                     reverse_token_key = f"{quote_token}/{base_token}"
-                    database["connections"][chain][network][connector]["pools_by_tokens"][
-                        reverse_token_key
-                    ] = pool_address
+                    if reverse_token_key not in database["maps"]["pools_by_tokens"]:
+                        database["maps"]["pools_by_tokens"][reverse_token_key] = []
+                    database["maps"]["pools_by_tokens"][reverse_token_key].append(pool_internal_id)
                 # For other pool types, we'll handle them later
                 else:
                     pool_type = pool.get("type", PoolType.UNKNOWN.value)
@@ -1019,40 +1042,55 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return pools
 
+    # noinspection PyMethodMayBeStatic
     def _find_pools_with_token_pair(self, base_token: str, quote_token: str) -> List[Dict[str, Any]]:
         """Find pools that contain both tokens"""
-        # TODO Add a hashtable with the pools to have a immediate access to the pools with the same tokens!!!
         matching_pools = []
+        token_key = f"{base_token}/{quote_token}"
 
-        pools = self._get_all_pools_from_database()
+        # Get pool internal IDs from the map
+        pool_internal_ids = database["maps"]["pools_by_tokens"].get(token_key, [])
 
-        for pool in pools:
-            if "tokens" in pool and base_token in pool["tokens"] and quote_token in pool["tokens"]:
-                matching_pools.append(pool)
+        # Convert internal IDs to full pool information
+        for pool_internal_id in pool_internal_ids:
+            chain, network, connector, pool_address = pool_internal_id.split("/")
+            if (
+                chain in database["connections"]
+                and network in database["connections"][chain]
+                and connector in database["connections"][chain][network]
+                and "pools" in database["connections"][chain][network][connector]
+                and pool_address in database["connections"][chain][network][connector]["pools"]
+            ):
+                matching_pools.append(database["connections"][chain][network][connector]["pools"][pool_address])
 
         return matching_pools
 
     # noinspection PyMethodMayBeStatic
-    def _get_wallet_addresses_for_pool(self, pool: Dict[str, Any]) -> Optional[str]:
-        """Get a wallet address that can be used for a specific pool"""
-        chain = pool.get("chain")
-        network = pool.get("network")
-        connector = pool.get("connector")
-
-        if not all([chain, network, connector]):
+    def _get_wallet_addresses_for_pool(self, pool: Dict[str, Any]) -> Optional[List[str]]:
+        """Get wallet addresses that can be used for a specific pool"""
+        pool_internal_id = pool.get("internal_id")
+        if not pool_internal_id:
             return None
 
-        all_gateway_connections = GatewayConnectionSetting.load()
+        # Get wallet internal IDs from the map
+        wallet_internal_ids = database["maps"]["wallets_by_pool"].get(pool_internal_id, [])
+        if not wallet_internal_ids:
+            return None
 
-        for connection in all_gateway_connections:
+        # Convert internal IDs to wallet addresses
+        wallet_addresses = []
+        for wallet_internal_id in wallet_internal_ids:
+            chain, network, connector, wallet_address = wallet_internal_id.split("/")
             if (
-                connection.get("chain") == chain
-                and connection.get("network") == network
-                and connection.get("connector") == connector
+                chain in database["connections"]
+                and network in database["connections"][chain]
+                and connector in database["connections"][chain][network]
+                and "wallets" in database["connections"][chain][network][connector]
+                and wallet_address in database["connections"][chain][network][connector]["wallets"]
             ):
-                return connection.get("wallet_address")
+                wallet_addresses.append(wallet_address)
 
-        return None
+        return wallet_addresses if wallet_addresses else None
 
     async def _get_total_token_balance_from_all_wallets(self, token_symbol: str) -> Decimal:
         """Get token balance across all wallets"""
