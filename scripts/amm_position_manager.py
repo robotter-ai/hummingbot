@@ -79,20 +79,24 @@ configuration: Dict[str, Any] = {
 #                 "hydration": {
 #                     "wallets": {
 #                         "<wallet_address>": {
+#                             "internal_id": "<chain>/<network>/<connector>/<wallet_address>", # TODO fix!!!
+#                             "chain": "<chain>", # TODO fix!!!
+#                             "network": "<network>", # TODO fix!!!
+#                             "connector": "<connector>", # TODO fix!!!
 #                             "tokens": {
 #                                 "<token_symbol>": {
 #                                     "balances": {
-#                                         "free": "<free_quote_token_balance>",
+#                                         "free": "<free_token_balance>",
 #                                         "locked": {
-#                                             "total": "<locked_quote_token_balance>",
+#                                             "total": "<locked_token_balance>",
 #                                             "liquidity": {
-#                                                 "total": "<liquidity_quote_token_balance>",
+#                                                 "total": "<liquidity_token_balance>",
 #                                                 "pools": {
-#                                                     "<pool_address>": "<pool_quote_token_balance>"
+#                                                     "<pool_address>": "<pool_token_balance>"
 #                                                 }
 #                                             }
 #                                         },
-#                                         "total": "<quote_token_balance>"
+#                                         "total": "<token_balance>"
 #                                     }
 #                                 }
 #                             },
@@ -100,7 +104,7 @@ configuration: Dict[str, Any] = {
 #                                 "<pool_address>": {
 #                                     "shares": "<pool_shares>",
 #                                     "tokens": {
-#                                         "<token_symbol>": "<pool_quote_token_balance>",
+#                                         "<token_symbol>": "<pool_token_balance>",
 #                                     },
 #                                     "impermanent_loss": "<pool_impermanent_loss>",
 #                                 }
@@ -109,7 +113,11 @@ configuration: Dict[str, Any] = {
 #                     },
 #                     "tokens": {
 #                         "<token_symbol>": {
-#                             "address": "<base_tokenddress>",
+#                             "internal_id": "<chain>/<network>/<connector>/<token_address>", # TODO fix!!!
+#                             "address": "<token_address>",
+#                             "chain": "<chain>", # TODO fix!!!
+#                             "network": "<network>", # TODO fix!!!
+#                             "connector": "<connector>", # TODO fix!!!
 #                             "symbol": "<token_symbol>",
 #                             "name": "<token_name>",
 #                             "decimals": "<token_decimals>",
@@ -118,14 +126,19 @@ configuration: Dict[str, Any] = {
 #                     },
 #                     "pools": {
 #                         "<pool_address>": {
+#                             "internal_id": "<chain>/<network>/<connector>/<pool_address>", # TODO fix!!!
 #                             "address": "<pool_address>",
+#                             "chain": "<chain>", # TODO fix!!!
+#                             "network": "<network>", # TODO fix!!!
+#                             "connector": "<connector>", # TODO fix!!!
 #                             "type": "<pool_type>",
+#                             "tokens_list": ["token_1_symbol", "token_2_symbol"], # TODO fix!!!
 #                             "tokens": {
-#                                 "<token_symbol>": {
-#                                     "price": "<token_price>",
+#                                 "<token_1_symbol>": {
+#                                     "price": "<token_1_price>",
 #                                 },
-#                                 "<token_symbol>": {
-#                                     "price": "<token_price>",
+#                                 "<token_2_symbol>": {
+#                                     "price": "<token_2_price>",
 #                                 },
 #                             },
 #                             "annual_percentage_rate": "<pool_annual_percentage_rate>",
@@ -134,6 +147,9 @@ configuration: Dict[str, Any] = {
 #                                 "24h": "<pool_24h_volume>",
 #                             }
 #                         }
+#                     },
+#                     "pools_by_tokens": { # TODO reminder: 1/2/3, 1/3/2, 2/1/3, 2/3/1, 3/1/2, 3/2/1 -> pool_address!!! [[1, 2, 3], ..., [2, 3, 1], ...]
+#                         "<token_1_symbol>/<token_2_symbol>/.../<token_n_symbol>": "<pool_address>",  # TODO fix!!!
 #                     }
 #                 },
 #             }
@@ -629,6 +645,30 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     if pool_price is None:
                         self.logger().warning(f"Could not get price for pool {pool_address}")
                         continue
+
+                    database["connections"][chain][network][connector]["pools"][pool_address] = {
+                        "chain": chain,
+                        "network": network,
+                        "connector": connector,
+                        "address": pool_address,
+                        "type": pool.get("type", "unknown"),
+                        "tokens": {},
+                        "token_list": [],
+                        "annual_percentage_rate": detailed_pool_info.get("apr"),
+                        "total_value_locked": detailed_pool_info.get("tvl"),
+                        "impermanent_loss": 0,
+                        "volume": {"24h": detailed_pool_info.get("volume24h")},
+                    }
+
+                    for token_symbol in pool.get("tokens", {}):
+                        database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
+                            token_symbol
+                        ] = {
+                            "balance": 0,  # TODO a pool doesn't a token balance, but a wallet has inside the tokens and inside the pools informations, check and fix this!!!
+                            "price": {
+                                f"{pool_address}": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
+                            },
+                        }
 
                     # Initialize base token
                     database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][base_token] = {
