@@ -548,7 +548,7 @@ class GatewayHttpClient:
             request_payload["nonce"] = int(nonce)
         if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
             request_payload["poolAddress"] = pool_address
-        return await self.api_request("post", f"{connector}/execute-swap", request_payload)
+        return await self.api_request("post", f"{connector}/amm/execute-swap", request_payload)
 
     async def estimate_gas(
         self,
