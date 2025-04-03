@@ -1172,7 +1172,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing pools information
         """
-        return await self.gateway_http_client.amm_pools(connector, network)
+        return await self.gateway_http_client.amm_list_pools(connector, network)
 
     async def _get_pool_information(self, pool: Dict[str, Any]):
         """
@@ -1303,7 +1303,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         return await self.gateway_http_client.amm_execute_swap(
             network=network,
             connector=connector,
-            address=wallet_address,
+            wallet_address=wallet_address,
             base_asset=base_token,
             quote_asset=quote_token,
             side=side,
