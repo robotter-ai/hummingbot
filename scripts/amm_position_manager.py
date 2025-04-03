@@ -3,6 +3,7 @@ import os
 import time
 from decimal import Decimal
 from enum import Enum
+from itertools import permutations
 from typing import Any, Dict, List, Optional, Union
 
 # noinspection PyUnresolvedReferences
@@ -822,60 +823,70 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     "volume": {"24h": detailed_pool_info.get("volume24h")},
                 }
 
-                # For XYK and Stable pools, we have exactly 2 tokens
-                if (pool.get("type") == PoolType.XYK.value or pool.get("type") == PoolType.STABLE.value) and len(
-                    pool_tokens
-                ) == 2:
-                    base_token = pool_tokens[0]
-                    quote_token = pool_tokens[1]
-                    pool_price = detailed_pool_info.get("price", None)
+                # Generate all possible token permutations for this pool
+                token_permutations = self._generate_token_permutations(pool_tokens)
 
-                    if pool_price is None:
-                        self.logger().warning(f"Could not get price for pool {pool_address}")
-                        continue
+                # Add pool to all token permutations in the map
+                for token_key in token_permutations:
+                    if token_key not in database["maps"]["pools_by_tokens"]:
+                        database["maps"]["pools_by_tokens"][token_key] = []
+                    if pool_internal_id not in database["maps"]["pools_by_tokens"][token_key]:
+                        database["maps"]["pools_by_tokens"][token_key].append(pool_internal_id)
 
-                    # Update pool tokens information
-                    for token_symbol in pool_tokens:
+                # Handle specific pool types
+                pool_type = pool.get("type", PoolType.UNKNOWN.value)
+                if pool_type == PoolType.XYK.value or pool_type == PoolType.STABLE.value:
+                    if len(pool_tokens) == 2:
+                        base_token = pool_tokens[0]
+                        quote_token = pool_tokens[1]
+                        pool_price = detailed_pool_info.get("price", None)
+
+                        if pool_price is None:
+                            self.logger().warning(f"Could not get price for pool {pool_address}")
+                            continue
+
+                        # Update pool tokens information
+                        for token_symbol in pool_tokens:
+                            database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
+                                token_symbol
+                            ] = {
+                                "price": {
+                                    f"{pool_address}": detailed_pool_info.get(
+                                        "price"
+                                    ),  # TODO fix this on the gateway!!!
+                                },
+                            }
+
+                        # Initialize base token
                         database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                            token_symbol
+                            base_token
                         ] = {
-                            "price": {
-                                f"{pool_address}": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
+                            "balance": Decimal(str(detailed_pool_info.get("baseTokenAmount", "0"))),
+                            "prices": {
+                                quote_token: Decimal(str(pool_price)),  # Direct price
                             },
                         }
 
-                    # Initialize base token
-                    database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][base_token] = {
-                        "balance": Decimal(str(detailed_pool_info.get("baseTokenAmount", "0"))),
-                        "prices": {
-                            quote_token: Decimal(str(pool_price)),  # Direct price
-                        },
-                    }
-
-                    # Initialize quote token
-                    database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][quote_token] = {
-                        "balance": Decimal(str(detailed_pool_info.get("quoteTokenAmount", "0"))),
-                        "prices": {
-                            base_token: Decimal("1") / Decimal(str(pool_price))
-                            if Decimal(str(pool_price)) != DECIMAL_ZERO
-                            else None,  # Inverse price
-                        },
-                    }
-
-                    # Add to pools_by_tokens map
-                    token_key = f"{base_token}/{quote_token}"
-                    if token_key not in database["maps"]["pools_by_tokens"]:
-                        database["maps"]["pools_by_tokens"][token_key] = []
-                    database["maps"]["pools_by_tokens"][token_key].append(pool_internal_id)
-
-                    # Also add reverse order for flexibility
-                    reverse_token_key = f"{quote_token}/{base_token}"
-                    if reverse_token_key not in database["maps"]["pools_by_tokens"]:
-                        database["maps"]["pools_by_tokens"][reverse_token_key] = []
-                    database["maps"]["pools_by_tokens"][reverse_token_key].append(pool_internal_id)
-                # For other pool types, we'll handle them later
+                        # Initialize quote token
+                        database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
+                            quote_token
+                        ] = {
+                            "balance": Decimal(str(detailed_pool_info.get("quoteTokenAmount", "0"))),
+                            "prices": {
+                                base_token: Decimal("1") / Decimal(str(pool_price))
+                                if Decimal(str(pool_price)) != DECIMAL_ZERO
+                                else None,  # Inverse price
+                            },
+                        }
+                elif pool_type == PoolType.OMNIPOOL.value:
+                    # Handle Omni pool specific logic here
+                    # For now, we'll just log that we found an Omni pool
+                    self.logger().info(f"Found Omni pool: {pool_address}")
+                elif pool_type == PoolType.LBP.value:
+                    # Handle LBP pool specific logic here
+                    # For now, we'll just log that we found an LBP pool
+                    self.logger().info(f"Found LBP pool: {pool_address}")
                 else:
-                    pool_type = pool.get("type", PoolType.UNKNOWN.value)
                     self.logger().warning(f"Pool type {pool_type} not supported yet")
                     raise NotImplementedError(f"Pool type {pool_type} not supported")
 
@@ -892,6 +903,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 )
 
         return database
+
+    # noinspection PyMethodMayBeStatic
+    def _generate_token_permutations(self, tokens: List[str]) -> List[str]:
+        """Generate all possible permutations of token pairs for a given list of tokens"""
+        token_pairs = []
+
+        for permutation in permutations(tokens, len(tokens)):
+            # Join tokens with '/' to create the key
+            token_key = "/".join(permutation)
+            token_pairs.append(token_key)
+
+        return token_pairs
 
     async def _calculate_price_difference_percentage(
         self, base_token: str, quote_token: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
