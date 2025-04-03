@@ -953,9 +953,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         for pool_address, pool_info in database["connections"][chain][network][connector][
                             "pools"
                         ].items():
-                            pool_info["chain"] = chain
-                            pool_info["network"] = network
-                            pool_info["connector"] = connector
                             pools.append(pool_info)
 
         return pools
@@ -1175,7 +1172,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         )
 
     async def _get_quote_liquidity(
-        self, pool: Dict[str, Any], base_token_amount: str, quote_token_amount: str, slippage_percentage: str = "0.5"
+        self,
+        pool: Dict[str, Any],
+        base_token_amount: Optional[Decimal] = None,
+        quote_token_amount: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
     ):
         """
         Get a quote for adding liquidity to a pool.
@@ -1200,9 +1201,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             connector=connector,
             network=network,
             pool_address=pool_address,
-            base_token_amount=float(base_token_amount) if base_token_amount else None,
-            quote_token_amount=float(quote_token_amount) if quote_token_amount else None,
-            slippage_percentage=float(slippage_percentage) if slippage_percentage else None,
+            base_token_amount=base_token_amount,
+            quote_token_amount=quote_token_amount,
+            slippage_percentage=slippage_percentage,
         )
 
     async def _post_execute_swap(
@@ -1249,7 +1250,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         )
 
     async def _post_add_liquidity(
-        self, pool: Dict[str, Any], base_token_amount: str, quote_token_amount: str, slippage_percentage: str
+        self,
+        pool: Dict[str, Any],
+        base_token_amount: Optional[Decimal] = None,
+        quote_token_amount: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
     ):
         """
         Add liquidity to the specified pool.
@@ -1276,18 +1281,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             network=network,
             wallet_address=wallet_address,
             pool_address=pool_address,
-            base_token_amount=float(base_token_amount) if base_token_amount else None,
-            quote_token_amount=float(quote_token_amount) if quote_token_amount else None,
-            slippage_percentage=float(slippage_percentage) if slippage_percentage else None,
+            base_token_amount=base_token_amount,
+            quote_token_amount=quote_token_amount,
+            slippage_percentage=slippage_percentage,
         )
 
-    async def _post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: str):
+    async def _post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: Decimal):
         """
         Remove liquidity from the specified pool.
 
         Args:
             pool: Dictionary containing pool configuration parameters
-            percentage_to_remove: Percentage of liquidity to remove
+            percentage_to_remove: Percentage of liquidity to remove as a Decimal
 
         Returns:
             Dictionary containing remove liquidity operation result
@@ -1305,7 +1310,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             network=network,
             wallet_address=wallet_address,
             pool_address=pool_address,
-            percentage_to_remove=float(percentage_to_remove),
+            percentage_to_remove=percentage_to_remove,
         )
 
     async def _get_root_status(self):
