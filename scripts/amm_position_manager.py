@@ -350,6 +350,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self.logger().info(f"Step 1: Swap {trade_amount} {base_token} for {quote_token} in pool {buy_pool['address']}")
 
         # Get wallet information
+        # TODO Improve the code to correctly handle cases where the pool is available in different wallets!!!
         wallet_address = self._get_wallet_address_for_pool(buy_pool)
         if not wallet_address:
             self.logger().error(f"No wallet address found for pool {buy_pool['address']}")
@@ -596,6 +597,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     continue
 
                 database["connections"][chain][network][connector]["pools"][pool_address] = {
+                    "chain": chain,
+                    "network": network,
+                    "connector": connector,
                     "address": pool_address,
                     "type": pool.get("type", "unknown"),
                     "tokens": {},
