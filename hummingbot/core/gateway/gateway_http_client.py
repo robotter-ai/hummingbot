@@ -431,11 +431,11 @@ class GatewayHttpClient:
             "network": network,
             "baseToken": base_asset,
             "quoteToken": quote_asset,
-            "amount": float(amount),
+            "amount": amount,
             "side": side.name,
         }
         if slippage_percentage is not None:
-            request_payload["slippagePct"] = float(slippage_percentage)
+            request_payload["slippagePct"] = slippage_percentage
         if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
@@ -517,7 +517,7 @@ class GatewayHttpClient:
         self,
         network: str,
         connector: str,
-        address: str,
+        wallet_address: str,
         base_asset: str,
         quote_asset: str,
         side: TradeType,
@@ -534,16 +534,16 @@ class GatewayHttpClient:
 
         request_payload: Dict[str, Any] = {
             "network": network,
-            "walletAddress": address,
+            "walletAddress": wallet_address,
             "baseToken": base_asset,
             "quoteToken": quote_asset,
-            "amount": float(amount),
+            "amount": amount,
             "side": side.name,
         }
         if slippage_percentage is not None:
-            request_payload["slippagePct"] = float(slippage_percentage)
+            request_payload["slippagePct"] = slippage_percentage
         # if limit_price is not None:
-        #     request_payload["limitPrice"] = float(limit_price)
+        #     request_payload["limitPrice"] = limit_price
         if nonce is not None:
             request_payload["nonce"] = int(nonce)
         if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
@@ -748,9 +748,9 @@ class GatewayHttpClient:
         connector: str,
         network: str,
         pool_address: str,
-        base_token_amount: Optional[float] = None,
-        quote_token_amount: Optional[float] = None,
-        slippage_percentage: Optional[float] = None,
+        base_token_amount: Optional[Decimal] = None,
+        quote_token_amount: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -788,9 +788,9 @@ class GatewayHttpClient:
         network: str,
         wallet_address: str,
         pool_address: str,
-        base_token_amount: Optional[float] = None,
-        quote_token_amount: Optional[float] = None,
-        slippage_percentage: Optional[float] = None,
+        base_token_amount: Optional[Decimal] = None,
+        quote_token_amount: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
         fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -857,7 +857,7 @@ class GatewayHttpClient:
             fail_silently=fail_silently,
         )
 
-    async def amm_pools(self, connector: str, network: str, fail_silently: bool = False) -> Dict[str, Any]:
+    async def amm_list_pools(self, connector: str, network: str, fail_silently: bool = False) -> Dict[str, Any]:
         """
         Fetches all available AMM pools for a given connector and network
         :param connector: The connector/protocol (e.g., "raydium")
