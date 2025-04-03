@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 # noinspection PyUnresolvedReferences
@@ -14,6 +15,17 @@ from hummingbot.core.event.events import TradeType
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
+
+
+class PoolType(Enum):
+    """Enum for different types of liquidity pools"""
+
+    XYK = "Xyk"
+    STABLE = "Stable"
+    OMNIPOOL = "Omni"
+    LBP = "Lbp"
+    UNKNOWN = "unknown"
+
 
 configuration: Dict[str, Any] = {
     "globals": {
@@ -208,16 +220,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         minimum_profitability_percentage = float(configuration["globals"].get("minimum_profitability_percentage"))
 
         # Iterate through all token pairs and pool combinations
-        for i, base_token in enumerate(tokens):  # TODO change the i variable for another thing!!!
-            for quote_token in tokens[(i + 1) :]:  # TODO remove the slide [..:] from here, use a variable index too!!!
+        for token_idx in range(len(tokens)):
+            base_token = tokens[token_idx]
+            for quote_idx in range(token_idx + 1, len(tokens)):
+                quote_token = tokens[quote_idx]
                 # Find pools that contain both tokens
                 relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Check for arbitrage opportunities between different pools
-                for i, pool_1 in enumerate(relevant_pools):  # TODO change the i variable for another thing!!!
-                    for pool_2 in relevant_pools[
-                        (i + 1) :
-                    ]:  # TODO remove the slide [..:] from here, use a variable index too!!!
+                for pool_idx in range(len(relevant_pools)):
+                    pool_1 = relevant_pools[pool_idx]
+                    for pool_2_idx in range(pool_idx + 1, len(relevant_pools)):
+                        pool_2 = relevant_pools[pool_2_idx]
                         # Calculate price difference between the two pools
                         price_difference_percentage = await self._calculate_price_difference_percentage(
                             base_token, quote_token, pool_1, pool_2
@@ -368,7 +382,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             quote_token,
             trade_amount,
             TradeType.SELL,  # Selling base_token to buy quote_token
-            maximum_slippage_percentage
+            maximum_slippage_percentage,
         )
 
         if not first_swap_result or "signature" not in first_swap_result:
@@ -596,28 +610,59 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 if not detailed_pool_info:
                     continue
 
-                database["connections"][chain][network][connector]["pools"][pool_address] = {
-                    "chain": chain,
-                    "network": network,
-                    "connector": connector,
-                    "address": pool_address,
-                    "type": pool.get("type", "unknown"),
-                    "tokens": {},
-                    "annual_percentage_rate": detailed_pool_info.get("apr"),
-                    "total_value_locked": detailed_pool_info.get("tvl"),
-                    "impermanent_loss": 0,
-                    "volume": {"24h": detailed_pool_info.get("volume24h")},
-                }
+                # Get pool tokens
+                pool_tokens = pool.get("tokens", [])
+                if not pool_tokens:
+                    continue
 
-                for token_symbol in pool.get("tokens", {}):
-                    database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                        token_symbol
-                    ] = {
-                        "balance": 0,  # TODO fix this info!!!
-                        "price": {
-                            f"{pool_address}": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
+                # Initialize the tokens structure in the database
+                database["connections"][chain][network][connector]["pools"][pool_address]["tokens"] = {}
+
+                # For XYK and Stable pools, we have exactly 2 tokens
+                if (pool.get("type") == PoolType.XYK.value or pool.get("type") == PoolType.STABLE.value) and len(
+                    pool_tokens
+                ) == 2:
+                    base_token = pool_tokens[0]
+                    quote_token = pool_tokens[1]
+                    pool_price = detailed_pool_info.get("price", None)
+
+                    if pool_price is None:
+                        self.logger().warning(f"Could not get price for pool {pool_address}")
+                        continue
+
+                    # Initialize base token
+                    database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][base_token] = {
+                        "balance": Decimal(str(detailed_pool_info.get("baseTokenAmount", "0"))),
+                        "prices": {
+                            quote_token: Decimal(str(pool_price)),  # Direct price
                         },
                     }
+
+                    # Initialize quote token
+                    database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][quote_token] = {
+                        "balance": Decimal(str(detailed_pool_info.get("quoteTokenAmount", "0"))),
+                        "prices": {
+                            base_token: Decimal("1") / Decimal(str(pool_price))
+                            if Decimal(str(pool_price)) != Decimal("0")
+                            else None,  # Inverse price
+                        },
+                    }
+                # For other pool types, we'll handle them later
+                else:
+                    pool_type = pool.get("type", PoolType.UNKNOWN.value)
+                    self.logger().warning(f"Pool type {pool_type} not supported yet")
+                    raise NotImplementedError(f"Pool type {pool_type} not supported")
+
+                database["connections"][chain][network][connector]["pools"][pool_address].update(
+                    {
+                        "address": pool_address,
+                        "type": pool.get("type", PoolType.UNKNOWN.value),
+                        "annual_percentage_rate": detailed_pool_info.get("apr", None),
+                        "total_value_locked": detailed_pool_info.get("tvl", None),
+                        "impermanent_loss": None,
+                        "volume": {"24h": detailed_pool_info.get("volume24h", None)},
+                    }
+                )
 
         return database
 
