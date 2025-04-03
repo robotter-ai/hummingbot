@@ -91,10 +91,10 @@ configuration: Dict[str, Any] = {
 #                 "hydration": {
 #                     "wallets": {
 #                         "<wallet_address>": {
-#                             "internal_id": "<chain>/<network>/<connector>/<wallet_address>", # TODO fix!!!
-#                             "chain": "<chain>", # TODO fix!!!
-#                             "network": "<network>", # TODO fix!!!
-#                             "connector": "<connector>", # TODO fix!!!
+#                             "internal_id": "<chain>/<network>/<connector>/<wallet_address>",
+#                             "chain": "<chain>",
+#                             "network": "<network>",
+#                             "connector": "<connector>",
 #                             "tokens": {
 #                                 "<token_symbol>": {
 #                                     "balances": {
@@ -125,11 +125,11 @@ configuration: Dict[str, Any] = {
 #                     },
 #                     "tokens": {
 #                         "<token_symbol>": {
-#                             "internal_id": "<chain>/<network>/<connector>/<token_address>", # TODO fix!!!
+#                             "internal_id": "<chain>/<network>/<connector>/<token_address>",
 #                             "address": "<token_address>",
-#                             "chain": "<chain>", # TODO fix!!!
-#                             "network": "<network>", # TODO fix!!!
-#                             "connector": "<connector>", # TODO fix!!!
+#                             "chain": "<chain>",
+#                             "network": "<network>",
+#                             "connector": "<connector>",
 #                             "symbol": "<token_symbol>",
 #                             "name": "<token_name>",
 #                             "decimals": "<token_decimals>",
@@ -138,13 +138,13 @@ configuration: Dict[str, Any] = {
 #                     },
 #                     "pools": {
 #                         "<pool_address>": {
-#                             "internal_id": "<chain>/<network>/<connector>/<pool_address>", # TODO fix!!!
+#                             "internal_id": "<chain>/<network>/<connector>/<pool_address>",
 #                             "address": "<pool_address>",
-#                             "chain": "<chain>", # TODO fix!!!
-#                             "network": "<network>", # TODO fix!!!
-#                             "connector": "<connector>", # TODO fix!!!
+#                             "chain": "<chain>",
+#                             "network": "<network>",
+#                             "connector": "<connector>",
 #                             "type": "<pool_type>",
-#                             "tokens_list": ["token_1_symbol", "token_2_symbol"], # TODO fix!!!
+#                             "tokens_list": ["token_1_symbol", "token_2_symbol"],
 #                             "tokens": {
 #                                 "<token_1_symbol>": {
 #                                     "price": "<token_1_price>",
@@ -159,13 +159,17 @@ configuration: Dict[str, Any] = {
 #                                 "24h": "<pool_24h_volume>",
 #                             }
 #                         }
-#                     },
-#                     "pools_by_tokens": { # TODO reminder: 1/2/3, 1/3/2, 2/1/3, 2/3/1, 3/1/2, 3/2/1 -> pool_address!!! [[1, 2, 3], ..., [2, 3, 1], ...]
-#                         "<token_1_symbol>/<token_2_symbol>/.../<token_n_symbol>": "<pool_address>",  # TODO fix!!!
 #                     }
 #                 },
 #             }
 #         }
+#     },
+#     "arbitrage_opportunities": [],
+#     "execution_history": [],
+#     "maps": {
+#         "pools_by_tokens": {},  # Format: "token1/token2" -> [pool_internal_id1, pool_internal_id2, ...]
+#         "wallets_by_pool": {},  # Format: pool_internal_id -> [wallet_internal_id1, wallet_internal_id2, ...]
+#         "pools_by_wallet": {},  # Format: wallet_internal_id -> [pool_internal_id1, pool_internal_id2, ...]
 #     }
 # }
 database: Dict[str, Any] = {
