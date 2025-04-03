@@ -41,12 +41,12 @@ class PoolType(Enum):
 
 configuration: Dict[str, Any] = {
     "globals": {
-        "maximum_slippage_percentage": Decimal("0.5"),  # 0.5 means 0.5%, or 0.005, in the code
-        "minimum_profitability_percentage": Decimal("1"),  # 1 means 1%, or 0.01, in the code
-        "arbitrage_check_interval_seconds": Decimal("30"),  # Time between arbitrage checks
-        "minimum_trade_amount": Decimal("1"),  # Minimum amount to consider for a trade
-        "time_delay_between_arbitrages": Decimal("1"),  # Time delay between arbitrage trades
-        "transaction_confirmation_delay": Decimal("2"),  # Time delay between transaction confirmation
+        "maximum_slippage_percentage": "0.5",  # 0.5 means 0.5%, or 0.005, in the code
+        "minimum_profitability_percentage": "1",  # 1 means 1%, or 0.01, in the code
+        "arbitrage_check_interval_seconds": "30",  # Time between arbitrage checks
+        "minimum_trade_amount": "1",  # Minimum amount to consider for a trade
+        "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
+        "transaction_confirmation_delay": "2",  # Time delay between transaction confirmation
     },
     "connections": {
         "polkadot": {
@@ -188,12 +188,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     last_arbitrage_check_time = 0
 
     # Instance variables for global configuration
-    maximum_slippage_percentage: Decimal = DECIMAL_ZERO
-    minimum_profitability_percentage: Decimal = DECIMAL_ZERO
-    arbitrage_check_interval_seconds: Decimal = DECIMAL_ZERO
-    minimum_trade_amount: Decimal = DECIMAL_ZERO
-    time_delay_between_arbitrages: Decimal = DECIMAL_ZERO
-    transaction_confirmation_delay: Decimal = DECIMAL_ZERO
+    _maximum_slippage_percentage: Decimal = DECIMAL_ZERO
+    _minimum_profitability_percentage: Decimal = DECIMAL_ZERO
+    _arbitrage_check_interval_seconds: Decimal = DECIMAL_ZERO
+    _minimum_trade_amount: Decimal = DECIMAL_ZERO
+    _time_delay_between_arbitrages: Decimal = DECIMAL_ZERO
+    _transaction_confirmation_delay: Decimal = DECIMAL_ZERO
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
         super().__init__(connectors)
@@ -206,17 +206,21 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self.configuration = configuration_param
 
         # Use the global configuration variable to initialize global values
-        self.maximum_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage", DECIMAL_ZERO)
-        self.minimum_profitability_percentage = configuration["globals"].get(
-            "minimum_profitability_percentage", DECIMAL_ZERO
+        self._maximum_slippage_percentage = Decimal(
+            configuration["globals"].get("maximum_slippage_percentage", DECIMAL_ZERO)
         )
-        self.arbitrage_check_interval_seconds = configuration["globals"].get(
-            "arbitrage_check_interval_seconds", DECIMAL_ZERO
+        self._minimum_profitability_percentage = Decimal(
+            configuration["globals"].get("minimum_profitability_percentage", DECIMAL_ZERO)
         )
-        self.minimum_trade_amount = configuration["globals"].get("minimum_trade_amount", DECIMAL_ZERO)
-        self.time_delay_between_arbitrages = configuration["globals"].get("time_delay_between_arbitrages", DECIMAL_ZERO)
-        self.transaction_confirmation_delay = configuration["globals"].get(
-            "transaction_confirmation_delay", DECIMAL_ZERO
+        self._arbitrage_check_interval_seconds = Decimal(
+            configuration["globals"].get("arbitrage_check_interval_seconds", DECIMAL_ZERO)
+        )
+        self._minimum_trade_amount = Decimal(configuration["globals"].get("minimum_trade_amount", DECIMAL_ZERO))
+        self._time_delay_between_arbitrages = Decimal(
+            configuration["globals"].get("time_delay_between_arbitrages", DECIMAL_ZERO)
+        )
+        self._transaction_confirmation_delay = Decimal(
+            configuration["globals"].get("transaction_confirmation_delay", DECIMAL_ZERO)
         )
 
         self._log_initialization()
@@ -239,8 +243,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         await self._update_database()
 
         # Check if it's time to run arbitrage check
-        current_time = time.time()
-        arbitrage_check_interval = float(self.arbitrage_check_interval_seconds)
+        current_time = Decimal(time.time())
+        arbitrage_check_interval = self._arbitrage_check_interval_seconds
 
         if current_time - self.last_arbitrage_check_time >= arbitrage_check_interval:
             self.last_arbitrage_check_time = current_time
@@ -257,7 +261,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 await self._execute_arbitrage(opportunity)
 
                 # Add a short delay between trades to prevent transaction collisions
-                await asyncio.sleep(float(self.time_delay_between_arbitrages))
+                await asyncio.sleep(self._time_delay_between_arbitrages)
 
     async def _find_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
         """Find arbitrage opportunities across pools and tokens"""
@@ -267,7 +271,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         tokens = configuration["tokens"]
 
         # Minimum profit percentage required for arbitrage
-        minimum_profitability_percentage = float(self.minimum_profitability_percentage)
+        minimum_profitability_percentage = self._minimum_profitability_percentage
 
         # Iterate through all token pairs and pool combinations
         for token_idx in range(len(tokens)):
@@ -329,7 +333,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         base_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
 
         # Check if we have enough balance for the trade
-        minimum_trade_amount = self.minimum_trade_amount
+        minimum_trade_amount = self._minimum_trade_amount
         if base_token_balance < minimum_trade_amount:
             self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_token_balance}")
             return False
@@ -342,7 +346,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             return False
 
         # Check slippage for both trades
-        maximum_slippage_percentage = self.maximum_slippage_percentage
+        maximum_slippage_percentage = self._maximum_slippage_percentage
 
         # Get quote for buying quote_token with base_token in buy_pool
         buy_quote = await self._get_quote_swap(
@@ -390,7 +394,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         opportunity["expected_profit_percentage"] = expected_profit_percentage
 
         # Validate that the opportunity is still profitable after slippage
-        minimum_profitability_percentage = self.minimum_profitability_percentage
+        minimum_profitability_percentage = self._minimum_profitability_percentage
         if expected_profit_percentage < minimum_profitability_percentage:
             self.logger().info(
                 f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_percentage:.2f}% < {minimum_profitability_percentage}%"
@@ -428,7 +432,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Track overall success
         overall_success = False
-        maximum_slippage_percentage = self.maximum_slippage_percentage
+        maximum_slippage_percentage = self._maximum_slippage_percentage
 
         # Execute trades for each wallet
         for wallet_address in wallet_addresses:
@@ -475,7 +479,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 self.logger().info(f"First swap completed with transaction signature: {first_swap_result['signature']}")
 
                 # Wait for transaction to be confirmed
-                await asyncio.sleep(float(self.transaction_confirmation_delay))
+                await asyncio.sleep(self._transaction_confirmation_delay)
 
                 # Get quote_token balance after first swap
                 updated_wallet_balances = await self._post_chain_balances(
@@ -514,7 +518,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 )
 
                 # Wait for transaction to be confirmed
-                await asyncio.sleep(float(self.transaction_confirmation_delay))
+                await asyncio.sleep(self._transaction_confirmation_delay)
 
                 # Calculate actual profit
                 final_wallet_balances = await self._post_chain_balances(
@@ -843,7 +847,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     ) -> Optional[Decimal]:
         """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
-        maximum_slippage_percentage = self.maximum_slippage_percentage
+        maximum_slippage_percentage = self._maximum_slippage_percentage
 
         quote = await self._get_quote_swap(
             pool, base_token, quote_token, DECIMAL_ONE, TradeType.SELL, maximum_slippage_percentage
@@ -860,7 +864,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: Decimal) -> Decimal:
         """Calculate the optimal amount to trade based on slippage considerations"""
-        minimum_trade_amount = self.minimum_trade_amount
+        minimum_trade_amount = self._minimum_trade_amount
 
         # Try different trade amounts to find the optimal one
         test_amounts = [
@@ -898,7 +902,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
 
-        maximum_slippage_percentage = self.maximum_slippage_percentage
+        maximum_slippage_percentage = self._maximum_slippage_percentage
 
         # Simulate first swap: base_token -> quote_token in buy_pool
         buy_quote = await self._get_quote_swap(
