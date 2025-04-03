@@ -618,9 +618,24 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             # Initialize wallet if not exists
             if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
                 database["connections"][chain][network][connector]["wallets"][wallet_address] = {
+                    "internal_id": f"{chain}/{network}/{connector}/{wallet_address}",
+                    "chain": chain,
+                    "network": network,
+                    "connector": connector,
                     "tokens": {},
                     "pools": {},
                 }
+            else:
+                # Update existing wallet with missing fields if needed
+                wallet_data = database["connections"][chain][network][connector]["wallets"][wallet_address]
+                if "internal_id" not in wallet_data:
+                    wallet_data["internal_id"] = f"{chain}/{network}/{connector}/{wallet_address}"
+                if "chain" not in wallet_data:
+                    wallet_data["chain"] = chain
+                if "network" not in wallet_data:
+                    wallet_data["network"] = network
+                if "connector" not in wallet_data:
+                    wallet_data["connector"] = connector
 
             # Update wallet token balances
             wallet_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
@@ -633,11 +648,27 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     ):
                         database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][
                             token_symbol
-                        ] = {}
-
-                    database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][
-                        token_symbol
-                    ]["balances"] = {"free": balance, "total": balance}
+                        ] = {
+                            "balances": {
+                                "free": balance,
+                                "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
+                                "total": balance,
+                            }
+                        }
+                    else:
+                        # Update existing token balance
+                        token_data = database["connections"][chain][network][connector]["wallets"][wallet_address][
+                            "tokens"
+                        ][token_symbol]
+                        if "balances" not in token_data:
+                            token_data["balances"] = {
+                                "free": balance,
+                                "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
+                                "total": balance,
+                            }
+                        else:
+                            token_data["balances"]["free"] = balance
+                            token_data["balances"]["total"] = balance
 
     async def _update_token_information(self):
         """Update token information in the database"""
@@ -663,15 +694,27 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             if token_info and "tokens" in token_info:
                 for token in token_info["tokens"]:
                     symbol = token.get("symbol")
+                    address = token.get("address")
 
-                    if not symbol:
+                    if not symbol or not address:
                         continue
 
+                    # Create internal_id for token
+                    internal_id = f"{chain}/{network}/{connector}/{address}"
+
+                    # Get token price if available
+                    token_price = await self._get_token_price(symbol, chain, network)
+
                     database["connections"][chain][network][connector]["tokens"][symbol] = {
-                        "address": token.get("address"),
+                        "internal_id": internal_id,
+                        "address": address,
+                        "chain": chain,
+                        "network": network,
+                        "connector": connector,
                         "symbol": symbol,
-                        "name": token.get("name"),
-                        "decimals": token.get("decimals"),
+                        "name": token.get("name", symbol),
+                        "decimals": token.get("decimals", 18),
+                        "price": token_price,
                     }
 
     async def _update_pool_information(self):
@@ -688,6 +731,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
             if "pools" not in database["connections"][chain][network][connector]:
                 database["connections"][chain][network][connector]["pools"] = {}
+
+            # Initialize pools_by_tokens if not exists
+            if "pools_by_tokens" not in database["connections"][chain][network][connector]:
+                database["connections"][chain][network][connector]["pools_by_tokens"] = {}
 
             pools_info = await self._get_pools(chain, connector, network)
 
@@ -731,8 +778,24 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 if not pool_tokens:
                     continue
 
+                # Create internal_id for pool
+                internal_id = f"{chain}/{network}/{connector}/{pool_address}"
+
                 # Initialize the tokens structure in the database
-                database["connections"][chain][network][connector]["pools"][pool_address]["tokens"] = {}
+                database["connections"][chain][network][connector]["pools"][pool_address] = {
+                    "internal_id": internal_id,
+                    "chain": chain,
+                    "network": network,
+                    "connector": connector,
+                    "address": pool_address,
+                    "type": pool.get("type", "unknown"),
+                    "tokens": {},
+                    "tokens_list": pool_tokens,
+                    "annual_percentage_rate": detailed_pool_info.get("apr"),
+                    "total_value_locked": detailed_pool_info.get("tvl"),
+                    "impermanent_loss": 0,
+                    "volume": {"24h": detailed_pool_info.get("volume24h")},
+                }
 
                 # For XYK and Stable pools, we have exactly 2 tokens
                 if (pool.get("type") == PoolType.XYK.value or pool.get("type") == PoolType.STABLE.value) and len(
@@ -746,25 +809,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         self.logger().warning(f"Could not get price for pool {pool_address}")
                         continue
 
-                    database["connections"][chain][network][connector]["pools"][pool_address] = {
-                        "chain": chain,
-                        "network": network,
-                        "connector": connector,
-                        "address": pool_address,
-                        "type": pool.get("type", "unknown"),
-                        "tokens": {},
-                        "token_list": [],
-                        "annual_percentage_rate": detailed_pool_info.get("apr"),
-                        "total_value_locked": detailed_pool_info.get("tvl"),
-                        "impermanent_loss": 0,
-                        "volume": {"24h": detailed_pool_info.get("volume24h")},
-                    }
-
-                    for token_symbol in pool.get("tokens", {}):
+                    # Update pool tokens information
+                    for token_symbol in pool_tokens:
                         database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
                             token_symbol
                         ] = {
-                            "balance": 0,  # TODO a pool doesn't a token balance, but a wallet has inside the tokens and inside the pools informations, check and fix this!!!
                             "price": {
                                 f"{pool_address}": detailed_pool_info.get("price"),  # TODO fix this on the gateway!!!
                             },
@@ -787,12 +836,23 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             else None,  # Inverse price
                         },
                     }
+
+                    # Add to pools_by_tokens
+                    token_key = f"{base_token}/{quote_token}"
+                    database["connections"][chain][network][connector]["pools_by_tokens"][token_key] = pool_address
+
+                    # Also add reverse order for flexibility
+                    reverse_token_key = f"{quote_token}/{base_token}"
+                    database["connections"][chain][network][connector]["pools_by_tokens"][
+                        reverse_token_key
+                    ] = pool_address
                 # For other pool types, we'll handle them later
                 else:
                     pool_type = pool.get("type", PoolType.UNKNOWN.value)
                     self.logger().warning(f"Pool type {pool_type} not supported yet")
                     raise NotImplementedError(f"Pool type {pool_type} not supported")
 
+                # Update pool with additional information
                 database["connections"][chain][network][connector]["pools"][pool_address].update(
                     {
                         "address": pool_address,
@@ -1422,6 +1482,30 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             Dictionary containing token balances
         """
         return await self.gateway_http_client.get_balances(chain, network, address, token_symbols)
+
+    async def _get_token_price(self, token_symbol: str, chain: str, network: str) -> Optional[Decimal]:
+        """
+        Get the price of a token from a price feed or API.
+
+        Args:
+            token_symbol: Symbol of the token
+            chain: Chain identifier
+            network: Network identifier
+
+        Returns:
+            Decimal price of the token or None if not available
+        """
+        try:
+            # This is a placeholder implementation
+            # In a real implementation, you would fetch the price from a price feed or API
+            # For example, you might use CoinGecko, CoinMarketCap, or a DEX price feed
+
+            # For now, we'll return None to indicate that the price is not available
+            # You should implement the actual price fetching logic here
+            return None
+        except Exception as e:
+            self.logger().error(f"Error fetching price for {token_symbol}: {str(e)}")
+            return None
 
     def format_status(self) -> str:
         """Format the strategy status for display"""
