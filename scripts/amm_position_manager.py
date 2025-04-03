@@ -16,6 +16,18 @@ from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
+DECIMAL_ZERO = Decimal("0")
+DECIMAL_ONE_PERCENT = Decimal("0.01")
+DECIMAL_TEN_PERCENT = Decimal("0.1")
+DECIMAL_TWENTY_FIVE_PERCENT = Decimal("0.25")
+DECIMAL_FIFTY_PERCENT = Decimal("0.5")
+DECIMAL_SEVENTY_FIVE_PERCENT = Decimal("0.75")
+DECIMAL_ONE_HUNDRED_PERCENT = Decimal("1")
+DECIMAL_ONE = Decimal("1")
+DECIMAL_ONE_HUNDRED = Decimal("100")
+DECIMAL_NOT_A_NUMBER = Decimal("NaN")
+DECIMAL_INFINITY = Decimal("Infinity")
+
 
 class PoolType(Enum):
     """Enum for different types of liquidity pools"""
@@ -32,7 +44,7 @@ configuration: Dict[str, Any] = {
         "maximum_slippage_percentage": Decimal("0.5"),  # 0.5 means 0.5%, or 0.005, in the code
         "minimum_profitability_percentage": Decimal("1"),  # 1 means 1%, or 0.01, in the code
         "arbitrage_check_interval_seconds": Decimal("30"),  # Time between arbitrage checks
-        "minimum_trade_amount": Decimal("10"),  # Minimum amount to consider for a trade
+        "minimum_trade_amount": Decimal("1"),  # Minimum amount to consider for a trade
         "time_delay_between_arbitrages": Decimal("1"),  # Time delay between arbitrage trades
         "transaction_confirmation_delay": Decimal("2"),  # Time delay between transaction confirmation
     },
@@ -303,7 +315,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Calculate optimal trade amount (considering slippage)
         trade_amount = await self._calculate_optimal_trade_amount(opportunity, base_token_balance)
 
-        if not trade_amount or trade_amount <= Decimal("0"):
+        if not trade_amount or trade_amount <= DECIMAL_ZERO:
             self.logger().info("Optimal trade amount calculation resulted in an invalid or non-positive amount")
             return False
 
@@ -346,7 +358,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         # Calculate expected profit
         expected_profit = expected_base_token_return - trade_amount
-        expected_profit_percentage = (expected_profit / trade_amount) * Decimal("100")
+        expected_profit_percentage = (expected_profit / trade_amount) * DECIMAL_ONE_HUNDRED
 
         # Add profit details to the opportunity
         opportunity["trade_amount"] = trade_amount
@@ -585,10 +597,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 }
 
             # Update wallet token balances
-            wallet_quote_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
+            wallet_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
 
-            if wallet_quote_token_balances and "balances" in wallet_quote_token_balances:
-                for token_symbol, balance in wallet_quote_token_balances["balances"].items():
+            if wallet_token_balances and "balances" in wallet_token_balances:
+                for token_symbol, balance in wallet_token_balances["balances"].items():
                     if (
                         token_symbol
                         not in database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"]
@@ -745,7 +757,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         "balance": Decimal(str(detailed_pool_info.get("quoteTokenAmount", "0"))),
                         "prices": {
                             base_token: Decimal("1") / Decimal(str(pool_price))
-                            if Decimal(str(pool_price)) != Decimal("0")
+                            if Decimal(str(pool_price)) != DECIMAL_ZERO
                             else None,  # Inverse price
                         },
                     }
@@ -791,16 +803,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_2['address']}")
             return None
 
-        if price_1 == Decimal("0"):
+        if price_1 == DECIMAL_ZERO:
             self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_1['address']} is 0")
             return None
 
-        if price_2 == Decimal("0"):
+        if price_2 == DECIMAL_ZERO:
             self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_2['address']} is 0")
             return None
 
         # Calculate price difference
-        price_difference = Decimal("100") * ((price_2 - price_1) / price_1)
+        price_difference = DECIMAL_ONE_HUNDRED * ((price_2 - price_1) / price_1)
 
         return price_difference
 
@@ -809,11 +821,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     ) -> Optional[Decimal]:
         """Get the price of quote_token in terms of base_token in the given pool"""
         # First try to get a quote for a small amount to determine price
-        minimum_trade_amount = configuration["globals"].get("minimum_trade_amount")
         maximum_slippage_percentage = configuration["globals"].get("maximum_slippage_percentage")
 
         quote = await self._get_quote_swap(
-            pool, base_token, quote_token, minimum_trade_amount, TradeType.SELL, maximum_slippage_percentage
+            pool, base_token, quote_token, DECIMAL_ONE, TradeType.SELL, maximum_slippage_percentage
         )
 
         if not quote or "expectedOut" not in quote:
@@ -821,8 +832,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         expected_out = Decimal(str(quote["expectedOut"]))
 
-        # Calculate price: how much quote_token you get for 1 base_token
-        price = expected_out / minimum_trade_amount
+        price = expected_out
 
         return price
 
@@ -833,22 +843,22 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Try different trade amounts to find the optimal one
         test_amounts = [
             minimum_trade_amount,
-            max_available * Decimal("0.1"),
-            max_available * Decimal("0.25"),
-            max_available * Decimal("0.5"),
-            max_available * Decimal("0.75"),
+            max_available * DECIMAL_TEN_PERCENT,
+            max_available * DECIMAL_TWENTY_FIVE_PERCENT,
+            max_available * DECIMAL_FIFTY_PERCENT,
+            max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
             max_available,
         ]
 
-        best_amount = Decimal("0")
-        best_profit_percentage = Decimal("0")
+        best_amount = DECIMAL_ZERO
+        best_profit_percentage = DECIMAL_ZERO
 
         for amount in test_amounts:
             if amount > max_available:
                 continue
 
             # Skip amounts that are too close to previously tested ones
-            if best_amount > Decimal("0") and abs(amount - best_amount) / best_amount < Decimal("0.1"):
+            if best_amount > DECIMAL_ZERO and abs(amount - best_amount) / best_amount < DECIMAL_TEN_PERCENT:
                 continue
 
             profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
@@ -874,7 +884,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         )
 
         if not buy_quote or "expectedOut" not in buy_quote:
-            return Decimal("0")
+            return DECIMAL_ZERO
 
         expected_quote_token = Decimal(str(buy_quote["expectedOut"]))
 
@@ -884,13 +894,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         )
 
         if not sell_quote or "expectedOut" not in sell_quote:
-            return Decimal("0")
+            return DECIMAL_ZERO
 
         expected_base_token_return = Decimal(str(sell_quote["expectedOut"]))
 
         # Calculate expected profit percentage
         expected_profit = expected_base_token_return - trade_amount
-        expected_profit_percentage = (expected_profit / trade_amount) * Decimal("100")
+        expected_profit_percentage = (expected_profit / trade_amount) * DECIMAL_ONE_HUNDRED
 
         return expected_profit_percentage
 
@@ -960,7 +970,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _get_total_token_balance_from_all_wallets(self, token_symbol: str) -> Decimal:
         """Get token balance across all wallets"""
-        total_balance = Decimal("0")
+        total_balance = DECIMAL_ZERO
 
         for chain_name, chain in configuration["connections"].items():
             for network_name, network in chain.items():
@@ -1400,7 +1410,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         ]  # Last hour
 
         # Calculate profit statistics
-        total_profit = Decimal("0")
+        total_profit = DECIMAL_ZERO
         for ex in executions:
             profit = ex.get("profit")
             if profit is not None:
