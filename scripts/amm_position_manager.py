@@ -393,11 +393,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             maximum_slippage_percentage,
         )
 
-        if not buy_quote or "expectedOut" not in buy_quote:
+        if not buy_quote or "estimatedAmountOut" not in buy_quote:
             self.logger().info(f"Failed to get buy quote for {base_token}/{quote_token} in pool {buy_pool['address']}")
             return False
 
-        expected_quote_token = Decimal(str(buy_quote["expectedOut"]))
+        expected_quote_token = Decimal(str(buy_quote["estimatedAmountOut"]))
 
         # Get quote for selling quote_token for base_token in sell_pool
         sell_quote = await self._get_quote_swap(
@@ -409,13 +409,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             maximum_slippage_percentage,
         )
 
-        if not sell_quote or "expectedOut" not in sell_quote:
+        if not sell_quote or "estimatedAmountOut" not in sell_quote:
             self.logger().info(
                 f"Failed to get sell quote for {quote_token}/{base_token} in pool {sell_pool['address']}"
             )
             return False
 
-        expected_base_token_return = Decimal(str(sell_quote["expectedOut"]))
+        expected_base_token_return = Decimal(str(sell_quote["estimatedAmountOut"]))
 
         # Calculate expected profit
         expected_profit = expected_base_token_return - trade_amount
@@ -1050,10 +1050,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             pool, base_token, quote_token, DECIMAL_ONE, TradeType.SELL, maximum_slippage_percentage
         )
 
-        if not quote or "expectedOut" not in quote:
+        if not quote or "estimatedAmountOut" not in quote:
             return None
 
-        expected_out = Decimal(str(quote["expectedOut"]))
+        expected_out = Decimal(str(quote["estimatedAmountOut"]))
 
         price = expected_out
 
@@ -1106,20 +1106,20 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, maximum_slippage_percentage
         )
 
-        if not buy_quote or "expectedOut" not in buy_quote:
+        if not buy_quote or "estimatedAmountOut" not in buy_quote:
             return DECIMAL_ZERO
 
-        expected_quote_token = Decimal(str(buy_quote["expectedOut"]))
+        expected_quote_token = Decimal(str(buy_quote["estimatedAmountOut"]))
 
         # Simulate second swap: quote_token -> base_token in sell_pool
         sell_quote = await self._get_quote_swap(
             sell_pool, quote_token, base_token, expected_quote_token, TradeType.SELL, maximum_slippage_percentage
         )
 
-        if not sell_quote or "expectedOut" not in sell_quote:
+        if not sell_quote or "estimatedAmountOut" not in sell_quote:
             return DECIMAL_ZERO
 
-        expected_base_token_return = Decimal(str(sell_quote["expectedOut"]))
+        expected_base_token_return = Decimal(str(sell_quote["estimatedAmountOut"]))
 
         # Calculate expected profit percentage
         expected_profit = expected_base_token_return - trade_amount
