@@ -33,10 +33,17 @@ DECIMAL_INFINITY = Decimal("Infinity")
 class PoolType(Enum):
     """Enum for different types of liquidity pools"""
 
+    # Hydration
     XYK = "Xyk"
     STABLE = "Stable"
     OMNIPOOL = "Omni"
     LBP = "Lbp"
+
+    # Raydium
+    AMM = "amm"
+    CPMM = "cpmm"
+    CLMM = "clmm"
+
     UNKNOWN = "unknown"
 
 
@@ -66,21 +73,21 @@ configuration: Dict[str, Any] = {
                 }
             },
         },
-        # "solana": {
-        #     "mainnet-beta": {
-        #         "raydium": {
-        #             "wallets": [
-        #                 "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
-        #             ],
-        #             "pools": [
-        #                 # "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
-        #                 # "<pool_address>",  # Omni pool
-        #                 # "<pool_address>",  # Stable pool
-        #                 # "<pool_address>",  # LBP pool
-        #             ],
-        #         }
-        #     }
-        # },
+        "solana": {
+            "mainnet-beta": {
+                "raydium": {
+                    "wallets": [
+                        "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
+                    ],
+                    "pools": [
+                        # "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
+                        # "<pool_address>",  # Omni pool
+                        # "<pool_address>",  # Stable pool
+                        # "<pool_address>",  # LBP pool
+                    ],
+                }
+            }
+        },
     },
     "tokens": ["DOT", "HDX", "USDC", "USDT"],
 }
@@ -673,314 +680,307 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if "connections" not in database:
             database["connections"] = {}
 
-        for connection in self._all_gateway_connections:
-            chain = connection.get("chain")
-            network = connection.get("network")
-            connector = connection.get("connector")
-            wallet_address = connection.get("wallet_address")
-            tokens = connection.get("tokens", "").split(",")
+        for chain in self._configuration["connections"].keys():
+            for network in self._configuration["connections"][chain].keys():
+                for connector in self._configuration["connections"][chain][network].keys():
+                    tokens = self._configuration["tokens"]
 
-            # Skip incomplete connections
-            if not all([chain, network, connector, wallet_address]):
-                continue
+                    for wallet_address in self._configuration["connections"][chain][network][connector]["wallets"]:
+                        # Initialize chain if not exists
+                        if chain not in database["connections"]:
+                            database["connections"][chain] = {}
 
-            # Initialize chain if not exists
-            if chain not in database["connections"]:
-                database["connections"][chain] = {}
+                        # Initialize network if not exists
+                        if network not in database["connections"][chain]:
+                            database["connections"][chain][network] = {}
 
-            # Initialize network if not exists
-            if network not in database["connections"][chain]:
-                database["connections"][chain][network] = {}
+                        # Initialize connector if not exists
+                        if connector not in database["connections"][chain][network]:
+                            database["connections"][chain][network][connector] = {}
 
-            # Initialize connector if not exists
-            if connector not in database["connections"][chain][network]:
-                database["connections"][chain][network][connector] = {}
+                        # Initialize wallets if not exists
+                        if "wallets" not in database["connections"][chain][network][connector]:
+                            database["connections"][chain][network][connector]["wallets"] = {}
 
-            # Initialize wallets if not exists
-            if "wallets" not in database["connections"][chain][network][connector]:
-                database["connections"][chain][network][connector]["wallets"] = {}
+                        # Create wallet internal_id
+                        wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
 
-            # Create wallet internal_id
-            wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
-
-            # Initialize wallet if not exists
-            if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
-                database["connections"][chain][network][connector]["wallets"][wallet_address] = {
-                    "internal_id": wallet_internal_id,
-                    "chain": chain,
-                    "network": network,
-                    "connector": connector,
-                    "tokens": {},
-                    "pools": {},
-                }
-            else:
-                # Update existing wallet with missing fields if needed
-                wallet_data = database["connections"][chain][network][connector]["wallets"][wallet_address]
-                if "internal_id" not in wallet_data:
-                    wallet_data["internal_id"] = wallet_internal_id
-                if "chain" not in wallet_data:
-                    wallet_data["chain"] = chain
-                if "network" not in wallet_data:
-                    wallet_data["network"] = network
-                if "connector" not in wallet_data:
-                    wallet_data["connector"] = connector
-
-            # Update wallet token balances
-            wallet_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
-
-            if wallet_token_balances and "balances" in wallet_token_balances:
-                for token_symbol, balance in wallet_token_balances["balances"].items():
-                    if (
-                        token_symbol
-                        not in database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"]
-                    ):
-                        database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][
-                            token_symbol
-                        ] = {
-                            "balances": {
-                                "free": balance,
-                                "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                                "total": balance,
-                            }
-                        }
-                    else:
-                        # Update existing token balance
-                        token_data = database["connections"][chain][network][connector]["wallets"][wallet_address][
-                            "tokens"
-                        ][token_symbol]
-                        if "balances" not in token_data:
-                            token_data["balances"] = {
-                                "free": balance,
-                                "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                                "total": balance,
+                        # Initialize wallet if not exists
+                        if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
+                            database["connections"][chain][network][connector]["wallets"][wallet_address] = {
+                                "internal_id": wallet_internal_id,
+                                "chain": chain,
+                                "network": network,
+                                "connector": connector,
+                                "tokens": {},
+                                "pools": {},
                             }
                         else:
-                            token_data["balances"]["free"] = balance
-                            token_data["balances"]["total"] = balance
+                            # Update existing wallet with missing fields if needed
+                            wallet_data = database["connections"][chain][network][connector]["wallets"][wallet_address]
+                            if "internal_id" not in wallet_data:
+                                wallet_data["internal_id"] = wallet_internal_id
+                            if "chain" not in wallet_data:
+                                wallet_data["chain"] = chain
+                            if "network" not in wallet_data:
+                                wallet_data["network"] = network
+                            if "connector" not in wallet_data:
+                                wallet_data["connector"] = connector
 
-            # Update wallet-pool mappings
-            if "pools" in database["connections"][chain][network][connector]:
-                for pool_address, pool_info in database["connections"][chain][network][connector]["pools"].items():
-                    pool_internal_id = pool_info["internal_id"]
+                        # Update wallet token balances
+                        wallet_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
 
-                    # Update wallets_by_pool map
-                    if pool_internal_id not in database["maps"]["wallets_by_pool"]:
-                        database["maps"]["wallets_by_pool"][pool_internal_id] = []
-                    if wallet_internal_id not in database["maps"]["wallets_by_pool"][pool_internal_id]:
-                        database["maps"]["wallets_by_pool"][pool_internal_id].append(wallet_internal_id)
+                        if wallet_token_balances and "balances" in wallet_token_balances:
+                            for token_symbol, balance in wallet_token_balances["balances"].items():
+                                if (
+                                    token_symbol
+                                    not in database["connections"][chain][network][connector]["wallets"][
+                                        wallet_address
+                                    ]["tokens"]
+                                ):
+                                    database["connections"][chain][network][connector]["wallets"][wallet_address][
+                                        "tokens"
+                                    ][token_symbol] = {
+                                        "balances": {
+                                            "free": balance,
+                                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
+                                            "total": balance,
+                                        }
+                                    }
+                                else:
+                                    # Update existing token balance
+                                    token_data = database["connections"][chain][network][connector]["wallets"][
+                                        wallet_address
+                                    ]["tokens"][token_symbol]
+                                    if "balances" not in token_data:
+                                        token_data["balances"] = {
+                                            "free": balance,
+                                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
+                                            "total": balance,
+                                        }
+                                    else:
+                                        token_data["balances"]["free"] = balance
+                                        token_data["balances"]["total"] = balance
 
-                    # Update pools_by_wallet map
-                    if wallet_internal_id not in database["maps"]["pools_by_wallet"]:
-                        database["maps"]["pools_by_wallet"][wallet_internal_id] = []
-                    if pool_internal_id not in database["maps"]["pools_by_wallet"][wallet_internal_id]:
-                        database["maps"]["pools_by_wallet"][wallet_internal_id].append(pool_internal_id)
+                        # Update wallet-pool mappings
+                        if "pools" in database["connections"][chain][network][connector]:
+                            for pool_address, pool_info in database["connections"][chain][network][connector][
+                                "pools"
+                            ].items():
+                                pool_internal_id = pool_info["internal_id"]
+
+                                # Update wallets_by_pool map
+                                if pool_internal_id not in database["maps"]["wallets_by_pool"]:
+                                    database["maps"]["wallets_by_pool"][pool_internal_id] = []
+                                if wallet_internal_id not in database["maps"]["wallets_by_pool"][pool_internal_id]:
+                                    database["maps"]["wallets_by_pool"][pool_internal_id].append(wallet_internal_id)
+
+                                # Update pools_by_wallet map
+                                if wallet_internal_id not in database["maps"]["pools_by_wallet"]:
+                                    database["maps"]["pools_by_wallet"][wallet_internal_id] = []
+                                if pool_internal_id not in database["maps"]["pools_by_wallet"][wallet_internal_id]:
+                                    database["maps"]["pools_by_wallet"][wallet_internal_id].append(pool_internal_id)
 
         return database
 
     async def _update_token_information(self):
         """Update token information in the database"""
 
-        for connection in self._all_gateway_connections:
-            chain = connection.get("chain")
-            network = connection.get("network")
-            connector = connection.get("connector")
-            tokens = connection.get("tokens", "").split(",")
+        for chain in self._configuration["connections"].keys():
+            for network in self._configuration["connections"][chain].keys():
+                for connector in self._configuration["connections"][chain][network].keys():
+                    tokens = self._configuration["tokens"]
 
-            # Skip incomplete connections
-            if not all([chain, network, connector]):
-                continue
+                    # Initialize connector tokens if not exists
+                    if not database["connections"][chain][network][connector].get("tokens"):
+                        database["connections"][chain][network][connector]["tokens"] = {}
 
-            # Initialize connector tokens if not exists
-            if not database["connections"][chain][network][connector].get("tokens"):
-                database["connections"][chain][network][connector]["tokens"] = {}
+                    # Get token information
+                    token_info = await self._get_chain_tokens(chain, network, tokens)
 
-            # Get token information
-            token_info = await self._get_chain_tokens(chain, network, tokens)
+                    if token_info and "tokens" in token_info:
+                        for token in token_info["tokens"]:
+                            symbol = token.get("symbol")
+                            address = token.get("address")
 
-            if token_info and "tokens" in token_info:
-                for token in token_info["tokens"]:
-                    symbol = token.get("symbol")
-                    address = token.get("address")
+                            if not symbol or not address:
+                                continue
 
-                    if not symbol or not address:
-                        continue
+                            # Create internal_id for token
+                            internal_id = f"{chain}/{network}/{connector}/{address}"
 
-                    # Create internal_id for token
-                    internal_id = f"{chain}/{network}/{connector}/{address}"
+                            # Get token price if available
+                            token_price = await self._get_token_price(symbol, chain, network)
 
-                    # Get token price if available
-                    token_price = await self._get_token_price(symbol, chain, network)
-
-                    database["connections"][chain][network][connector]["tokens"][symbol] = {
-                        "internal_id": internal_id,
-                        "address": address,
-                        "chain": chain,
-                        "network": network,
-                        "connector": connector,
-                        "symbol": symbol,
-                        "name": token.get("name", symbol),
-                        "decimals": token.get("decimals", 18),
-                        "price": token_price,
-                    }
+                            database["connections"][chain][network][connector]["tokens"][symbol] = {
+                                "internal_id": internal_id,
+                                "address": address,
+                                "chain": chain,
+                                "network": network,
+                                "connector": connector,
+                                "symbol": symbol,
+                                "name": token.get("name", symbol),
+                                "decimals": token.get("decimals", 18),
+                                "price": token_price,
+                            }
 
         return database
 
     async def _update_pool_information(self):
         """Update pool information in the database"""
 
-        for connection in self._all_gateway_connections:
-            chain = connection.get("chain")
-            network = connection.get("network")
-            connector = connection.get("connector")
+        for chain in self._configuration["connections"].keys():
+            for network in self._configuration["connections"][chain].keys():
+                for connector in self._configuration["connections"][chain][network].keys():
+                    if "pools" not in database["connections"][chain][network][connector]:
+                        database["connections"][chain][network][connector]["pools"] = {}
 
-            if not all([chain, network, connector]):
-                continue
+                    pools_info = await self._get_pools(chain, connector, network)
 
-            if "pools" not in database["connections"][chain][network][connector]:
-                database["connections"][chain][network][connector]["pools"] = {}
+                    if not pools_info:
+                        continue
 
-            pools_info = await self._get_pools(chain, connector, network)
+                    _pools = pools_info.get("pools", [])
 
-            if not pools_info:
-                continue
+                    # Check if pools_info is a list
+                    if not isinstance(_pools, list):
+                        continue
 
-            _pools = pools_info.get("pools", [])
-
-            # Check if pools_info is a list
-            if not isinstance(_pools, list):
-                continue
-
-            # Update pool information in database for each pool
-            for pool in _pools:
-                if not isinstance(pool, dict):
-                    continue
-
-                pool_address = pool.get("address")
-                if not pool_address:
-                    raise ValueError(f"Pool {pool} doesn't have an address")
-
-                should_ignore = False
-                for token in pool.get("tokens", []):
-                    if token not in self._configuration["tokens"]:
-                        if (
-                            pool.get("address")
-                            not in self._configuration["connections"][chain][network][connector]["pools"]
-                        ):
-                            should_ignore = True
-                            break
-                if should_ignore:
-                    continue
-
-                # Get detailed pool information
-                detailed_pool_info = await self._get_pool_information(
-                    {"network": network, "connector": connector, "pool_address": pool_address}
-                )
-
-                if not detailed_pool_info:
-                    continue
-
-                # Get pool tokens
-                pool_tokens = pool.get("tokens", [])
-                if not pool_tokens:
-                    continue
-
-                # Create internal_id for pool
-                pool_internal_id = f"{chain}/{network}/{connector}/{pool_address}"
-
-                # Initialize the tokens structure in the database
-                database["connections"][chain][network][connector]["pools"][pool_address] = {
-                    "internal_id": pool_internal_id,
-                    "chain": chain,
-                    "network": network,
-                    "connector": connector,
-                    "address": pool_address,
-                    "type": pool.get("type", PoolType.UNKNOWN.value),
-                    "tokens": {},
-                    "tokens_list": pool_tokens,
-                    "annual_percentage_rate": detailed_pool_info.get("apr"),
-                    "total_value_locked": detailed_pool_info.get("tvl"),
-                    "impermanent_loss": 0,
-                    "volume": {"24h": detailed_pool_info.get("volume24h")},
-                }
-
-                # Generate all possible token permutations for this pool
-                token_permutations = self._generate_token_permutations(pool_tokens)
-
-                # Add pool to all token permutations in the map
-                for token_key in token_permutations:
-                    if token_key not in database["maps"]["pools_by_tokens"]:
-                        database["maps"]["pools_by_tokens"][token_key] = []
-                    if pool_internal_id not in database["maps"]["pools_by_tokens"][token_key]:
-                        database["maps"]["pools_by_tokens"][token_key].append(pool_internal_id)
-
-                # Handle specific pool types
-                pool_type = pool.get("type", PoolType.UNKNOWN.value)
-                if pool_type == PoolType.XYK.value or pool_type == PoolType.STABLE.value:
-                    if len(pool_tokens) == 2:
-                        base_token = pool_tokens[0]
-                        quote_token = pool_tokens[1]
-                        pool_price = detailed_pool_info.get("price", None)
-
-                        if pool_price is None:
-                            self.logger().warning(f"Could not get price for pool {pool_address}")
+                    # Update pool information in database for each pool
+                    for pool in _pools:
+                        if not isinstance(pool, dict):
                             continue
 
-                        # Update pool tokens information
-                        for token_symbol in pool_tokens:
-                            database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                                token_symbol
-                            ] = {
-                                "price": {
-                                    f"{pool_address}": detailed_pool_info.get(
-                                        "price"
-                                    ),  # TODO fix this on the gateway!!!
-                                },
+                        pool_address = pool.get("address")
+                        if not pool_address:
+                            raise ValueError(f"Pool {pool} doesn't have an address")
+
+                        should_ignore = False
+                        for token in pool.get("tokens", []):
+                            if token not in self._configuration["tokens"]:
+                                if (
+                                    pool.get("address")
+                                    not in self._configuration["connections"][chain][network][connector]["pools"]
+                                ):
+                                    should_ignore = True
+                                    break
+                        if should_ignore:
+                            continue
+
+                        # Get detailed pool information
+                        detailed_pool_info = await self._get_pool_information(
+                            {"network": network, "connector": connector, "pool_address": pool_address}
+                        )
+
+                        if not detailed_pool_info:
+                            continue
+
+                        # Get pool tokens
+                        pool_tokens = pool.get("tokens", [])
+                        if not pool_tokens:
+                            continue
+
+                        # Create internal_id for pool
+                        pool_internal_id = f"{chain}/{network}/{connector}/{pool_address}"
+
+                        # Initialize the tokens structure in the database
+                        database["connections"][chain][network][connector]["pools"][pool_address] = {
+                            "internal_id": pool_internal_id,
+                            "chain": chain,
+                            "network": network,
+                            "connector": connector,
+                            "address": pool_address,
+                            "type": pool.get("type", PoolType.UNKNOWN.value),
+                            "tokens": {},
+                            "tokens_list": pool_tokens,
+                            "annual_percentage_rate": detailed_pool_info.get("apr"),
+                            "total_value_locked": detailed_pool_info.get("tvl"),
+                            "impermanent_loss": 0,
+                            "volume": {"24h": detailed_pool_info.get("volume24h")},
+                        }
+
+                        # Generate all possible token permutations for this pool
+                        token_permutations = self._generate_token_permutations(pool_tokens)
+
+                        # Add pool to all token permutations in the map
+                        for token_key in token_permutations:
+                            if token_key not in database["maps"]["pools_by_tokens"]:
+                                database["maps"]["pools_by_tokens"][token_key] = []
+                            if pool_internal_id not in database["maps"]["pools_by_tokens"][token_key]:
+                                database["maps"]["pools_by_tokens"][token_key].append(pool_internal_id)
+
+                        # Handle specific pool types
+                        pool_type = pool.get("type", PoolType.UNKNOWN.value)
+                        if (
+                            pool_type == PoolType.XYK.value
+                            or pool_type == PoolType.STABLE.value
+                            or pool_type == PoolType.AMM.value
+                        ):
+                            if len(pool_tokens) == 2:
+                                base_token = pool_tokens[0]
+                                quote_token = pool_tokens[1]
+                                pool_price = detailed_pool_info.get("price", None)
+
+                                if pool_price is None:
+                                    self.logger().warning(f"Could not get price for pool {pool_address}")
+                                    continue
+
+                                # Update pool tokens information
+                                for token_symbol in pool_tokens:
+                                    database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
+                                        token_symbol
+                                    ] = {
+                                        "price": {
+                                            f"{pool_address}": detailed_pool_info.get(
+                                                "price"
+                                            ),  # TODO fix this on the gateway!!!
+                                        },
+                                    }
+
+                                # Initialize base token
+                                database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
+                                    base_token
+                                ] = {
+                                    "balance": Decimal(str(detailed_pool_info.get("baseTokenAmount", "0"))),
+                                    "prices": {
+                                        quote_token: Decimal(str(pool_price)),  # Direct price
+                                    },
+                                }
+
+                                # Initialize quote token
+                                database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
+                                    quote_token
+                                ] = {
+                                    "balance": Decimal(str(detailed_pool_info.get("quoteTokenAmount", "0"))),
+                                    "prices": {
+                                        base_token: Decimal("1") / Decimal(str(pool_price))
+                                        if Decimal(str(pool_price)) != DECIMAL_ZERO
+                                        else None,  # Inverse price
+                                    },
+                                }
+                        elif pool_type == PoolType.OMNIPOOL.value:
+                            # Handle Omni pool specific logic here
+                            # For now, we'll just log that we found an Omni pool
+                            self.logger().info(f"Found Omni pool: {pool_address}")
+                        elif pool_type == PoolType.LBP.value:
+                            # Handle LBP pool specific logic here
+                            # For now, we'll just log that we found an LBP pool
+                            self.logger().info(f"Found LBP pool: {pool_address}")
+                        else:
+                            self.logger().warning(f"Pool type {pool_type} not supported yet")
+                            raise NotImplementedError(f"Pool type {pool_type} not supported")
+
+                        # Update pool with additional information
+                        database["connections"][chain][network][connector]["pools"][pool_address].update(
+                            {
+                                "address": pool_address,
+                                "type": pool.get("type", PoolType.UNKNOWN.value),
+                                "annual_percentage_rate": detailed_pool_info.get("apr", None),
+                                "total_value_locked": detailed_pool_info.get("tvl", None),
+                                "impermanent_loss": None,
+                                "volume": {"24h": detailed_pool_info.get("volume24h", None)},
                             }
-
-                        # Initialize base token
-                        database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                            base_token
-                        ] = {
-                            "balance": Decimal(str(detailed_pool_info.get("baseTokenAmount", "0"))),
-                            "prices": {
-                                quote_token: Decimal(str(pool_price)),  # Direct price
-                            },
-                        }
-
-                        # Initialize quote token
-                        database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                            quote_token
-                        ] = {
-                            "balance": Decimal(str(detailed_pool_info.get("quoteTokenAmount", "0"))),
-                            "prices": {
-                                base_token: Decimal("1") / Decimal(str(pool_price))
-                                if Decimal(str(pool_price)) != DECIMAL_ZERO
-                                else None,  # Inverse price
-                            },
-                        }
-                elif pool_type == PoolType.OMNIPOOL.value:
-                    # Handle Omni pool specific logic here
-                    # For now, we'll just log that we found an Omni pool
-                    self.logger().info(f"Found Omni pool: {pool_address}")
-                elif pool_type == PoolType.LBP.value:
-                    # Handle LBP pool specific logic here
-                    # For now, we'll just log that we found an LBP pool
-                    self.logger().info(f"Found LBP pool: {pool_address}")
-                else:
-                    self.logger().warning(f"Pool type {pool_type} not supported yet")
-                    raise NotImplementedError(f"Pool type {pool_type} not supported")
-
-                # Update pool with additional information
-                database["connections"][chain][network][connector]["pools"][pool_address].update(
-                    {
-                        "address": pool_address,
-                        "type": pool.get("type", PoolType.UNKNOWN.value),
-                        "annual_percentage_rate": detailed_pool_info.get("apr", None),
-                        "total_value_locked": detailed_pool_info.get("tvl", None),
-                        "impermanent_loss": None,
-                        "volume": {"24h": detailed_pool_info.get("volume24h", None)},
-                    }
-                )
+                        )
 
         return database
 
