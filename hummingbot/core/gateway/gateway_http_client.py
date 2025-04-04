@@ -326,10 +326,21 @@ class GatewayHttpClient:
         self,
         chain: str,
         network: str,
-        _token_symbols: Optional[Union[str, List[str]]] = None,
+        token_symbols: Optional[Union[str, List[str]]] = None,
         fail_silently: bool = True,
     ) -> Dict[str, Any]:
-        return await self.api_request("get", f"{chain}/tokens", {"network": network}, fail_silently=fail_silently)
+        if token_symbols is None:
+            return await self.api_request("get", f"{chain}/tokens", {"network": network}, fail_silently=fail_silently)
+        else:
+            if isinstance(token_symbols, str):
+                token_symbols = [token_symbols]
+
+            return await self.api_request(
+                "get",
+                f"{chain}/tokens",
+                {"network": network, "tokenSymbols": token_symbols},
+                fail_silently=fail_silently,
+            )
 
     async def get_network_status(
         self, chain: str = None, network: str = None, fail_silently: bool = False
