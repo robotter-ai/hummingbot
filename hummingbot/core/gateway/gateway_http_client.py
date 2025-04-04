@@ -442,11 +442,11 @@ class GatewayHttpClient:
             "network": network,
             "baseToken": base_asset,
             "quoteToken": quote_asset,
-            "amount": amount,
-            "side": side.name,
+            "amount": float(amount),
+            "side": str(side.name).lower(),
         }
         if slippage_percentage is not None:
-            request_payload["slippagePct"] = slippage_percentage
+            request_payload["slippagePct"] = float(slippage_percentage)
         if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
@@ -548,11 +548,11 @@ class GatewayHttpClient:
             "walletAddress": wallet_address,
             "baseToken": base_asset,
             "quoteToken": quote_asset,
-            "amount": amount,
-            "side": side.name,
+            "amount": float(amount),
+            "side": str(side.name).lower(),
         }
         if slippage_percentage is not None:
-            request_payload["slippagePct"] = slippage_percentage
+            request_payload["slippagePct"] = float(slippage_percentage)
         # if limit_price is not None:
         #     request_payload["limitPrice"] = limit_price
         if nonce is not None:
@@ -715,7 +715,8 @@ class GatewayHttpClient:
         :return: Dictionary containing price information
         """
         try:
-            response = await self.quote_swap(
+            # TODO handle CLMM as well!!!
+            response = await self.amm_quote_swap(
                 network=network,
                 connector=connector,
                 base_asset=base_asset,
@@ -780,11 +781,11 @@ class GatewayHttpClient:
             "poolAddress": pool_address,
         }
         if base_token_amount is not None:
-            query_params["baseTokenAmount"] = base_token_amount
+            query_params["baseTokenAmount"] = float(base_token_amount)
         if quote_token_amount is not None:
-            query_params["quoteTokenAmount"] = quote_token_amount
+            query_params["quoteTokenAmount"] = float(quote_token_amount)
         if slippage_percentage is not None:
-            query_params["slippagePct"] = slippage_percentage
+            query_params["slippagePct"] = float(slippage_percentage)
 
         return await self.api_request(
             "get",
@@ -822,11 +823,11 @@ class GatewayHttpClient:
             "poolAddress": pool_address,
         }
         if base_token_amount is not None:
-            request_payload["baseTokenAmount"] = base_token_amount
+            request_payload["baseTokenAmount"] = float(base_token_amount)
         if quote_token_amount is not None:
-            request_payload["quoteTokenAmount"] = quote_token_amount
+            request_payload["quoteTokenAmount"] = float(quote_token_amount)
         if slippage_percentage is not None:
-            request_payload["slippagePct"] = slippage_percentage
+            request_payload["slippagePct"] = float(slippage_percentage)
 
         return await self.api_request(
             "post",
@@ -858,7 +859,7 @@ class GatewayHttpClient:
             "network": network,
             "walletAddress": wallet_address,
             "poolAddress": pool_address,
-            "percentageToRemove": percentage_to_remove,
+            "percentageToRemove": float(percentage_to_remove),
         }
 
         return await self.api_request(
