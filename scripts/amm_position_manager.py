@@ -35,8 +35,8 @@ class PoolType(Enum):
 
     # Hydration
     XYK = "Xyk"
-    STABLE = "Stable"
-    OMNIPOOL = "Omni"
+    STABLE = "Stableswap"
+    OMNIPOOL = "Omnipool"
     LBP = "Lbp"
 
     # Raydium
@@ -73,21 +73,21 @@ configuration: Dict[str, Any] = {
                 }
             },
         },
-        "solana": {
-            "mainnet-beta": {
-                "raydium": {
-                    "wallets": [
-                        "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
-                    ],
-                    "pools": [
-                        # "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
-                        # "<pool_address>",  # Omni pool
-                        # "<pool_address>",  # Stable pool
-                        # "<pool_address>",  # LBP pool
-                    ],
-                }
-            }
-        },
+        # "solana": {
+        #     "mainnet-beta": {
+        #         "raydium": {
+        #             "wallets": [
+        #                 "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
+        #             ],
+        #             "pools": [
+        #                 # "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
+        #                 # "<pool_address>",  # Omni pool
+        #                 # "<pool_address>",  # Stable pool
+        #                 # "<pool_address>",  # LBP pool
+        #             ],
+        #         }
+        #     }
+        # },
     },
     "tokens": ["DOT", "HDX", "USDC", "USDT"],
 }
