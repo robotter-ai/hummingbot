@@ -59,21 +59,21 @@ configuration: Dict[str, Any] = {
         "transaction_polling_interval": "2",  # Time delay between transaction polling
     },
     "connections": {
-        # "polkadot": {
-        #     "mainnet": {
-        #         "hydration": {
-        #             "wallets": [
-        #                 "5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt",
-        #             ],
-        #             "pools": [
-        #                 # "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
-        #                 # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
-        #                 # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
-        #                 # "<pool_address>",  # LBP pool
-        #             ],
-        #         }
-        #     },
-        # },
+        "polkadot": {
+            "mainnet": {
+                "hydration": {
+                    "wallets": [
+                        "5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt",
+                    ],
+                    "pools": [
+                        # "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
+                        # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
+                        # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
+                        # "<pool_address>",  # LBP pool
+                    ],
+                }
+            },
+        },
         "solana": {
             "mainnet-beta": {
                 "raydium": {
@@ -90,7 +90,12 @@ configuration: Dict[str, Any] = {
             }
         },
     },
-    "tokens": ["DOT", "HDX", "USDC", "USDT"],
+    "tokens": [
+        "USDC",
+        "USDT",
+        # "DOT",
+        # "HDX",
+    ],
 }
 
 # Example structure)
@@ -1364,7 +1369,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """
         network = pool.get("network")
         connector = pool.get("connector")
-        pool_address = pool.get("pool_address")
+        pool_address = pool.get("address")
 
         if not all([network, connector, pool_address]):
             return None
