@@ -16,6 +16,7 @@ from hummingbot.core.event.events import TradeType
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
+from scripts.utility.decorators import logged_class
 
 DECIMAL_ZERO = Decimal("0")
 DECIMAL_ONE_PERCENT = Decimal("0.01")
@@ -58,36 +59,36 @@ configuration: Dict[str, Any] = {
         "transaction_polling_interval": "2",  # Time delay between transaction polling
     },
     "connections": {
-        "polkadot": {
-            "mainnet": {
-                "hydration": {
-                    "wallets": [
-                        "5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt",
-                    ],
-                    "pools": [
-                        # "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
-                        # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
-                        # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
-                        # "<pool_address>",  # LBP pool
-                    ],
-                }
-            },
-        },
-        # "solana": {
-        #     "mainnet-beta": {
-        #         "raydium": {
+        # "polkadot": {
+        #     "mainnet": {
+        #         "hydration": {
         #             "wallets": [
-        #                 "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
+        #                 "5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt",
         #             ],
         #             "pools": [
-        #                 # "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
-        #                 # "<pool_address>",  # Omni pool
-        #                 # "<pool_address>",  # Stable pool
+        #                 # "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
+        #                 # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
+        #                 # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
         #                 # "<pool_address>",  # LBP pool
         #             ],
         #         }
-        #     }
+        #     },
         # },
+        "solana": {
+            "mainnet-beta": {
+                "raydium": {
+                    "wallets": [
+                        "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
+                    ],
+                    "pools": [
+                        # "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
+                        # "<pool_address>",  # Omni pool
+                        # "<pool_address>",  # Stable pool
+                        # "<pool_address>",  # LBP pool
+                    ],
+                }
+            }
+        },
     },
     "tokens": ["DOT", "HDX", "USDC", "USDT"],
 }
@@ -198,6 +199,7 @@ class AMMRobustPositionManagerConfiguration(BaseClientModel):
 
 
 # noinspection PyShadowingNames
+@logged_class
 class AMMRobustPositionManager(ScriptStrategyBase):
     markets: Dict[str, Any] = {}
     _configuration = None
