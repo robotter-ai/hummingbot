@@ -715,8 +715,8 @@ class GatewayHttpClient:
         :return: Dictionary containing price information
         """
         try:
-            # TODO handle CLMM as well!!!
-            response = await self.amm_quote_swap(
+            # TODO handle AMM as well!!!
+            response = await self.clmm_quote_swap(
                 network=network,
                 connector=connector,
                 base_asset=base_asset,
