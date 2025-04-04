@@ -196,6 +196,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     _configuration = None
     _gateway_is_ready = False
     _gateway_http_client: Optional[GatewayHttpClient] = None
+    _all_gateway_connections: List[Dict[str, Any]] = []
     _last_arbitrage_check_time = 0
     _maximum_slippage_percentage: Decimal = DECIMAL_ZERO
     _minimum_profitability_percentage: Decimal = DECIMAL_ZERO
@@ -243,6 +244,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # If the configured delay is 0, use the default timeout (60 seconds)
         if self._transaction_confirmation_delay > 0:
             self._maximum_transaction_confirmation_timeout = int(self._transaction_confirmation_delay) * 5
+
+        self._all_gateway_connections = GatewayConnectionSetting.load()
 
         self._log_initialization()
 
@@ -665,13 +668,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _update_wallet_information(self):
         """Update wallet information in the database"""
-        all_gateway_connections = GatewayConnectionSetting.load()
 
         # Prepare database connections structure if not exists
         if "connections" not in database:
             database["connections"] = {}
 
-        for connection in all_gateway_connections:
+        for connection in self._all_gateway_connections:
             chain = connection.get("chain")
             network = connection.get("network")
             connector = connection.get("connector")
@@ -773,11 +775,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     if pool_internal_id not in database["maps"]["pools_by_wallet"][wallet_internal_id]:
                         database["maps"]["pools_by_wallet"][wallet_internal_id].append(pool_internal_id)
 
+        return database
+
     async def _update_token_information(self):
         """Update token information in the database"""
-        all_gateway_connections = GatewayConnectionSetting.load()
 
-        for connection in all_gateway_connections:
+        for connection in self._all_gateway_connections:
             chain = connection.get("chain")
             network = connection.get("network")
             connector = connection.get("connector")
@@ -820,11 +823,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                         "price": token_price,
                     }
 
+        return database
+
     async def _update_pool_information(self):
         """Update pool information in the database"""
-        all_gateway_connections = GatewayConnectionSetting.load()
 
-        for connection in all_gateway_connections:
+        for connection in self._all_gateway_connections:
             chain = connection.get("chain")
             network = connection.get("network")
             connector = connection.get("connector")
@@ -1242,9 +1246,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _verify_wallet_connections(self):
         """Verify wallet connections for all configured pools"""
-        all_gateway_connections = GatewayConnectionSetting.load()
 
-        if not all_gateway_connections or len(all_gateway_connections) == 0:
+        if not self._all_gateway_connections or len(self._all_gateway_connections) == 0:
             self.logger().error("No wallet connections found. Please connect a wallet using 'gateway connect'.")
             return
 
@@ -1254,7 +1257,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             return
 
         for pool in pools:
-            await self._verify_pool_wallet(pool, all_gateway_connections)
+            await self._verify_pool_wallet(pool, self._all_gateway_connections)
 
     async def _verify_pool_wallet(self, pool: Dict[str, Any], all_gateway_connections: List[Dict[str, Any]]):
         """Verify wallet connection for a specific pool configuration"""
