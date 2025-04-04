@@ -48,6 +48,7 @@ configuration: Dict[str, Any] = {
         "minimum_trade_amount": "1",  # Minimum amount to consider for a trade
         "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
         "transaction_confirmation_delay": "2",  # Time delay between transaction confirmation
+        "transaction_polling_interval": "2",  # Time delay between transaction polling
     },
     "connections": {
         "polkadot": {
@@ -192,46 +193,56 @@ class AMMRobustPositionManagerConfiguration(BaseClientModel):
 # noinspection PyShadowingNames
 class AMMRobustPositionManager(ScriptStrategyBase):
     markets: Dict[str, Any] = {}
-    configuration = None
-    gateway_is_ready = False
-    gateway_http_client: Optional[GatewayHttpClient] = None
-    last_arbitrage_check_time = 0
-
-    # Instance variables for global configuration
+    _configuration = None
+    _gateway_is_ready = False
+    _gateway_http_client: Optional[GatewayHttpClient] = None
+    _last_arbitrage_check_time = 0
     _maximum_slippage_percentage: Decimal = DECIMAL_ZERO
     _minimum_profitability_percentage: Decimal = DECIMAL_ZERO
     _arbitrage_check_interval_seconds: Decimal = DECIMAL_ZERO
     _minimum_trade_amount: Decimal = DECIMAL_ZERO
     _time_delay_between_arbitrages: Decimal = DECIMAL_ZERO
     _transaction_confirmation_delay: Decimal = DECIMAL_ZERO
+    _maximum_transaction_confirmation_timeout: int = 60
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
         super().__init__(connectors)
 
-        AMMRobustPositionManager.gateway_http_client = GatewayHttpClient.get_instance()
-
         self._initialize()
 
-    def _initialize(self, configuration_param: AMMRobustPositionManagerConfiguration = None):
-        self.configuration = configuration_param
+    def _initialize(self, _strategy_configuration: AMMRobustPositionManagerConfiguration = None):
+        """Initialize the strategy with configuration parameters."""
+        self._gateway_http_client = GatewayHttpClient.get_instance()
+
+        # Set configuration
+        self._configuration = configuration
 
         # Use the global configuration variable to initialize global values
         self._maximum_slippage_percentage = Decimal(
-            configuration["globals"].get("maximum_slippage_percentage", DECIMAL_ZERO)
+            self._configuration["globals"].get("maximum_slippage_percentage", DECIMAL_ZERO)
         )
         self._minimum_profitability_percentage = Decimal(
-            configuration["globals"].get("minimum_profitability_percentage", DECIMAL_ZERO)
+            self._configuration["globals"].get("minimum_profitability_percentage", DECIMAL_ZERO)
         )
         self._arbitrage_check_interval_seconds = Decimal(
-            configuration["globals"].get("arbitrage_check_interval_seconds", DECIMAL_ZERO)
+            self._configuration["globals"].get("arbitrage_check_interval_seconds", DECIMAL_ZERO)
         )
-        self._minimum_trade_amount = Decimal(configuration["globals"].get("minimum_trade_amount", DECIMAL_ZERO))
+        self._minimum_trade_amount = Decimal(self._configuration["globals"].get("minimum_trade_amount", DECIMAL_ZERO))
         self._time_delay_between_arbitrages = Decimal(
-            configuration["globals"].get("time_delay_between_arbitrages", DECIMAL_ZERO)
+            self._configuration["globals"].get("time_delay_between_arbitrages", DECIMAL_ZERO)
         )
         self._transaction_confirmation_delay = Decimal(
-            configuration["globals"].get("transaction_confirmation_delay", DECIMAL_ZERO)
+            self._configuration["globals"].get("transaction_confirmation_delay", DECIMAL_ZERO)
         )
+
+        self._transaction_polling_interval = int(
+            self._configuration["globals"].get("transaction_polling_interval", DECIMAL_ZERO)
+        )
+
+        # Set transaction confirmation timeout to 5x the configured delay as a safety measure
+        # If the configured delay is 0, use the default timeout (60 seconds)
+        if self._transaction_confirmation_delay > 0:
+            self._maximum_transaction_confirmation_timeout = int(self._transaction_confirmation_delay) * 5
 
         self._log_initialization()
 
@@ -244,9 +255,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     async def _async_on_tick(self):
         """Main strategy execution logic that runs on each tick"""
         # First check gateway status
-        if not self.gateway_is_ready:
+        if not self._gateway_is_ready:
             await self._check_gateway_status()
-            if not self.gateway_is_ready:
+            if not self._gateway_is_ready:
                 return
 
         # Update database with latest information
@@ -256,8 +267,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         current_time = Decimal(time.time())
         arbitrage_check_interval = self._arbitrage_check_interval_seconds
 
-        if current_time - self.last_arbitrage_check_time >= arbitrage_check_interval:
-            self.last_arbitrage_check_time = current_time
+        if current_time - self._last_arbitrage_check_time >= arbitrage_check_interval:
+            self._last_arbitrage_check_time = current_time
             await self._run_arbitrage_strategy()
 
     async def _run_arbitrage_strategy(self):
@@ -270,15 +281,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             if await self._validate_opportunity(opportunity):
                 await self._execute_arbitrage(opportunity)
 
-                # Add a short delay between trades to prevent transaction collisions
-                await asyncio.sleep(float(self._time_delay_between_arbitrages))
-
     async def _find_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
         """Find arbitrage opportunities across pools and tokens"""
         opportunities = []
 
         # Get all available tokens and pools from the database
-        tokens = configuration["tokens"]
+        tokens = self._configuration["tokens"]
 
         # Minimum profit percentage required for arbitrage
         minimum_profitability_percentage = self._minimum_profitability_percentage
@@ -488,8 +496,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
                 self.logger().info(f"First swap completed with transaction signature: {first_swap_result['signature']}")
 
-                # Wait for transaction to be confirmed
-                await asyncio.sleep(float(self._transaction_confirmation_delay))
+                # Wait for first transaction to be confirmed using polling
+                first_transaction_confirmation = await self._wait_for_transaction_confirmation(
+                    buy_pool.get("chain"), buy_pool.get("network"), first_swap_result["signature"]
+                )
+
+                if not first_transaction_confirmation:
+                    self.logger().error(
+                        f"First swap transaction confirmation failed for {first_swap_result['signature']}"
+                    )
+                    continue
 
                 # Get quote_token balance after first swap
                 updated_wallet_balances = await self._post_chain_balances(
@@ -527,8 +543,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     f"Second swap completed with transaction signature: {second_swap_result['signature']}"
                 )
 
-                # Wait for transaction to be confirmed
-                await asyncio.sleep(float(self._transaction_confirmation_delay))
+                # Wait for second transaction to be confirmed using polling
+                second_transaction_confirmation = await self._wait_for_transaction_confirmation(
+                    sell_pool.get("chain"), sell_pool.get("network"), second_swap_result["signature"]
+                )
+
+                if not second_transaction_confirmation:
+                    self.logger().error(
+                        f"Second swap transaction confirmation failed for {second_swap_result['signature']}"
+                    )
+                    continue
 
                 # Calculate actual profit
                 final_wallet_balances = await self._post_chain_balances(
@@ -578,6 +602,55 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 continue
 
         return overall_success
+
+    async def _wait_for_transaction_confirmation(
+        self, chain: str, network: str, tx_hash: str, max_timeout: int = None
+    ) -> bool:
+        """
+        Wait for a transaction to be confirmed using the poll mechanism.
+
+        Args:
+            chain: Chain identifier
+            network: Network identifier
+            tx_hash: Transaction hash to poll
+            max_timeout: Maximum time to wait for confirmation in seconds (default: use class default)
+
+        Returns:
+            bool: True if transaction was confirmed, False otherwise
+        """
+        if max_timeout is None:
+            max_timeout = self._maximum_transaction_confirmation_timeout
+
+        start_time = time.time()
+        polling_interval = self._transaction_polling_interval
+
+        self.logger().info(f"Waiting for transaction {tx_hash} to be confirmed...")
+
+        while time.time() - start_time < max_timeout:
+            try:
+                # Poll transaction status
+                tx_status = await self._post_chain_poll(chain, network, tx_hash)
+
+                # Check if transaction is confirmed (successful)
+                if tx_status and tx_status.get("txStatus") == 1:
+                    self.logger().info(f"Transaction {tx_hash} confirmed successfully!")
+                    return True
+
+                # If transaction has failed
+                if tx_status and tx_status.get("txStatus") == -1:
+                    self.logger().error(f"Transaction {tx_hash} failed with status: {tx_status}")
+                    return False
+
+                # Wait before polling again
+                await asyncio.sleep(polling_interval)
+
+            except Exception as e:
+                self.logger().error(f"Error while polling transaction {tx_hash}: {str(e)}")
+                await asyncio.sleep(polling_interval)
+
+        self.logger().warning(f"Transaction {tx_hash} confirmation timed out after {max_timeout} seconds")
+
+        return False
 
     async def _update_database(self):
         """Update the database with latest information"""
@@ -784,8 +857,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
                 should_ignore = False
                 for token in pool.get("tokens", []):
-                    if token not in configuration["tokens"]:
-                        if pool.get("address") not in configuration["connections"][chain][network][connector]["pools"]:
+                    if token not in self._configuration["tokens"]:
+                        if (
+                            pool.get("address")
+                            not in self._configuration["connections"][chain][network][connector]["pools"]
+                        ):
                             should_ignore = True
                             break
                 if should_ignore:
@@ -1123,7 +1199,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """Get token balance across all wallets"""
         total_balance = DECIMAL_ZERO
 
-        for chain_name, chain in configuration["connections"].items():
+        for chain_name, chain in self._configuration["connections"].items():
             for network_name, network in chain.items():
                 for _, connector in network.items():
                     for wallet_address in connector["wallets"].keys():
@@ -1141,13 +1217,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     async def _check_gateway_status(self):
         """Check if Gateway server is online and verify wallet connections for multiple pools"""
         # Skip if gateway is already verified as not ready
-        if self.gateway_is_ready:
+        if self._gateway_is_ready:
             return
 
         self.logger().info("Checking Gateway server status...")
         try:
-            if await self.gateway_http_client.ping_gateway():
-                self.gateway_is_ready = True
+            if await self._gateway_http_client.ping_gateway():
+                self._gateway_is_ready = True
 
                 self.logger().info("Gateway server is online!")
 
@@ -1161,7 +1237,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     def _set_gateway_as_not_ready(self, error_message: str):
         """Set gateway as not ready with appropriate error message"""
-        self.gateway_is_ready = False
+        self._gateway_is_ready = False
         self.logger().error(error_message)
 
     async def _verify_wallet_connections(self):
@@ -1172,7 +1248,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             self.logger().error("No wallet connections found. Please connect a wallet using 'gateway connect'.")
             return
 
-        pools = getattr(self.configuration, "pools", [])
+        pools = getattr(self._configuration, "pools", [])
         if not pools or len(pools) == 0:
             self.logger().error("No pools configured. Please add pool configurations.")
             return
@@ -1237,7 +1313,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing pools information
         """
-        return await self.gateway_http_client.amm_list_pools(connector, network)
+        return await self._gateway_http_client.amm_list_pools(connector, network)
 
     async def _get_pool_information(self, pool: Dict[str, Any]):
         """
@@ -1256,7 +1332,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        return await self.gateway_http_client.amm_pool_info(connector, network, pool_address)
+        return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
 
     async def _get_quote_swap(
         self,
@@ -1288,7 +1364,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        return await self.gateway_http_client.amm_quote_swap(
+        return await self._gateway_http_client.amm_quote_swap(
             network=network,
             connector=connector,
             base_asset=base_token,
@@ -1325,7 +1401,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        return await self.gateway_http_client.amm_quote_liquidity(
+        return await self._gateway_http_client.amm_quote_liquidity(
             connector=connector,
             network=network,
             pool_address=pool_address,
@@ -1365,7 +1441,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        return await self.gateway_http_client.amm_execute_swap(
+        return await self._gateway_http_client.amm_execute_swap(
             network=network,
             connector=connector,
             wallet_address=wallet_address,
@@ -1404,7 +1480,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        return await self.gateway_http_client.amm_add_liquidity(
+        return await self._gateway_http_client.amm_add_liquidity(
             connector=connector,
             network=network,
             wallet_address=wallet_address,
@@ -1433,7 +1509,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        return await self.gateway_http_client.amm_remove_liquidity(
+        return await self._gateway_http_client.amm_remove_liquidity(
             connector=connector,
             network=network,
             wallet_address=wallet_address,
@@ -1448,7 +1524,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing server status information
         """
-        return await self.gateway_http_client.get_gateway_status()
+        return await self._gateway_http_client.get_gateway_status()
 
     async def _get_config(self, chain_or_connector: Optional[str] = None):
         """
@@ -1460,7 +1536,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing Gateway configuration
         """
-        return await self.gateway_http_client.get_configuration(chain_or_connector)
+        return await self._gateway_http_client.getself._configuration(chain_or_connector)
 
     async def _post_config_update(self, config_path: str, config_value: Any):
         """
@@ -1473,7 +1549,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing operation result
         """
-        return await self.gateway_http_client.update_config(config_path, config_value)
+        return await self._gateway_http_client.update_config(config_path, config_value)
 
     async def _get_connectors(self):
         """
@@ -1482,7 +1558,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing available connectors information
         """
-        return await self.gateway_http_client.get_connectors()
+        return await self._gateway_http_client.get_connectors()
 
     async def _get_wallet(self):
         """
@@ -1491,7 +1567,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing wallet information
         """
-        return await self.gateway_http_client.get_wallets()
+        return await self._gateway_http_client.get_wallets()
 
     async def _get_chain_status(self, chain: str, network: str):
         """
@@ -1504,7 +1580,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing chain status information
         """
-        return await self.gateway_http_client.get_network_status(chain, network)
+        return await self._gateway_http_client.get_network_status(chain, network)
 
     async def _post_chain_poll(self, chain: str, network: str, tx_hash: str):
         """
@@ -1518,7 +1594,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing transaction status
         """
-        return await self.gateway_http_client.get_transaction_status(chain, network, tx_hash)
+        return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
 
     async def _get_chain_tokens(self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None):
         """
@@ -1532,7 +1608,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing token information
         """
-        return await self.gateway_http_client.get_tokens(chain, network, token_symbols)
+        return await self._gateway_http_client.get_tokens(chain, network, token_symbols)
 
     async def _post_chain_balances(
         self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
@@ -1549,7 +1625,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing token balances
         """
-        return await self.gateway_http_client.get_balances(chain, network, address, token_symbols)
+        return await self._gateway_http_client.get_balances(chain, network, address, token_symbols)
 
     async def _get_token_price(self, token_symbol: str, chain: str, network: str) -> Optional[Decimal]:
         """
@@ -1577,7 +1653,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     def format_status(self) -> str:
         """Format the strategy status for display"""
-        if not self.gateway_is_ready:
+        if not self._gateway_is_ready:
             return "Gateway is not ready. Please check connection."
 
         # Get recent arbitrage opportunities
@@ -1602,7 +1678,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Format status message
         status = [
             "AMM Arbitrage Strategy Status:",
-            f"Gateway Status: {'Ready' if self.gateway_is_ready else 'Not Ready'}",
+            f"Gateway Status: {'Ready' if self._gateway_is_ready else 'Not Ready'}",
             f"Opportunities Found (last hour): {len(recent_opportunities)}",
             f"Trades Executed (last hour): {len(recent_executions)}",
             f"Total Profit: {total_profit:.4f}",
