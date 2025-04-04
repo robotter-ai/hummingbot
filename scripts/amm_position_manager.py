@@ -890,7 +890,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     "network": network,
                     "connector": connector,
                     "address": pool_address,
-                    "type": pool.get("type", "unknown"),
+                    "type": pool.get("type", PoolType.UNKNOWN.value),
                     "tokens": {},
                     "tokens_list": pool_tokens,
                     "annual_percentage_rate": detailed_pool_info.get("apr"),
