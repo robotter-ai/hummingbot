@@ -2,7 +2,7 @@ import os
 from decimal import Decimal
 from typing import Dict, List, Set
 
-from pydantic.v1 import Field
+from pydantic import Field
 
 from hummingbot.client.config.config_data_types import ClientFieldData
 from hummingbot.connector.connector_base import ConnectorBase, TradeType

@@ -68,7 +68,7 @@ configuration: Dict[str, Any] = {
                     "pools": [
                         # "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of",  # XyK / Isolated pool
                         # "7L53bUTBbfuj14UpdCNPwmgzzHSsrsTWBHX5pys32mVWM3C1",  # Omni pool
-                        # "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
+                        "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # Stable pool
                         # "<pool_address>",  # LBP pool
                     ],
                 }
@@ -81,6 +81,8 @@ configuration: Dict[str, Any] = {
                         "7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb",
                     ],
                     "pools": [
+                        "2EXiumdi14E9b8Fy62QcA5Uh6WdHS2b38wtSxp72Mibj",
+                        "3NeUgARDmFgnKtkJLqUcEUNCfknFCcGsFfMJCtx6bAgx"
                         # "G7mw1d83ismcQJKkzt62Ug4noXCjVhu3eV7U5EMgge6Z",  # XyK / Isolated pool
                         # "<pool_address>",  # Omni pool
                         # "<pool_address>",  # Stable pool
@@ -219,6 +221,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     _time_delay_between_arbitrages: Decimal = DECIMAL_ZERO
     _transaction_confirmation_delay: Decimal = DECIMAL_ZERO
     _maximum_transaction_confirmation_timeout: int = 60
+    _balance_cache: Dict[str, Dict[str, Any]] = {}
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
         super().__init__(connectors)
@@ -670,125 +673,102 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         return False
 
     async def _update_database(self):
-        """Update the database with latest information"""
-        # Update connected wallets and their tokens/pools
-        await self._update_wallet_information()
-
-        # Update token information
-        await self._update_token_information()
-
-        # Update pool information
-        await self._update_pool_information()
-
-    async def _update_wallet_information(self):
-        """Update wallet information in the database"""
-
-        # Prepare database connections structure if not exists
+        """Atualiza o database com as informações mais recentes de forma eficiente"""
+        current_time = time.time()
+        
+        # Definir intervalos para cada tipo de atualização
+        wallet_update_interval = 60  # 1 minuto
+        token_update_interval = 300  # 5 minutos
+        pool_update_interval = 120   # 2 minutos
+        
+        # Inicializar a estrutura principal se ainda não existir
         if "connections" not in database:
             database["connections"] = {}
+        
+        # Atualizar carteiras (menos frequente)
+        if not hasattr(self, '_last_wallet_update_time') or current_time - self._last_wallet_update_time >= wallet_update_interval:
+            self._last_wallet_update_time = current_time
+            await self._update_wallet_structure()
+        
+        # Atualizar tokens (menos frequente)
+        if not hasattr(self, '_last_token_update_time') or current_time - self._last_token_update_time >= token_update_interval:
+            self._last_token_update_time = current_time
+            await self._update_token_information()
+        
+        # Atualizar pools (mais frequente para preços)
+        if not hasattr(self, '_last_pool_update_time') or current_time - self._last_pool_update_time >= pool_update_interval:
+            self._last_pool_update_time = current_time
+            await self._update_pool_information()
 
+    async def _update_wallet_structure(self):
+        """Garante que a estrutura básica do database esteja inicializada corretamente"""
         for chain in self._configuration["connections"].keys():
+            # Garantir que a cadeia existe no database
+            if chain not in database["connections"]:
+                database["connections"][chain] = {}
+            
             for network in self._configuration["connections"][chain].keys():
+                # Garantir que a rede existe no database
+                if network not in database["connections"][chain]:
+                    database["connections"][chain][network] = {}
+                
                 for connector in self._configuration["connections"][chain][network].keys():
-                    tokens = self._configuration["tokens"]
+                    # Garantir que o connector existe no database
+                    if connector not in database["connections"][chain][network]:
+                        database["connections"][chain][network][connector] = {}
+                
+                    # Garantir que as estruturas de wallets, tokens e pools existam
+                    for structure in ["wallets", "tokens", "pools"]:
+                        if structure not in database["connections"][chain][network][connector]:
+                            database["connections"][chain][network][connector][structure] = {}
+                
+                    # Agora podemos fazer a atualização usando o cache
+                    await self._update_wallet_balances(chain, network, connector)
 
-                    for wallet_address in self._configuration["connections"][chain][network][connector]["wallets"]:
-                        # Initialize chain if not exists
-                        if chain not in database["connections"]:
-                            database["connections"][chain] = {}
-
-                        # Initialize network if not exists
-                        if network not in database["connections"][chain]:
-                            database["connections"][chain][network] = {}
-
-                        # Initialize connector if not exists
-                        if connector not in database["connections"][chain][network]:
-                            database["connections"][chain][network][connector] = {}
-
-                        # Initialize wallets if not exists
-                        if "wallets" not in database["connections"][chain][network][connector]:
-                            database["connections"][chain][network][connector]["wallets"] = {}
-
-                        # Create wallet internal_id
-                        wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
-
-                        # Initialize wallet if not exists
-                        if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
-                            database["connections"][chain][network][connector]["wallets"][wallet_address] = {
-                                "internal_id": wallet_internal_id,
-                                "chain": chain,
-                                "network": network,
-                                "connector": connector,
-                                "tokens": {},
-                                "pools": {},
-                            }
-                        else:
-                            # Update existing wallet with missing fields if needed
-                            wallet_data = database["connections"][chain][network][connector]["wallets"][wallet_address]
-                            if "internal_id" not in wallet_data:
-                                wallet_data["internal_id"] = wallet_internal_id
-                            if "chain" not in wallet_data:
-                                wallet_data["chain"] = chain
-                            if "network" not in wallet_data:
-                                wallet_data["network"] = network
-                            if "connector" not in wallet_data:
-                                wallet_data["connector"] = connector
-
-                        # Update wallet token balances
-                        wallet_token_balances = await self._post_chain_balances(chain, network, wallet_address, tokens)
-
-                        if wallet_token_balances and "balances" in wallet_token_balances:
-                            for token_symbol, balance in wallet_token_balances["balances"].items():
-                                if (
-                                    token_symbol
-                                    not in database["connections"][chain][network][connector]["wallets"][
-                                        wallet_address
-                                    ]["tokens"]
-                                ):
-                                    database["connections"][chain][network][connector]["wallets"][wallet_address][
-                                        "tokens"
-                                    ][token_symbol] = {
-                                        "balances": {
-                                            "free": balance,
-                                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                                            "total": balance,
-                                        }
-                                    }
-                                else:
-                                    # Update existing token balance
-                                    token_data = database["connections"][chain][network][connector]["wallets"][
-                                        wallet_address
-                                    ]["tokens"][token_symbol]
-                                    if "balances" not in token_data:
-                                        token_data["balances"] = {
-                                            "free": balance,
-                                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                                            "total": balance,
-                                        }
-                                    else:
-                                        token_data["balances"]["free"] = balance
-                                        token_data["balances"]["total"] = balance
-
-                        # Update wallet-pool mappings
-                        if "pools" in database["connections"][chain][network][connector]:
-                            for pool_address, pool_info in database["connections"][chain][network][connector][
-                                "pools"
-                            ].items():
-                                pool_internal_id = pool_info["internal_id"]
-
-                                # Update wallets_by_pool map
-                                if pool_internal_id not in database["maps"]["wallets_by_pool"]:
-                                    database["maps"]["wallets_by_pool"][pool_internal_id] = []
-                                if wallet_internal_id not in database["maps"]["wallets_by_pool"][pool_internal_id]:
-                                    database["maps"]["wallets_by_pool"][pool_internal_id].append(wallet_internal_id)
-
-                                # Update pools_by_wallet map
-                                if wallet_internal_id not in database["maps"]["pools_by_wallet"]:
-                                    database["maps"]["pools_by_wallet"][wallet_internal_id] = []
-                                if pool_internal_id not in database["maps"]["pools_by_wallet"][wallet_internal_id]:
-                                    database["maps"]["pools_by_wallet"][wallet_internal_id].append(pool_internal_id)
-
-        return database
+    async def _update_wallet_balances(self, chain, network, connector):
+        """Atualiza os balances das carteiras usando o método de cache"""
+        tokens = self._configuration["tokens"]
+        wallets = self._configuration["connections"][chain][network][connector]["wallets"]
+        
+        for wallet_address in wallets:
+            # Criar o internal_id da carteira
+            wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
+            
+            # Garantir que a carteira existe na estrutura
+            if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
+                database["connections"][chain][network][connector]["wallets"][wallet_address] = {
+                    "internal_id": wallet_internal_id,
+                    "chain": chain,
+                    "network": network,
+                    "connector": connector,
+                    "tokens": {},
+                    "pools": {}
+                }
+            
+            # Atualizar balances da carteira
+            for token_symbol in tokens:
+                balance = await self._get_token_balance_cached(chain, network, wallet_address, token_symbol)
+                
+                # Atualizar na estrutura do database
+                if token_symbol not in database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"]:
+                    database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][token_symbol] = {
+                        "balances": {
+                            "free": balance,
+                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
+                            "total": balance
+                        }
+                    }
+                else:
+                    token_data = database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][token_symbol]
+                    if "balances" not in token_data:
+                        token_data["balances"] = {
+                            "free": balance,
+                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
+                            "total": balance
+                        }
+                    else:
+                        token_data["balances"]["free"] = balance
+                        token_data["balances"]["total"] = balance
 
     async def _update_token_information(self):
         """Update token information in the database"""
@@ -1706,3 +1686,47 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     status.append(f"  {token}: {profit_decimal:.4f} ({profit_percentage_decimal:.2f}%)")
 
         return "\n".join(status)
+
+    async def _get_token_balance_cached(self, chain, network, wallet_address, token_symbol, max_age_seconds=30):
+        cache_key = f"{chain}_{network}_{wallet_address}_{token_symbol}"
+        current_time = time.time()
+        
+        if cache_key in self._balance_cache and current_time - self._balance_cache[cache_key]["timestamp"] < max_age_seconds:
+            return self._balance_cache[cache_key]["balance"]
+        
+        # Se não estiver em cache ou estiver expirado, buscar do gateway
+        balances = await self._post_chain_balances(chain, network, wallet_address, [token_symbol])
+        
+        if balances and "balances" in balances:
+            balance = Decimal(str(balances["balances"].get(token_symbol, 0)))
+            self._balance_cache[cache_key] = {
+                "balance": balance,
+                "timestamp": current_time
+            }
+            return balance
+        
+        return DECIMAL_ZERO
+
+    def _find_most_promising_token_pairs(self):
+        """Identificar pares de tokens com maior potencial de arbitragem"""
+        tokens = self._configuration["tokens"]
+        promising_pairs = []
+        
+        for i in range(len(tokens)):
+            for j in range(i+1, len(tokens)):
+                token1, token2 = tokens[i], tokens[j]
+                pools = self._find_pools_with_token_pair(token1, token2)
+                
+                if len(pools) >= 2:  # Precisamos de pelo menos 2 pools para arbitragem
+                    # Verificar liquidez e volume para determinar potencial
+                    total_volume = sum(Decimal(str(p.get("volume", {}).get("24h", 0) or 0)) for p in pools)
+                    promising_pairs.append({
+                        "token1": token1,
+                        "token2": token2,
+                        "pools_count": len(pools),
+                        "total_volume": total_volume
+                    })
+        
+        # Ordenar por volume e quantidade de pools
+        promising_pairs.sort(key=lambda x: (x["pools_count"], x["total_volume"]), reverse=True)
+        return promising_pairs[:5]  # Retornar os 5 mais promissores
