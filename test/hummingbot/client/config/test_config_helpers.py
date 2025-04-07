@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from typing import Awaitable, List, Optional
 from unittest.mock import MagicMock, patch
 
-from pydantic import Field, SecretStr
+from pydantic.v1 import Field, SecretStr
 
 from hummingbot.client.config import config_helpers
 from hummingbot.client.config.client_config_map import ClientConfigMap, CommandShortcutModel
@@ -84,7 +84,7 @@ strategy: pure_market_making
                         command="spreads",
                         help="Set bid and ask spread",
                         arguments=["Bid Spread", "Ask Spread"],
-                        output=["config bid_spread $1", "config ask_spread $2"]
+                        output=["config bid_spread $1", "config ask_spread $2"],
                     )
                 ]
             )
@@ -169,7 +169,6 @@ strategy: pure_market_making
 
 
 class ReadOnlyClientAdapterTest(unittest.TestCase):
-
     def test_read_only_adapter_can_be_created(self):
         adapter = ClientConfigAdapter(ClientConfigMap())
         read_only_adapter = ReadOnlyClientConfigAdapter(adapter.hb_config)

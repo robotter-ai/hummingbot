@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
-from pydantic import Field, SecretStr
-from pydantic.class_validators import validator
+from pydantic.v1 import Field, SecretStr
+from pydantic.v1.class_validators import validator
 from pyinjective.async_client import AsyncClient
 from pyinjective.composer import Composer
 from pyinjective.core.broadcaster import (
@@ -66,11 +66,11 @@ class InjectiveSimulatedTransactionFeeCalculatorMode(InjectiveFeeCalculatorMode)
         title = "simulated_transaction_fee_calculator"
 
     def create_calculator(
-            self,
-            client: AsyncClient,
-            composer: Composer,
-            gas_price: Optional[int] = None,
-            gas_limit_adjustment_multiplier: Optional[Decimal] = None,
+        self,
+        client: AsyncClient,
+        composer: Composer,
+        gas_price: Optional[int] = None,
+        gas_limit_adjustment_multiplier: Optional[Decimal] = None,
     ) -> TransactionFeeCalculator:
         return SimulatedTransactionFeeCalculator(
             client=client,
@@ -91,11 +91,11 @@ class InjectiveMessageBasedTransactionFeeCalculatorMode(InjectiveFeeCalculatorMo
         title = "message_based_transaction_fee_calculator"
 
     def create_calculator(
-            self,
-            client: AsyncClient,
-            composer: Composer,
-            gas_price: Optional[int] = None,
-            gas_limit_adjustment_multiplier: Optional[Decimal] = None,
+        self,
+        client: AsyncClient,
+        composer: Composer,
+        gas_price: Optional[int] = None,
+        gas_limit_adjustment_multiplier: Optional[Decimal] = None,
     ) -> TransactionFeeCalculator:
         return MessageBasedTransactionFeeCalculator(
             client=client,
@@ -121,7 +121,6 @@ class InjectiveNetworkMode(BaseClientModel, ABC):
 
 
 class InjectiveMainnetNetworkMode(InjectiveNetworkMode):
-
     class Config:
         title = "mainnet_network"
 
@@ -140,7 +139,7 @@ class InjectiveTestnetNetworkMode(InjectiveNetworkMode):
         default="lb",
         client_data=ClientFieldData(
             prompt=lambda cm: (f"Enter the testnet node you want to connect to ({'/'.join(TESTNET_NODES)})"),
-            prompt_on_new=True
+            prompt_on_new=True,
         ),
     )
 
@@ -166,65 +165,40 @@ class InjectiveTestnetNetworkMode(InjectiveNetworkMode):
 class InjectiveCustomNetworkMode(InjectiveNetworkMode):
     lcd_endpoint: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network lcd_endpoint"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network lcd_endpoint"), prompt_on_new=True),
     )
     tm_websocket_endpoint: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network tm_websocket_endpoint"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network tm_websocket_endpoint"), prompt_on_new=True),
     )
     grpc_endpoint: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network grpc_endpoint"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network grpc_endpoint"), prompt_on_new=True),
     )
     grpc_exchange_endpoint: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network grpc_exchange_endpoint"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network grpc_exchange_endpoint"), prompt_on_new=True),
     )
     grpc_explorer_endpoint: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network grpc_explorer_endpoint"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network grpc_explorer_endpoint"), prompt_on_new=True),
     )
     chain_stream_endpoint: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network chain_stream_endpoint"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network chain_stream_endpoint"), prompt_on_new=True),
     )
     chain_id: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network chain_id"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network chain_id"), prompt_on_new=True),
     )
     env: str = Field(
         default=...,
-        client_data=ClientFieldData(
-            prompt=lambda cm: ("Enter the network environment name"),
-            prompt_on_new=True
-        ),
+        client_data=ClientFieldData(prompt=lambda cm: ("Enter the network environment name"), prompt_on_new=True),
     )
     secure_connection: bool = Field(
         default=...,
         client_data=ClientFieldData(
-            prompt=lambda cm: ("Should this configuration use secure connections? (yes/no)"),
-            prompt_on_new=True
+            prompt=lambda cm: ("Should this configuration use secure connections? (yes/no)"), prompt_on_new=True
         ),
     )
 
@@ -262,14 +236,13 @@ RE_SEED_PHRASE = re.compile(r"^(?:[a-z]+(?: [a-z]+){11}|[a-z]+(?: [a-z]+){23})$"
 
 
 class InjectiveAccountMode(BaseClientModel, ABC):
-
     @abstractmethod
     def create_data_source(
-            self,
-            network: Network,
-            use_secure_connection: bool,
-            rate_limits: List[RateLimit],
-            fee_calculator_mode: InjectiveFeeCalculatorMode,
+        self,
+        network: Network,
+        use_secure_connection: bool,
+        rate_limits: List[RateLimit],
+        fee_calculator_mode: InjectiveFeeCalculatorMode,
     ) -> "InjectiveDataSource":
         pass
 
@@ -320,11 +293,11 @@ class InjectiveDelegatedAccountMode(InjectiveAccountMode):
         title = "delegate_account"
 
     def create_data_source(
-            self,
-            network: Network,
-            use_secure_connection: bool,
-            rate_limits: List[RateLimit],
-            fee_calculator_mode: InjectiveFeeCalculatorMode,
+        self,
+        network: Network,
+        use_secure_connection: bool,
+        rate_limits: List[RateLimit],
+        fee_calculator_mode: InjectiveFeeCalculatorMode,
     ) -> "InjectiveDataSource":
         return InjectiveGranteeDataSource(
             private_key=self.private_key.get_secret_value(),
@@ -362,21 +335,17 @@ class InjectiveVaultAccountMode(InjectiveAccountMode):
             prompt_on_new=True,
         ),
     )
-    vault_subaccount_index: int = Field(
-        default=1,
-        const=True,
-        client_data=None
-    )
+    vault_subaccount_index: int = Field(default=1, const=True, client_data=None)
 
     class Config:
         title = "vault_account"
 
     def create_data_source(
-            self,
-            network: Network,
-            use_secure_connection: bool,
-            rate_limits: List[RateLimit],
-            fee_calculator_mode: InjectiveFeeCalculatorMode,
+        self,
+        network: Network,
+        use_secure_connection: bool,
+        rate_limits: List[RateLimit],
+        fee_calculator_mode: InjectiveFeeCalculatorMode,
     ) -> "InjectiveDataSource":
         return InjectiveVaultsDataSource(
             private_key=self.private_key.get_secret_value(),
@@ -391,15 +360,15 @@ class InjectiveVaultAccountMode(InjectiveAccountMode):
 
 
 class InjectiveReadOnlyAccountMode(InjectiveAccountMode):
-
     class Config:
         title = "read_only_account"
 
     def create_data_source(
-            self,
-            network: Network, use_secure_connection: bool,
-            rate_limits: List[RateLimit],
-            fee_calculator_mode: InjectiveFeeCalculatorMode,
+        self,
+        network: Network,
+        use_secure_connection: bool,
+        rate_limits: List[RateLimit],
+        fee_calculator_mode: InjectiveFeeCalculatorMode,
     ) -> "InjectiveDataSource":
         return InjectiveReadOnlyDataSource(
             network=network,
@@ -419,7 +388,8 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
     # Setting a default dummy configuration to allow the bot to create a dummy instance to fetch all trading pairs
     connector: str = Field(default="injective_v2", const=True, client_data=None)
     receive_connector_configuration: bool = Field(
-        default=True, const=True,
+        default=True,
+        const=True,
         client_data=ClientFieldData(),
     )
     network: Union[tuple(NETWORK_MODES.values())] = Field(
@@ -452,9 +422,7 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
         if isinstance(v, tuple(NETWORK_MODES.values()) + (Dict,)):
             sub_model = v
         elif v not in NETWORK_MODES:
-            raise ValueError(
-                f"Invalid network, please choose a value from {list(NETWORK_MODES.keys())}."
-            )
+            raise ValueError(f"Invalid network, please choose a value from {list(NETWORK_MODES.keys())}.")
         else:
             sub_model = NETWORK_MODES[v].construct()
         return sub_model
@@ -464,9 +432,7 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
         if isinstance(v, tuple(ACCOUNT_MODES.values()) + (Dict,)):
             sub_model = v
         elif v not in ACCOUNT_MODES:
-            raise ValueError(
-                f"Invalid account type, please choose a value from {list(ACCOUNT_MODES.keys())}."
-            )
+            raise ValueError(f"Invalid account type, please choose a value from {list(ACCOUNT_MODES.keys())}.")
         else:
             sub_model = ACCOUNT_MODES[v].construct()
         return sub_model
@@ -476,9 +442,7 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
         if isinstance(v, tuple(FEE_CALCULATOR_MODES.values()) + (Dict,)):
             sub_model = v
         elif v not in FEE_CALCULATOR_MODES:
-            raise ValueError(
-                f"Invalid fee calculator, please choose a value from {list(FEE_CALCULATOR_MODES.keys())}."
-            )
+            raise ValueError(f"Invalid fee calculator, please choose a value from {list(FEE_CALCULATOR_MODES.keys())}.")
         else:
             sub_model = FEE_CALCULATOR_MODES[v].construct()
         return sub_model

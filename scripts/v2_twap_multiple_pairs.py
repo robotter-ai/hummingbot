@@ -2,7 +2,7 @@ import os
 import time
 from typing import Dict, List, Set
 
-from pydantic import Field, validator
+from pydantic.v1 import Field, validator
 
 from hummingbot.client.config.config_data_types import ClientFieldData
 from hummingbot.client.hummingbot_application import HummingbotApplication
@@ -22,22 +22,31 @@ class TWAPMultiplePairsConfig(StrategyV2ConfigBase):
     markets: Dict[str, Set[str]] = {}
     position_mode: PositionMode = Field(
         default="HEDGE",
-        client_data=ClientFieldData(
-            prompt=lambda mi: "Enter the position mode (HEDGE/ONEWAY): ",
-            prompt_on_new=True
-        ))
+        client_data=ClientFieldData(prompt=lambda mi: "Enter the position mode (HEDGE/ONEWAY): ", prompt_on_new=True),
+    )
     twap_configs: List[TWAPExecutorConfig] = Field(
         default="binance,WLD-USDT,BUY,1,100,60,15,TAKER",
         client_data=ClientFieldData(
             prompt=lambda mi: "Enter the TWAP configurations (e.g. connector,trading_pair,side,leverage,total_amount_quote,total_duration,order_interval,mode:same_for_other_config): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
 
     @validator("twap_configs", pre=True, always=True, allow_reuse=True)
     def validate_twap_configs(cls, v):
         if isinstance(v, str):
             twap_configs = []
             for config in v.split(":"):
-                connector, trading_pair, side, leverage, total_amount_quote, total_duration, order_interval, mode = config.split(",")
+                (
+                    connector,
+                    trading_pair,
+                    side,
+                    leverage,
+                    total_amount_quote,
+                    total_duration,
+                    order_interval,
+                    mode,
+                ) = config.split(",")
                 twap_configs.append(
                     TWAPExecutorConfig(
                         timestamp=time.time(),
@@ -48,11 +57,13 @@ class TWAPMultiplePairsConfig(StrategyV2ConfigBase):
                         total_amount_quote=total_amount_quote,
                         total_duration=total_duration,
                         order_interval=order_interval,
-                        mode=TWAPMode[mode.upper()]))
+                        mode=TWAPMode[mode.upper()],
+                    )
+                )
             return twap_configs
         return v
 
-    @validator('position_mode', pre=True, allow_reuse=True)
+    @validator("position_mode", pre=True, allow_reuse=True)
     def validate_position_mode(cls, v: str) -> PositionMode:
         if v.upper() in PositionMode.__members__:
             return PositionMode[v.upper()]

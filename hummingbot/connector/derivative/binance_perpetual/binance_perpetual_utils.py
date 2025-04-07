@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import Field, SecretStr
+from pydantic.v1 import Field, SecretStr
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.core.data_type.trade_fee import TradeFeeSchema
@@ -8,7 +8,7 @@ from hummingbot.core.data_type.trade_fee import TradeFeeSchema
 DEFAULT_FEES = TradeFeeSchema(
     maker_percent_fee_decimal=Decimal("0.0002"),
     taker_percent_fee_decimal=Decimal("0.0004"),
-    buy_percent_fee_deducted_from_returns=True
+    buy_percent_fee_deducted_from_returns=True,
 )
 
 CENTRALIZED = True
@@ -27,7 +27,7 @@ class BinancePerpetualConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     binance_perpetual_api_secret: SecretStr = Field(
         default=...,
@@ -36,7 +36,7 @@ class BinancePerpetualConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
 
@@ -57,7 +57,7 @@ class BinancePerpetualTestnetConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     binance_perpetual_testnet_api_secret: SecretStr = Field(
         default=...,
@@ -66,7 +66,7 @@ class BinancePerpetualTestnetConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     class Config:

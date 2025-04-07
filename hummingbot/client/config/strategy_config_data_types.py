@@ -1,6 +1,6 @@
 from typing import Dict
 
-from pydantic import Field, validator
+from pydantic.v1 import Field, validator
 
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientConfigEnum, ClientFieldData
 from hummingbot.client.config.config_validators import (
@@ -51,7 +51,7 @@ class BaseTradingStrategyConfigMap(BaseStrategyConfigMap):
     )
 
     @classmethod
-    def trading_pair_prompt(cls, model_instance: 'BaseTradingStrategyConfigMap') -> str:
+    def trading_pair_prompt(cls, model_instance: "BaseTradingStrategyConfigMap") -> str:
         exchange = model_instance.exchange
         example = AllConnectorSettings.get_example_pairs().get(exchange)
         return (
@@ -127,7 +127,7 @@ class BaseTradingStrategyMakerTakerConfigMap(BaseStrategyConfigMap):
     )
 
     @classmethod
-    def trading_pair_prompt(cls, model_instance: 'BaseTradingStrategyMakerTakerConfigMap', is_maker: bool) -> str:
+    def trading_pair_prompt(cls, model_instance: "BaseTradingStrategyMakerTakerConfigMap", is_maker: bool) -> str:
         if is_maker:
             exchange = model_instance.maker_market
             example = AllConnectorSettings.get_example_pairs().get(exchange)
@@ -141,11 +141,7 @@ class BaseTradingStrategyMakerTakerConfigMap(BaseStrategyConfigMap):
             f" {exchange}{f' (e.g. {example})' if example else ''}"
         )
 
-    @validator(
-        "maker_market",
-        "taker_market",
-        pre=True
-    )
+    @validator("maker_market", "taker_market", pre=True)
     def validate_exchange(cls, v: str, field: Field):
         """Used for client-friendly error output."""
         ret = validate_exchange(v)

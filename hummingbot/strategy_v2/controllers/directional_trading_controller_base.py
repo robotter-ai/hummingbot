@@ -2,7 +2,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Set
 
 import pandas as pd
-from pydantic import Field, validator
+from pydantic.v1 import Field, validator
 
 from hummingbot.client.config.config_data_types import ClientFieldData
 from hummingbot.client.ui.interface_utils import format_df_for_printout
@@ -21,70 +21,89 @@ class DirectionalTradingControllerConfigBase(ControllerConfigBase):
     """
     This class represents the configuration required to run a Directional Strategy.
     """
+
     controller_type = "directional_trading"
     connector_name: str = Field(
         default="binance_perpetual",
         client_data=ClientFieldData(
             prompt_on_new=True,
-            prompt=lambda mi: "Enter the name of the exchange to trade on (e.g., binance_perpetual):"))
+            prompt=lambda mi: "Enter the name of the exchange to trade on (e.g., binance_perpetual):",
+        ),
+    )
     trading_pair: str = Field(
         default="WLD-USDT",
         client_data=ClientFieldData(
-            prompt_on_new=True,
-            prompt=lambda mi: "Enter the trading pair to trade on (e.g., WLD-USDT):"))
+            prompt_on_new=True, prompt=lambda mi: "Enter the trading pair to trade on (e.g., WLD-USDT):"
+        ),
+    )
     max_executors_per_side: int = Field(
         default=2,
         client_data=ClientFieldData(
-            prompt_on_new=True,
-            prompt=lambda mi: "Enter the maximum number of executors per side (e.g., 2):"))
+            prompt_on_new=True, prompt=lambda mi: "Enter the maximum number of executors per side (e.g., 2):"
+        ),
+    )
     cooldown_time: int = Field(
-        default=60 * 5, gt=0,
+        default=60 * 5,
+        gt=0,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=False,
-            prompt=lambda mi: "Specify the cooldown time in seconds after executing a signal (e.g., 300 for 5 minutes):"))
+            prompt=lambda mi: "Specify the cooldown time in seconds after executing a signal (e.g., 300 for 5 minutes):",
+        ),
+    )
 
     leverage: int = Field(
         default=20,
         client_data=ClientFieldData(
             prompt_on_new=True,
-            prompt=lambda mi: "Set the leverage to use for trading (e.g., 20 for 20x leverage). Set it to 1 for spot trading:"))
+            prompt=lambda mi: "Set the leverage to use for trading (e.g., 20 for 20x leverage). Set it to 1 for spot trading:",
+        ),
+    )
     position_mode: PositionMode = Field(
         default="HEDGE",
-        client_data=ClientFieldData(
-            prompt=lambda mi: "Enter the position mode (HEDGE/ONEWAY): ",
-            prompt_on_new=False
-        )
+        client_data=ClientFieldData(prompt=lambda mi: "Enter the position mode (HEDGE/ONEWAY): ", prompt_on_new=False),
     )
     # Triple Barrier Configuration
     stop_loss: Optional[Decimal] = Field(
-        default=Decimal("0.03"), gt=0,
+        default=Decimal("0.03"),
+        gt=0,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt=lambda mi: "Enter the stop loss (as a decimal, e.g., 0.03 for 3%): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
     take_profit: Optional[Decimal] = Field(
-        default=Decimal("0.02"), gt=0,
+        default=Decimal("0.02"),
+        gt=0,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt=lambda mi: "Enter the take profit (as a decimal, e.g., 0.01 for 1%): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
     time_limit: Optional[int] = Field(
-        default=60 * 45, gt=0,
+        default=60 * 45,
+        gt=0,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt=lambda mi: "Enter the time limit in seconds (e.g., 2700 for 45 minutes): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
     take_profit_order_type: OrderType = Field(
         default="LIMIT",
         client_data=ClientFieldData(
-            prompt=lambda mi: "Enter the order type for taking profit (LIMIT/MARKET): ",
-            prompt_on_new=True))
+            prompt=lambda mi: "Enter the order type for taking profit (LIMIT/MARKET): ", prompt_on_new=True
+        ),
+    )
     trailing_stop: Optional[TrailingStop] = Field(
         default="0.015,0.003",
         client_data=ClientFieldData(
             prompt=lambda mi: "Enter the trailing stop as activation_price,trailing_delta (e.g., 0.015,0.003): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
 
     @validator("trailing_stop", pre=True, always=True)
     def parse_trailing_stop(cls, v):
@@ -103,7 +122,7 @@ class DirectionalTradingControllerConfigBase(ControllerConfigBase):
             return Decimal(v)
         return v
 
-    @validator('take_profit_order_type', pre=True, allow_reuse=True, always=True)
+    @validator("take_profit_order_type", pre=True, allow_reuse=True, always=True)
     def validate_order_type(cls, v) -> OrderType:
         if isinstance(v, OrderType):
             return v
@@ -129,10 +148,10 @@ class DirectionalTradingControllerConfigBase(ControllerConfigBase):
             open_order_type=OrderType.MARKET,  # Defaulting to MARKET as is a Taker Controller
             take_profit_order_type=self.take_profit_order_type,
             stop_loss_order_type=OrderType.MARKET,  # Defaulting to MARKET as per requirement
-            time_limit_order_type=OrderType.MARKET  # Defaulting to MARKET as per requirement
+            time_limit_order_type=OrderType.MARKET,  # Defaulting to MARKET as per requirement
         )
 
-    @validator('position_mode', pre=True, allow_reuse=True)
+    @validator("position_mode", pre=True, allow_reuse=True)
     def validate_position_mode(cls, v: str) -> PositionMode:
         if isinstance(v, str):
             if v.upper() in PositionMode.__members__:
@@ -151,11 +170,13 @@ class DirectionalTradingControllerBase(ControllerBase):
     """
     This class represents the base class for a Directional Strategy.
     """
+
     def __init__(self, config: DirectionalTradingControllerConfigBase, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         self.config = config
-        self.market_data_provider.initialize_rate_sources([ConnectorPair(
-            connector_name=config.connector_name, trading_pair=config.trading_pair)])
+        self.market_data_provider.initialize_rate_sources(
+            [ConnectorPair(connector_name=config.connector_name, trading_pair=config.trading_pair)]
+        )
 
     def determine_executor_actions(self) -> List[ExecutorAction]:
         """
@@ -179,14 +200,17 @@ class DirectionalTradingControllerBase(ControllerBase):
         create_actions = []
         signal = self.processed_data["signal"]
         if signal != 0 and self.can_create_executor(signal):
-            price = self.market_data_provider.get_price_by_type(self.config.connector_name, self.config.trading_pair,
-                                                                PriceType.MidPrice)
+            price = self.market_data_provider.get_price_by_type(
+                self.config.connector_name, self.config.trading_pair, PriceType.MidPrice
+            )
             # Default implementation distribute the total amount equally among the executors
             amount = self.config.total_amount_quote / price / Decimal(self.config.max_executors_per_side)
             trade_type = TradeType.BUY if signal > 0 else TradeType.SELL
-            create_actions.append(CreateExecutorAction(
-                controller_id=self.config.id,
-                executor_config=self.get_executor_config(trade_type, price, amount)))
+            create_actions.append(
+                CreateExecutorAction(
+                    controller_id=self.config.id, executor_config=self.get_executor_config(trade_type, price, amount)
+                )
+            )
 
         return create_actions
 
@@ -196,7 +220,8 @@ class DirectionalTradingControllerBase(ControllerBase):
         """
         active_executors_by_signal_side = self.filter_executors(
             executors=self.executors_info,
-            filter_func=lambda x: x.is_active and (x.side == TradeType.BUY if signal > 0 else TradeType.SELL))
+            filter_func=lambda x: x.is_active and (x.side == TradeType.BUY if signal > 0 else TradeType.SELL),
+        )
         max_timestamp = max([executor.timestamp for executor in active_executors_by_signal_side], default=0)
         active_executors_condition = len(active_executors_by_signal_side) < self.config.max_executors_per_side
         cooldown_condition = self.market_data_provider.time() - max_timestamp > self.config.cooldown_time
@@ -229,4 +254,9 @@ class DirectionalTradingControllerBase(ControllerBase):
         df = self.processed_data.get("features", pd.DataFrame())
         if df.empty:
             return []
-        return [format_df_for_printout(df.tail(5), table_format="psql",)]
+        return [
+            format_df_for_printout(
+                df.tail(5),
+                table_format="psql",
+            )
+        ]

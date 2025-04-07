@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Dict, Tuple, Union
 
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic.v1 import BaseModel, Field, root_validator, validator
 
 import hummingbot.client.settings as settings
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientConfigEnum, ClientFieldData
@@ -16,9 +16,7 @@ from hummingbot.strategy.maker_taker_market_pair import MakerTakerMarketPair
 
 class ConversionRateModel(BaseClientModel, ABC):
     @abstractmethod
-    def get_conversion_rates(
-        self, market_pair: MakerTakerMarketPair
-    ) -> Tuple[str, str, Decimal, str, str, Decimal]:
+    def get_conversion_rates(self, market_pair: MakerTakerMarketPair) -> Tuple[str, str, Decimal, str, str, Decimal]:
         pass
 
 
@@ -26,9 +24,7 @@ class OracleConversionRateMode(ConversionRateModel):
     class Config:
         title = "rate_oracle_conversion_rate"
 
-    def get_conversion_rates(
-        self, market_pair: MakerTakerMarketPair
-    ) -> Tuple[str, str, Decimal, str, str, Decimal]:
+    def get_conversion_rates(self, market_pair: MakerTakerMarketPair) -> Tuple[str, str, Decimal, str, str, Decimal]:
         """
         Find conversion rates from taker market to maker market
         :param market_pair: maker and taker trading pairs for which to do conversion
@@ -36,6 +32,7 @@ class OracleConversionRateMode(ConversionRateModel):
         base pair symbol, base conversion rate source, base conversion rate
         """
         from .cross_exchange_market_making import CrossExchangeMarketMakingStrategy
+
         quote_pair = f"{market_pair.taker.quote_asset}-{market_pair.maker.quote_asset}"
         if market_pair.taker.quote_asset != market_pair.maker.quote_asset:
             quote_rate_source = RateOracle.get_instance().source.name
@@ -66,7 +63,17 @@ class OracleConversionRateMode(ConversionRateModel):
             gas_rate_source = "fixed"
             gas_rate = Decimal("1")
 
-        return quote_pair, quote_rate_source, quote_rate, base_pair, base_rate_source, base_rate, gas_pair, gas_rate_source, gas_rate
+        return (
+            quote_pair,
+            quote_rate_source,
+            quote_rate,
+            base_pair,
+            base_rate_source,
+            base_rate,
+            gas_pair,
+            gas_rate_source,
+            gas_rate,
+        )
 
 
 class TakerToMakerConversionRateMode(ConversionRateModel):
@@ -113,9 +120,7 @@ class TakerToMakerConversionRateMode(ConversionRateModel):
     class Config:
         title = "fixed_conversion_rate"
 
-    def get_conversion_rates(
-        self, market_pair: MakerTakerMarketPair
-    ) -> Tuple[str, str, Decimal, str, str, Decimal]:
+    def get_conversion_rates(self, market_pair: MakerTakerMarketPair) -> Tuple[str, str, Decimal, str, str, Decimal]:
         """
         Find conversion rates from taker market to maker market
         :param market_pair: maker and taker trading pairs for which to do conversion
@@ -123,6 +128,7 @@ class TakerToMakerConversionRateMode(ConversionRateModel):
         base pair symbol, base conversion rate source, base conversion rate
         """
         from .cross_exchange_market_making import CrossExchangeMarketMakingStrategy
+
         quote_pair = f"{market_pair.taker.quote_asset}-{market_pair.maker.quote_asset}"
         quote_rate_source = "fixed"
         quote_rate = self.taker_to_maker_quote_conversion_rate
@@ -141,7 +147,17 @@ class TakerToMakerConversionRateMode(ConversionRateModel):
         gas_rate_source = "fixed"
         gas_rate = self.taker_to_maker_base_conversion_rate
 
-        return quote_pair, quote_rate_source, quote_rate, base_pair, base_rate_source, base_rate, gas_pair, gas_rate_source, gas_rate
+        return (
+            quote_pair,
+            quote_rate_source,
+            quote_rate,
+            base_pair,
+            base_rate_source,
+            base_rate,
+            gas_pair,
+            gas_rate_source,
+            gas_rate,
+        )
 
     @validator(
         "taker_to_maker_base_conversion_rate",
@@ -214,10 +230,10 @@ class ActiveOrderRefreshMode(OrderRefreshMode):
         title = "active_order_refresh"
 
     def get_cancel_order_threshold(self) -> Decimal:
-        return Decimal('nan')
+        return Decimal("nan")
 
     def get_expiration_seconds(self) -> Decimal:
-        return Decimal('nan')
+        return Decimal("nan")
 
 
 ORDER_REFRESH_MODELS = {
@@ -246,14 +262,12 @@ class CrossExchangeMarketMakingConfigMap(BaseTradingStrategyMakerTakerConfigMap)
         client_data=ClientFieldData(
             prompt=lambda mi: CrossExchangeMarketMakingConfigMap.order_amount_prompt(mi),
             prompt_on_new=True,
-        )
+        ),
     )
     adjust_order_enabled: bool = Field(
         default=True,
         description="Adjust order price to be one tick above the top bid or below the top ask.",
-        client_data=ClientFieldData(
-            prompt=lambda mi: "Do you want to enable adjust order? (Yes/No)"
-        ),
+        client_data=ClientFieldData(prompt=lambda mi: "Do you want to enable adjust order? (Yes/No)"),
     )
     order_refresh_mode: Union[ActiveOrderRefreshMode, PassiveOrderRefreshMode] = Field(
         default=ActiveOrderRefreshMode.construct(),
@@ -348,13 +362,13 @@ class CrossExchangeMarketMakingConfigMap(BaseTradingStrategyMakerTakerConfigMap)
     # === prompts ===
 
     @classmethod
-    def top_depth_tolerance_prompt(cls, model_instance: 'CrossExchangeMarketMakingConfigMap') -> str:
+    def top_depth_tolerance_prompt(cls, model_instance: "CrossExchangeMarketMakingConfigMap") -> str:
         maker_market = model_instance.maker_market_trading_pair
         base_asset, quote_asset = maker_market.split("-")
         return f"What is your top depth tolerance? (in {base_asset})"
 
     @classmethod
-    def order_amount_prompt(cls, model_instance: 'CrossExchangeMarketMakingConfigMap') -> str:
+    def order_amount_prompt(cls, model_instance: "CrossExchangeMarketMakingConfigMap") -> str:
         trading_pair = model_instance.maker_market_trading_pair
         base_asset, quote_asset = trading_pair.split("-")
         return f"What is the amount of {base_asset} per order?"
@@ -430,9 +444,11 @@ class CrossExchangeMarketMakingConfigMap(BaseTradingStrategyMakerTakerConfigMap)
 
     @classmethod
     def update_oracle_settings(cls, values: str):
-        if not ("use_oracle_conversion_rate" in values.keys() and
-                "maker_market_trading_pair" in values.keys() and
-                "taker_market_trading_pair" in values.keys()):
+        if not (
+            "use_oracle_conversion_rate" in values.keys()
+            and "maker_market_trading_pair" in values.keys()
+            and "taker_market_trading_pair" in values.keys()
+        ):
             return
         use_oracle = values["use_oracle_conversion_rate"]
         first_base, first_quote = values["maker_market_trading_pair"].split("-")
@@ -448,11 +464,7 @@ class CrossExchangeMarketMakingConfigMap(BaseTradingStrategyMakerTakerConfigMap)
             settings.required_rate_oracle = False
             settings.rate_oracle_pairs = []
 
-    @validator(
-        "maker_market",
-        "taker_market",
-        pre=True
-    )
+    @validator("maker_market", "taker_market", pre=True)
     def validate_exchange(cls, v: str, field: Field):
         """Used for client-friendly error output."""
         if field.name == "maker_market":
@@ -463,9 +475,14 @@ class CrossExchangeMarketMakingConfigMap(BaseTradingStrategyMakerTakerConfigMap)
                 raise ValueError(ret)
             TakerMarketsEnum = ClientConfigEnum(
                 value="TakerMarkets",
-                names={e: e for e in sorted(AllConnectorSettings.get_exchange_names().union(
-                    AllConnectorSettings.get_gateway_amm_connector_names()
-                ))},
+                names={
+                    e: e
+                    for e in sorted(
+                        AllConnectorSettings.get_exchange_names().union(
+                            AllConnectorSettings.get_gateway_amm_connector_names()
+                        )
+                    )
+                },
                 type=str,
             )
             cls.__fields__["taker_market"].type_ = TakerMarketsEnum

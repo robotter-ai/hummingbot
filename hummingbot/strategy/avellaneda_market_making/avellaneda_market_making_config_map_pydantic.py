@@ -2,7 +2,7 @@ from datetime import datetime, time
 from decimal import Decimal
 from typing import Dict, Optional, Union
 
-from pydantic import Field, root_validator, validator
+from pydantic.v1 import Field, root_validator, validator
 
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientFieldData
 from hummingbot.client.config.config_validators import (
@@ -151,7 +151,7 @@ class TrackHangingOrdersModel(BaseClientModel):
                 "At what spread percentage (from mid price) will hanging orders be canceled?"
                 " (Enter 1 to indicate 1%)"
             ),
-        )
+        ),
     )
 
     class Config:
@@ -193,7 +193,7 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
         client_data=ClientFieldData(
             prompt=lambda mi: AvellanedaMarketMakingConfigMap.order_amount_prompt(mi),
             prompt_on_new=True,
-        )
+        ),
     )
     order_optimization_enabled: bool = Field(
         default=True,
@@ -201,9 +201,7 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
             "Allows the bid and ask order prices to be adjusted based on"
             " the current top bid and ask prices in the market."
         ),
-        client_data=ClientFieldData(
-            prompt=lambda mi: "Do you want to enable best bid ask jumping? (Yes/No)"
-        ),
+        client_data=ClientFieldData(prompt=lambda mi: "Do you want to enable best bid ask jumping? (Yes/No)"),
     )
     risk_factor: Decimal = Field(
         default=Decimal("1"),
@@ -234,16 +232,16 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
     order_refresh_time: float = Field(
         default=...,
         description="The frequency at which the orders' spreads will be re-evaluated.",
-        gt=0.,
+        gt=0.0,
         client_data=ClientFieldData(
             prompt=lambda mi: "How often do you want to cancel and replace bids and asks (in seconds)?",
             prompt_on_new=True,
         ),
     )
     max_order_age: float = Field(
-        default=1800.,
+        default=1800.0,
         description="A given order's maximum lifetime irrespective of spread.",
-        gt=0.,
+        gt=0.0,
         client_data=ClientFieldData(
             prompt=lambda mi: (
                 "How long do you want to cancel and replace bids and asks with the same price (in seconds)?"
@@ -260,19 +258,17 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
         le=10,
         client_data=ClientFieldData(
             prompt=lambda mi: (
-                "Enter the percent change in price needed to refresh orders at each cycle"
-                " (Enter 1 to indicate 1%)"
+                "Enter the percent change in price needed to refresh orders at each cycle" " (Enter 1 to indicate 1%)"
             )
         ),
     )
     filled_order_delay: float = Field(
-        default=60.,
+        default=60.0,
         description="The delay before placing a new order after an order fill.",
-        gt=0.,
+        gt=0.0,
         client_data=ClientFieldData(
             prompt=lambda mi: (
-                "How long do you want to wait before placing the next order"
-                " if your order gets filled (in seconds)?"
+                "How long do you want to wait before placing the next order" " if your order gets filled (in seconds)?"
             )
         ),
     )
@@ -344,7 +340,7 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
                 " before creating a new set of orders?"
                 " (Not waiting requires enough available balance) (Yes/No)"
             ),
-        )
+        ),
     )
 
     class Config:
@@ -353,7 +349,7 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
     # === prompts ===
 
     @classmethod
-    def order_amount_prompt(cls, model_instance: 'AvellanedaMarketMakingConfigMap') -> str:
+    def order_amount_prompt(cls, model_instance: "AvellanedaMarketMakingConfigMap") -> str:
         trading_pair = model_instance.market
         base_asset, quote_asset = split_hb_trading_pair(trading_pair)
         return f"What is the amount of {base_asset} per order?"
@@ -361,15 +357,11 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
     # === specific validations ===
 
     @validator("execution_timeframe_mode", pre=True)
-    def validate_execution_timeframe(
-        cls, v: Union[str, InfiniteModel, FromDateToDateModel, DailyBetweenTimesModel]
-    ):
+    def validate_execution_timeframe(cls, v: Union[str, InfiniteModel, FromDateToDateModel, DailyBetweenTimesModel]):
         if isinstance(v, (InfiniteModel, FromDateToDateModel, DailyBetweenTimesModel, Dict)):
             sub_model = v
         elif v not in EXECUTION_TIMEFRAME_MODELS:
-            raise ValueError(
-                f"Invalid timeframe, please choose value from {list(EXECUTION_TIMEFRAME_MODELS.keys())}"
-            )
+            raise ValueError(f"Invalid timeframe, please choose value from {list(EXECUTION_TIMEFRAME_MODELS.keys())}")
         else:
             sub_model = EXECUTION_TIMEFRAME_MODELS[v].construct()
         return sub_model
@@ -395,9 +387,7 @@ class AvellanedaMarketMakingConfigMap(BaseTradingStrategyConfigMap):
         if isinstance(v, (SingleOrderLevelModel, MultiOrderLevelModel, Dict)):
             sub_model = v
         elif v not in ORDER_LEVEL_MODELS:
-            raise ValueError(
-                f"Invalid order levels mode, please choose value from {list(ORDER_LEVEL_MODELS.keys())}."
-            )
+            raise ValueError(f"Invalid order levels mode, please choose value from {list(ORDER_LEVEL_MODELS.keys())}.")
         else:
             sub_model = ORDER_LEVEL_MODELS[v].construct()
         return sub_model

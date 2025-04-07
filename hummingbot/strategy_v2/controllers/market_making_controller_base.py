@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Dict, List, Optional, Set, Tuple, Union
 
-from pydantic import Field, validator
+from pydantic.v1 import Field, validator
 
 from hummingbot.client.config.config_data_types import ClientFieldData
 from hummingbot.core.data_type.common import OrderType, PositionMode, PriceType, TradeType
@@ -17,94 +17,121 @@ class MarketMakingControllerConfigBase(ControllerConfigBase):
     """
     This class represents the base configuration for a market making controller.
     """
+
     controller_type: str = "market_making"
     connector_name: str = Field(
         default="binance_perpetual",
         client_data=ClientFieldData(
             prompt_on_new=True,
-            prompt=lambda mi: "Enter the name of the exchange to trade on (e.g., binance_perpetual):"))
+            prompt=lambda mi: "Enter the name of the exchange to trade on (e.g., binance_perpetual):",
+        ),
+    )
     trading_pair: str = Field(
         default="WLD-USDT",
         client_data=ClientFieldData(
-            prompt_on_new=True,
-            prompt=lambda mi: "Enter the trading pair to trade on (e.g., WLD-USDT):"))
+            prompt_on_new=True, prompt=lambda mi: "Enter the trading pair to trade on (e.g., WLD-USDT):"
+        ),
+    )
     buy_spreads: List[float] = Field(
         default="0.01,0.02",
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=True,
-            prompt=lambda mi: "Enter a comma-separated list of buy spreads (e.g., '0.01, 0.02'):"))
+            prompt=lambda mi: "Enter a comma-separated list of buy spreads (e.g., '0.01, 0.02'):",
+        ),
+    )
     sell_spreads: List[float] = Field(
         default="0.01,0.02",
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=True,
-            prompt=lambda mi: "Enter a comma-separated list of sell spreads (e.g., '0.01, 0.02'):"))
+            prompt=lambda mi: "Enter a comma-separated list of sell spreads (e.g., '0.01, 0.02'):",
+        ),
+    )
     buy_amounts_pct: Union[List[Decimal], None] = Field(
         default=None,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=False,
-            prompt=lambda mi: "Enter a comma-separated list of buy amounts as percentages (e.g., '50, 50'), or leave blank to distribute equally:"))
+            prompt=lambda mi: "Enter a comma-separated list of buy amounts as percentages (e.g., '50, 50'), or leave blank to distribute equally:",
+        ),
+    )
     sell_amounts_pct: Union[List[Decimal], None] = Field(
         default=None,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=False,
-            prompt=lambda mi: "Enter a comma-separated list of sell amounts as percentages (e.g., '50, 50'), or leave blank to distribute equally:"))
+            prompt=lambda mi: "Enter a comma-separated list of sell amounts as percentages (e.g., '50, 50'), or leave blank to distribute equally:",
+        ),
+    )
     executor_refresh_time: int = Field(
         default=60 * 5,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=True,
-            prompt=lambda mi: "Enter the refresh time in seconds for executors (e.g., 300 for 5 minutes):"))
+            prompt=lambda mi: "Enter the refresh time in seconds for executors (e.g., 300 for 5 minutes):",
+        ),
+    )
     cooldown_time: int = Field(
         default=15,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=False,
-            prompt=lambda mi: "Specify the cooldown time in seconds between after replacing an executor that traded (e.g., 15):"))
+            prompt=lambda mi: "Specify the cooldown time in seconds between after replacing an executor that traded (e.g., 15):",
+        ),
+    )
     leverage: int = Field(
         default=20,
         client_data=ClientFieldData(
             prompt_on_new=True,
-            prompt=lambda mi: "Set the leverage to use for trading (e.g., 20 for 20x leverage). Set it to 1 for spot trading:"))
+            prompt=lambda mi: "Set the leverage to use for trading (e.g., 20 for 20x leverage). Set it to 1 for spot trading:",
+        ),
+    )
     position_mode: PositionMode = Field(
         default="HEDGE",
-        client_data=ClientFieldData(
-            prompt=lambda mi: "Enter the position mode (HEDGE/ONEWAY): ",
-            prompt_on_new=False
-        )
+        client_data=ClientFieldData(prompt=lambda mi: "Enter the position mode (HEDGE/ONEWAY): ", prompt_on_new=False),
     )
     # Triple Barrier Configuration
     stop_loss: Optional[Decimal] = Field(
-        default=Decimal("0.03"), gt=0,
+        default=Decimal("0.03"),
+        gt=0,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt=lambda mi: "Enter the stop loss (as a decimal, e.g., 0.03 for 3%): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
     take_profit: Optional[Decimal] = Field(
-        default=Decimal("0.02"), gt=0,
+        default=Decimal("0.02"),
+        gt=0,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt=lambda mi: "Enter the take profit (as a decimal, e.g., 0.01 for 1%): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
     time_limit: Optional[int] = Field(
-        default=None, gt=0,
+        default=None,
+        gt=0,
         client_data=ClientFieldData(
             is_updatable=True,
             prompt=lambda mi: "Enter the time limit in seconds (e.g., 2700 for 45 minutes): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
     take_profit_order_type: Optional[OrderType] = Field(
         default="LIMIT",
         client_data=ClientFieldData(
-            prompt=lambda mi: "Enter the order type for taking profit (LIMIT/MARKET): ",
-            prompt_on_new=True))
+            prompt=lambda mi: "Enter the order type for taking profit (LIMIT/MARKET): ", prompt_on_new=True
+        ),
+    )
     trailing_stop: Optional[TrailingStop] = Field(
         default="0.015,0.003",
         client_data=ClientFieldData(
             prompt=lambda mi: "Enter the trailing stop as activation_price,trailing_delta (e.g., 0.015,0.003): ",
-            prompt_on_new=True))
+            prompt_on_new=True,
+        ),
+    )
 
     @validator("trailing_stop", pre=True, always=True)
     def parse_trailing_stop(cls, v):
@@ -123,7 +150,7 @@ class MarketMakingControllerConfigBase(ControllerConfigBase):
             return Decimal(v)
         return v
 
-    @validator('take_profit_order_type', pre=True, allow_reuse=True, always=True)
+    @validator("take_profit_order_type", pre=True, allow_reuse=True, always=True)
     def validate_order_type(cls, v) -> OrderType:
         if isinstance(v, OrderType):
             return v
@@ -149,32 +176,33 @@ class MarketMakingControllerConfigBase(ControllerConfigBase):
             open_order_type=OrderType.LIMIT,  # Defaulting to LIMIT as is a Maker Controller
             take_profit_order_type=self.take_profit_order_type,
             stop_loss_order_type=OrderType.MARKET,  # Defaulting to MARKET as per requirement
-            time_limit_order_type=OrderType.MARKET  # Defaulting to MARKET as per requirement
+            time_limit_order_type=OrderType.MARKET,  # Defaulting to MARKET as per requirement
         )
 
-    @validator('buy_spreads', 'sell_spreads', pre=True, always=True)
+    @validator("buy_spreads", "sell_spreads", pre=True, always=True)
     def parse_spreads(cls, v):
         if v is None:
             return []
         if isinstance(v, str):
             if v == "":
                 return []
-            return [float(x.strip()) for x in v.split(',')]
+            return [float(x.strip()) for x in v.split(",")]
         return v
 
-    @validator('buy_amounts_pct', 'sell_amounts_pct', pre=True, always=True)
+    @validator("buy_amounts_pct", "sell_amounts_pct", pre=True, always=True)
     def parse_and_validate_amounts(cls, v, values, field):
         if v is None or v == "":
-            spread_field = field.name.replace('amounts_pct', 'spreads')
+            spread_field = field.name.replace("amounts_pct", "spreads")
             return [1 for _ in values[spread_field]]
         if isinstance(v, str):
-            return [float(x.strip()) for x in v.split(',')]
-        elif isinstance(v, list) and len(v) != len(values[field.name.replace('amounts_pct', 'spreads')]):
+            return [float(x.strip()) for x in v.split(",")]
+        elif isinstance(v, list) and len(v) != len(values[field.name.replace("amounts_pct", "spreads")]):
             raise ValueError(
-                f"The number of {field.name} must match the number of {field.name.replace('amounts_pct', 'spreads')}.")
+                f"The number of {field.name} must match the number of {field.name.replace('amounts_pct', 'spreads')}."
+            )
         return v
 
-    @validator('position_mode', pre=True, allow_reuse=True)
+    @validator("position_mode", pre=True, allow_reuse=True)
     def validate_position_mode(cls, v) -> PositionMode:
         if isinstance(v, str):
             if v.upper() in PositionMode.__members__:
@@ -182,19 +210,28 @@ class MarketMakingControllerConfigBase(ControllerConfigBase):
             raise ValueError(f"Invalid position mode: {v}. Valid options are: {', '.join(PositionMode.__members__)}")
         return v
 
-    def update_parameters(self, trade_type: TradeType, new_spreads: Union[List[float], str], new_amounts_pct: Optional[Union[List[int], str]] = None):
-        spreads_field = 'buy_spreads' if trade_type == TradeType.BUY else 'sell_spreads'
-        amounts_pct_field = 'buy_amounts_pct' if trade_type == TradeType.BUY else 'sell_amounts_pct'
+    def update_parameters(
+        self,
+        trade_type: TradeType,
+        new_spreads: Union[List[float], str],
+        new_amounts_pct: Optional[Union[List[int], str]] = None,
+    ):
+        spreads_field = "buy_spreads" if trade_type == TradeType.BUY else "sell_spreads"
+        amounts_pct_field = "buy_amounts_pct" if trade_type == TradeType.BUY else "sell_amounts_pct"
 
         setattr(self, spreads_field, self.parse_spreads(new_spreads))
         if new_amounts_pct is not None:
-            setattr(self, amounts_pct_field, self.parse_and_validate_amounts(new_amounts_pct, self.__dict__, self.__fields__[amounts_pct_field]))
+            setattr(
+                self,
+                amounts_pct_field,
+                self.parse_and_validate_amounts(new_amounts_pct, self.__dict__, self.__fields__[amounts_pct_field]),
+            )
         else:
             setattr(self, amounts_pct_field, [1 for _ in getattr(self, spreads_field)])
 
     def get_spreads_and_amounts_in_quote(self, trade_type: TradeType) -> Tuple[List[float], List[float]]:
-        buy_amounts_pct = getattr(self, 'buy_amounts_pct')
-        sell_amounts_pct = getattr(self, 'sell_amounts_pct')
+        buy_amounts_pct = getattr(self, "buy_amounts_pct")
+        sell_amounts_pct = getattr(self, "sell_amounts_pct")
 
         # Calculate total percentages across buys and sells
         total_pct = sum(buy_amounts_pct) + sum(sell_amounts_pct)
@@ -205,7 +242,7 @@ class MarketMakingControllerConfigBase(ControllerConfigBase):
         else:  # TradeType.SELL
             normalized_amounts_pct = [amt_pct / total_pct for amt_pct in sell_amounts_pct]
 
-        spreads = getattr(self, f'{trade_type.name.lower()}_spreads')
+        spreads = getattr(self, f"{trade_type.name.lower()}_spreads")
         return spreads, [amt_pct * self.total_amount_quote for amt_pct in normalized_amounts_pct]
 
     def update_markets(self, markets: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
@@ -223,8 +260,9 @@ class MarketMakingControllerBase(ControllerBase):
     def __init__(self, config: MarketMakingControllerConfigBase, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         self.config = config
-        self.market_data_provider.initialize_rate_sources([ConnectorPair(
-            connector_name=config.connector_name, trading_pair=config.trading_pair)])
+        self.market_data_provider.initialize_rate_sources(
+            [ConnectorPair(connector_name=config.connector_name, trading_pair=config.trading_pair)]
+        )
 
     def determine_executor_actions(self) -> List[ExecutorAction]:
         """
@@ -245,16 +283,19 @@ class MarketMakingControllerBase(ControllerBase):
             price, amount = self.get_price_and_amount(level_id)
             executor_config = self.get_executor_config(level_id, price, amount)
             if executor_config is not None:
-                create_actions.append(CreateExecutorAction(
-                    controller_id=self.config.id,
-                    executor_config=executor_config
-                ))
+                create_actions.append(
+                    CreateExecutorAction(controller_id=self.config.id, executor_config=executor_config)
+                )
         return create_actions
 
     def get_levels_to_execute(self) -> List[str]:
         working_levels = self.filter_executors(
             executors=self.executors_info,
-            filter_func=lambda x: x.is_active or (x.close_type == CloseType.STOP_LOSS and self.market_data_provider.time() - x.close_timestamp < self.config.cooldown_time)
+            filter_func=lambda x: x.is_active
+            or (
+                x.close_type == CloseType.STOP_LOSS
+                and self.market_data_provider.time() - x.close_timestamp < self.config.cooldown_time
+            ),
         )
         working_levels_ids = [executor.custom_info["level_id"] for executor in working_levels]
         return self.get_not_active_levels_ids(working_levels_ids)
@@ -271,11 +312,15 @@ class MarketMakingControllerBase(ControllerBase):
     def executors_to_refresh(self) -> List[ExecutorAction]:
         executors_to_refresh = self.filter_executors(
             executors=self.executors_info,
-            filter_func=lambda x: not x.is_trading and x.is_active and self.market_data_provider.time() - x.timestamp > self.config.executor_refresh_time)
+            filter_func=lambda x: not x.is_trading
+            and x.is_active
+            and self.market_data_provider.time() - x.timestamp > self.config.executor_refresh_time,
+        )
 
-        return [StopExecutorAction(
-            controller_id=self.config.id,
-            executor_id=executor.id) for executor in executors_to_refresh]
+        return [
+            StopExecutorAction(controller_id=self.config.id, executor_id=executor.id)
+            for executor in executors_to_refresh
+        ]
 
     def executors_to_early_stop(self) -> List[ExecutorAction]:
         """
@@ -290,8 +335,9 @@ class MarketMakingControllerBase(ControllerBase):
         and spread multiplier based on the market data. By default, it will update the reference price as mid price and
         the spread multiplier as 1.
         """
-        reference_price = self.market_data_provider.get_price_by_type(self.config.connector_name,
-                                                                      self.config.trading_pair, PriceType.MidPrice)
+        reference_price = self.market_data_provider.get_price_by_type(
+            self.config.connector_name, self.config.trading_pair, PriceType.MidPrice
+        )
         self.processed_data = {"reference_price": Decimal(reference_price), "spread_multiplier": Decimal("1")}
 
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
@@ -323,16 +369,22 @@ class MarketMakingControllerBase(ControllerBase):
         return TradeType.BUY if level_id.startswith("buy") else TradeType.SELL
 
     def get_level_from_level_id(self, level_id: str) -> int:
-        return int(level_id.split('_')[1])
+        return int(level_id.split("_")[1])
 
     def get_not_active_levels_ids(self, active_levels_ids: List[str]) -> List[str]:
         """
         Get the levels to execute based on the current state of the controller.
         """
-        buy_ids_missing = [self.get_level_id_from_side(TradeType.BUY, level) for level in range(len(self.config.buy_spreads))
-                           if self.get_level_id_from_side(TradeType.BUY, level) not in active_levels_ids]
-        sell_ids_missing = [self.get_level_id_from_side(TradeType.SELL, level) for level in range(len(self.config.sell_spreads))
-                            if self.get_level_id_from_side(TradeType.SELL, level) not in active_levels_ids]
+        buy_ids_missing = [
+            self.get_level_id_from_side(TradeType.BUY, level)
+            for level in range(len(self.config.buy_spreads))
+            if self.get_level_id_from_side(TradeType.BUY, level) not in active_levels_ids
+        ]
+        sell_ids_missing = [
+            self.get_level_id_from_side(TradeType.SELL, level)
+            for level in range(len(self.config.sell_spreads))
+            if self.get_level_id_from_side(TradeType.SELL, level) not in active_levels_ids
+        ]
         return buy_ids_missing + sell_ids_missing
 
     def get_balance_requirements(self) -> List[TokenAmount]:
@@ -342,5 +394,7 @@ class MarketMakingControllerBase(ControllerBase):
         base_asset, quote_asset = self.config.trading_pair.split("-")
         _, amounts_quote = self.config.get_spreads_and_amounts_in_quote(TradeType.BUY)
         _, amounts_base = self.config.get_spreads_and_amounts_in_quote(TradeType.SELL)
-        return [TokenAmount(base_asset, Decimal(sum(amounts_base) / self.processed_data["reference_price"])),
-                TokenAmount(quote_asset, Decimal(sum(amounts_quote)))]
+        return [
+            TokenAmount(base_asset, Decimal(sum(amounts_base) / self.processed_data["reference_price"])),
+            TokenAmount(quote_asset, Decimal(sum(amounts_quote))),
+        ]

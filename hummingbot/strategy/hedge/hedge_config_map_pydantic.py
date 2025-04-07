@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Dict, List, Literal, Union
 
-from pydantic import Field, validator
+from pydantic.v1 import Field, validator
 
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientConfigEnum, ClientFieldData
 from hummingbot.client.config.config_validators import validate_bool, validate_decimal, validate_market_trading_pair
@@ -205,7 +205,7 @@ class HedgeConfigMap(BaseStrategyConfigMap):
         client_data=ClientFieldData(
             prompt=lambda mi: "Do you want to automatically set the exchange position mode to one-way or hedge [y/n]?",
             prompt_on_new=False,
-        )
+        ),
     )
     connector_0: market_config_map = get_field(0)
     connector_1: market_config_map = get_field(1)

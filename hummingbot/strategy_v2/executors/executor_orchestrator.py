@@ -4,7 +4,7 @@ from copy import deepcopy
 from decimal import Decimal
 from typing import Dict, List
 
-from pydantic.main import BaseModel
+from pydantic.v1.main import BaseModel
 
 from hummingbot.connector.markets_recorder import MarketsRecorder
 from hummingbot.core.data_type.common import PriceType, TradeType
@@ -92,13 +92,15 @@ class PositionHeld:
             amount=net_amount,
             breakeven_price=breakeven_price,
             unrealized_pnl_quote=unrealized_pnl,
-            cum_fees_quote=cum_fees_quote)
+            cum_fees_quote=cum_fees_quote,
+        )
 
 
 class ExecutorOrchestrator:
     """
     Orchestrator for various executors.
     """
+
     _logger = None
 
     @classmethod
@@ -139,8 +141,9 @@ class ExecutorOrchestrator:
         report.realized_pnl_quote += executor_info.net_pnl_quote
         report.volume_traded += executor_info.filled_amount_quote
         if executor_info.close_type:
-            report.close_type_counts[executor_info.close_type] = report.close_type_counts.get(executor_info.close_type,
-                                                                                              0) + 1
+            report.close_type_counts[executor_info.close_type] = (
+                report.close_type_counts.get(executor_info.close_type, 0) + 1
+            )
 
     def stop(self):
         """
@@ -162,7 +165,8 @@ class ExecutorOrchestrator:
         for controller_id, positions_list in self.positions_held.items():
             for position in positions_list:
                 mid_price = self.strategy.market_data_provider.get_price_by_type(
-                    position.connector_name, position.trading_pair, PriceType.MidPrice)
+                    position.connector_name, position.trading_pair, PriceType.MidPrice
+                )
                 position_summary = position.get_position_summary(mid_price)
 
                 # Create a new Position record
@@ -177,7 +181,7 @@ class ExecutorOrchestrator:
                     breakeven_price=position_summary.breakeven_price,
                     unrealized_pnl_quote=position_summary.unrealized_pnl_quote,
                     cum_fees_quote=position_summary.cum_fees_quote,
-                    filled_orders=position.filled_orders
+                    filled_orders=position.filled_orders,
                 )
                 # Store the position in the database
                 markets_recorder.store_position(position_record)
@@ -256,8 +260,8 @@ class ExecutorOrchestrator:
         executor_id = action.executor_id
 
         executor = next(
-            (executor for executor in self.active_executors[controller_id] if executor.config.id == executor_id),
-            None)
+            (executor for executor in self.active_executors[controller_id] if executor.config.id == executor_id), None
+        )
         if not executor:
             self.logger().error(f"Executor ID {executor_id} not found for controller {controller_id}.")
             return
@@ -271,8 +275,8 @@ class ExecutorOrchestrator:
         executor_id = action.executor_id
 
         executor = next(
-            (executor for executor in self.active_executors[controller_id] if executor.config.id == executor_id),
-            None)
+            (executor for executor in self.active_executors[controller_id] if executor.config.id == executor_id), None
+        )
         if not executor:
             self.logger().error(f"Executor ID {executor_id} not found for controller {controller_id}.")
             return
@@ -308,7 +312,8 @@ class ExecutorOrchestrator:
             positions_summary = []
             for position in positions_list:
                 mid_price = self.strategy.market_data_provider.get_price_by_type(
-                    position.connector_name, position.trading_pair, PriceType.MidPrice)
+                    position.connector_name, position.trading_pair, PriceType.MidPrice
+                )
                 positions_summary.append(position.get_position_summary(mid_price))
             report[controller_id] = positions_summary
         return report
@@ -326,25 +331,39 @@ class ExecutorOrchestrator:
             if executor_info.is_active:
                 report.unrealized_pnl_quote += executor_info.net_pnl_quote
                 if side:
-                    report.inventory_imbalance += executor_info.filled_amount_quote \
-                        if side == TradeType.BUY else -executor_info.filled_amount_quote
+                    report.inventory_imbalance += (
+                        executor_info.filled_amount_quote
+                        if side == TradeType.BUY
+                        else -executor_info.filled_amount_quote
+                    )
                 if executor_info.type == "dca_executor":
-                    report.open_order_volume += sum(
-                        executor_info.config.amounts_quote) - executor_info.filled_amount_quote
+                    report.open_order_volume += (
+                        sum(executor_info.config.amounts_quote) - executor_info.filled_amount_quote
+                    )
                 elif executor_info.type == "position_executor":
-                    report.open_order_volume += (executor_info.config.amount *
-                                                 executor_info.config.entry_price) - executor_info.filled_amount_quote
+                    report.open_order_volume += (
+                        executor_info.config.amount * executor_info.config.entry_price
+                    ) - executor_info.filled_amount_quote
             else:
                 report.realized_pnl_quote += executor_info.net_pnl_quote
                 if executor_info.close_type in report.close_type_counts:
                     report.close_type_counts[executor_info.close_type] += 1
                 else:
                     report.close_type_counts[executor_info.close_type] = 1
-                if executor_info.close_type == CloseType.POSITION_HOLD and executor_info.config.id not in self.executors_ids_position_held:
+                if (
+                    executor_info.close_type == CloseType.POSITION_HOLD
+                    and executor_info.config.id not in self.executors_ids_position_held
+                ):
                     self.executors_ids_position_held.append(executor_info.config.id)
-                    position = next((position for position in positions if
-                                     position.trading_pair == executor_info.trading_pair and position.connector_name == executor_info.connector_name),
-                                    None)
+                    position = next(
+                        (
+                            position
+                            for position in positions
+                            if position.trading_pair == executor_info.trading_pair
+                            and position.connector_name == executor_info.connector_name
+                        ),
+                        None,
+                    )
                     if position:
                         position.add_orders_from_executor(executor_info)
                     else:
@@ -358,7 +377,8 @@ class ExecutorOrchestrator:
 
         for position in positions:
             mid_price = self.strategy.market_data_provider.get_price_by_type(
-                position.connector_name, position.trading_pair, PriceType.MidPrice)
+                position.connector_name, position.trading_pair, PriceType.MidPrice
+            )
             position_summary = position.get_position_summary(mid_price)
 
             # Update report with position data
@@ -373,10 +393,16 @@ class ExecutorOrchestrator:
 
         # Calculate global PNL values
         report.global_pnl_quote = report.unrealized_pnl_quote + report.realized_pnl_quote
-        report.global_pnl_pct = (report.global_pnl_quote / report.volume_traded) * 100 if report.volume_traded != 0 else Decimal(0)
+        report.global_pnl_pct = (
+            (report.global_pnl_quote / report.volume_traded) * 100 if report.volume_traded != 0 else Decimal(0)
+        )
 
         # Calculate individual PNL percentages
-        report.unrealized_pnl_pct = (report.unrealized_pnl_quote / report.volume_traded) * 100 if report.volume_traded != 0 else Decimal(0)
-        report.realized_pnl_pct = (report.realized_pnl_quote / report.volume_traded) * 100 if report.volume_traded != 0 else Decimal(0)
+        report.unrealized_pnl_pct = (
+            (report.unrealized_pnl_quote / report.volume_traded) * 100 if report.volume_traded != 0 else Decimal(0)
+        )
+        report.realized_pnl_pct = (
+            (report.realized_pnl_quote / report.volume_traded) * 100 if report.volume_traded != 0 else Decimal(0)
+        )
 
         return report

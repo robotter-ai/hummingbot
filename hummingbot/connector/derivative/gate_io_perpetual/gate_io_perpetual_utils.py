@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import Field, SecretStr
+from pydantic.v1 import Field, SecretStr
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.connector.derivative.gate_io_perpetual import gate_io_perpetual_constants as CONSTANTS
@@ -23,7 +23,7 @@ class GateIOPerpetualConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     gate_io_perpetual_secret_key: SecretStr = Field(
         default=...,
@@ -32,7 +32,7 @@ class GateIOPerpetualConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     gate_io_perpetual_user_id: SecretStr = Field(
         default=...,
@@ -41,7 +41,7 @@ class GateIOPerpetualConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     class Config:

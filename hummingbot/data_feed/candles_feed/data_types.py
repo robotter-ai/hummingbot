@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic.v1 import BaseModel
 
 
 class CandlesConfig(BaseModel):
@@ -10,6 +10,7 @@ class CandlesConfig(BaseModel):
     - interval: str
     - max_records: int
     """
+
     connector: str
     trading_pair: str
     interval: str = "1m"

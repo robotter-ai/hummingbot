@@ -1,7 +1,7 @@
 import unittest
 from decimal import Decimal
 
-from pydantic import SecretStr
+from pydantic.v1 import SecretStr
 
 import hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_constants as CONSTANTS
 from hummingbot.connector.exchange.coinbase_advanced_trade.coinbase_advanced_trade_utils import (
@@ -13,7 +13,6 @@ from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 
 
 class CoinbaseAdvancedTradeUtilTestCases(unittest.TestCase):
-
     quote_asset = None
     base_asset = None
 
@@ -46,8 +45,7 @@ class CoinbaseAdvancedTradeUtilTestCases(unittest.TestCase):
 
     def test_coinbase_advanced_trade_config_map(self):
         config_map = CoinbaseAdvancedTradeConfigMap(
-            coinbase_advanced_trade_api_key="test_key",
-            coinbase_advanced_trade_api_secret="test_secret"
+            coinbase_advanced_trade_api_key="test_key", coinbase_advanced_trade_api_secret="test_secret"
         )
         self.assertEqual(config_map.connector, "coinbase_advanced_trade")
         self.assertEqual(config_map.coinbase_advanced_trade_api_key, SecretStr("test_key"))

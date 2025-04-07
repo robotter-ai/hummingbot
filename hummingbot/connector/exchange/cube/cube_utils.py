@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Any, Dict
 
-from pydantic import Field, SecretStr, validator
+from pydantic.v1 import Field, SecretStr, validator
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.client.config.config_validators import validate_int, validate_with_regex
@@ -103,7 +103,7 @@ class CubeConfigMap(BaseConnectorConfigMap):
 
     @validator("cube_api_key", pre=True)
     def validate_cube_api_key(cls, v: str):
-        pattern = r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+        pattern = r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
         error_message = "Invalid API key. API key should be a UUID string."
         ret = validate_with_regex(v, pattern, error_message)
         if ret is not None:
@@ -112,7 +112,7 @@ class CubeConfigMap(BaseConnectorConfigMap):
 
     @validator("cube_api_secret", pre=True)
     def validate_cube_api_secret(cls, v: str):
-        pattern = r'^[a-zA-Z0-9]{64}$'
+        pattern = r"^[a-zA-Z0-9]{64}$"
         error_message = "Invalid secret key. Secret key should be a 64-character alphanumeric string."
         ret = validate_with_regex(v, pattern, error_message)
         if ret is not None:

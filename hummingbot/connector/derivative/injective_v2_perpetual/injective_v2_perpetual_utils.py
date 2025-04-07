@@ -1,8 +1,8 @@
 from decimal import Decimal
 from typing import Dict, Union
 
-from pydantic import Field
-from pydantic.class_validators import validator
+from pydantic.v1 import Field
+from pydantic.v1.class_validators import validator
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.connector.exchange.injective_v2.injective_v2_utils import (
@@ -28,7 +28,8 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
     # Setting a default dummy configuration to allow the bot to create a dummy instance to fetch all trading pairs
     connector: str = Field(default="injective_v2_perpetual", const=True, client_data=None)
     receive_connector_configuration: bool = Field(
-        default=True, const=True,
+        default=True,
+        const=True,
         client_data=ClientFieldData(),
     )
     network: Union[tuple(NETWORK_MODES.values())] = Field(
@@ -61,9 +62,7 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
         if isinstance(v, tuple(NETWORK_MODES.values()) + (Dict,)):
             sub_model = v
         elif v not in NETWORK_MODES:
-            raise ValueError(
-                f"Invalid network, please choose a value from {list(NETWORK_MODES.keys())}."
-            )
+            raise ValueError(f"Invalid network, please choose a value from {list(NETWORK_MODES.keys())}.")
         else:
             sub_model = NETWORK_MODES[v].construct()
         return sub_model
@@ -73,9 +72,7 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
         if isinstance(v, tuple(ACCOUNT_MODES.values()) + (Dict,)):
             sub_model = v
         elif v not in ACCOUNT_MODES:
-            raise ValueError(
-                f"Invalid account type, please choose a value from {list(ACCOUNT_MODES.keys())}."
-            )
+            raise ValueError(f"Invalid account type, please choose a value from {list(ACCOUNT_MODES.keys())}.")
         else:
             sub_model = ACCOUNT_MODES[v].construct()
         return sub_model
@@ -85,9 +82,7 @@ class InjectiveConfigMap(BaseConnectorConfigMap):
         if isinstance(v, tuple(FEE_CALCULATOR_MODES.values()) + (Dict,)):
             sub_model = v
         elif v not in FEE_CALCULATOR_MODES:
-            raise ValueError(
-                f"Invalid fee calculator, please choose a value from {list(FEE_CALCULATOR_MODES.keys())}."
-            )
+            raise ValueError(f"Invalid fee calculator, please choose a value from {list(FEE_CALCULATOR_MODES.keys())}.")
         else:
             sub_model = FEE_CALCULATOR_MODES[v].construct()
         return sub_model

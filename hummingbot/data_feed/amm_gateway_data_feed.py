@@ -3,7 +3,7 @@ import logging
 from decimal import Decimal
 from typing import Dict, Optional, Set
 
-from pydantic import BaseModel
+from pydantic.v1 import BaseModel
 
 from hummingbot.connector.utils import split_hb_trading_pair
 from hummingbot.core.data_type.common import TradeType
@@ -98,8 +98,7 @@ class AmmGatewayDataFeed(NetworkBase):
                 raise
             except Exception as e:
                 self.logger().error(
-                    f"Error getting data from {self.name}"
-                    f"Check network connection. Error: {e}",
+                    f"Error getting data from {self.name}" f"Check network connection. Error: {e}",
                 )
             await self._async_sleep(self._update_interval)
 

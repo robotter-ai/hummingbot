@@ -6,7 +6,7 @@ import inspect
 from decimal import Decimal
 from typing import Callable, Dict, List, Set
 
-from pydantic import Field, validator
+from pydantic.v1 import Field, validator
 
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientFieldData
 from hummingbot.core.data_type.trade_fee import TokenAmount
@@ -30,12 +30,14 @@ class ControllerConfigBase(BaseClientModel):
         controller_name (str): The name of the trading strategy that the controller will use.
         candles_config (List[CandlesConfig]): A list of configurations for the candles data feed.
     """
+
     id: str = Field(
         default=None,
         client_data=ClientFieldData(
             prompt_on_new=False,
-            prompt=lambda mi: "Enter a unique identifier for the controller or leave empty to generate one."
-        ))
+            prompt=lambda mi: "Enter a unique identifier for the controller or leave empty to generate one.",
+        ),
+    )
     controller_name: str
     controller_type: str = "generic"
     total_amount_quote: Decimal = Field(
@@ -43,7 +45,9 @@ class ControllerConfigBase(BaseClientModel):
         client_data=ClientFieldData(
             is_updatable=True,
             prompt_on_new=True,
-            prompt=lambda mi: "Enter the total amount in quote asset to use for trading (e.g., 1000):"))
+            prompt=lambda mi: "Enter the total amount in quote asset to use for trading (e.g., 1000):",
+        ),
+    )
     manual_kill_switch: bool = Field(default=None, client_data=ClientFieldData(is_updatable=True, prompt_on_new=False))
     candles_config: List[CandlesConfig] = Field(
         default="binance_perpetual.WLD-USDT.1m.500",
@@ -53,17 +57,17 @@ class ControllerConfigBase(BaseClientModel):
             prompt=lambda mi: (
                 "Enter candle configs in format 'exchange1.tp1.interval1.max_records:"
                 "exchange2.tp2.interval2.max_records':"
-            )
-        )
+            ),
+        ),
     )
 
-    @validator('id', pre=True, always=True)
+    @validator("id", pre=True, always=True)
     def set_id(cls, v):
         if v is None or v.strip() == "":
             return generate_unique_id()
         return v
 
-    @validator('candles_config', pre=True)
+    @validator("candles_config", pre=True)
     def parse_candles_config(cls, v) -> List[CandlesConfig]:
         if isinstance(v, str):
             return cls.parse_candles_config_str(v)
@@ -75,23 +79,24 @@ class ControllerConfigBase(BaseClientModel):
     def parse_candles_config_str(v: str) -> List[CandlesConfig]:
         configs = []
         if v.strip():
-            entries = v.split(':')
+            entries = v.split(":")
             for entry in entries:
-                parts = entry.split('.')
+                parts = entry.split(".")
                 if len(parts) != 4:
-                    raise ValueError(f"Invalid candles config format in segment '{entry}'. "
-                                     "Expected format: 'exchange.tradingpair.interval.maxrecords'")
+                    raise ValueError(
+                        f"Invalid candles config format in segment '{entry}'. "
+                        "Expected format: 'exchange.tradingpair.interval.maxrecords'"
+                    )
                 connector, trading_pair, interval, max_records_str = parts
                 try:
                     max_records = int(max_records_str)
                 except ValueError:
-                    raise ValueError(f"Invalid max_records value '{max_records_str}' in segment '{entry}'. "
-                                     "max_records should be an integer.")
+                    raise ValueError(
+                        f"Invalid max_records value '{max_records_str}' in segment '{entry}'. "
+                        "max_records should be an integer."
+                    )
                 config = CandlesConfig(
-                    connector=connector,
-                    trading_pair=trading_pair,
-                    interval=interval,
-                    max_records=max_records
+                    connector=connector, trading_pair=trading_pair, interval=interval, max_records=max_records
                 )
                 configs.append(config)
         return configs
@@ -122,8 +127,14 @@ class ControllerBase(RunnableBase):
     """
     Base class for controllers.
     """
-    def __init__(self, config: ControllerConfigBase, market_data_provider: MarketDataProvider,
-                 actions_queue: asyncio.Queue, update_interval: float = 1.0):
+
+    def __init__(
+        self,
+        config: ControllerConfigBase,
+        market_data_provider: MarketDataProvider,
+        actions_queue: asyncio.Queue,
+        update_interval: float = 1.0,
+    ):
         super().__init__(update_interval=update_interval)
         self.config = config
         self.executors_info: List[ExecutorInfo] = []
@@ -179,7 +190,9 @@ class ControllerBase(RunnableBase):
             self.executors_update_event.clear()  # Clear the event after sending the actions
 
     @staticmethod
-    def filter_executors(executors: List[ExecutorInfo], filter_func: Callable[[ExecutorInfo], bool]) -> List[ExecutorInfo]:
+    def filter_executors(
+        executors: List[ExecutorInfo], filter_func: Callable[[ExecutorInfo], bool]
+    ) -> List[ExecutorInfo]:
         return [executor for executor in executors if filter_func(executor)]
 
     async def update_processed_data(self):

@@ -1,7 +1,6 @@
-
 from decimal import Decimal
 
-from pydantic import Field
+from pydantic.v1 import Field
 
 from hummingbot.client.config.config_data_types import ClientFieldData
 from hummingbot.client.config.strategy_config_data_types import BaseTradingStrategyMakerTakerConfigMap
@@ -27,7 +26,7 @@ class CrossExchangeMiningConfigMap(BaseTradingStrategyMakerTakerConfigMap):
         client_data=ClientFieldData(
             prompt=lambda mi: CrossExchangeMiningConfigMap.order_amount_prompt(mi),
             prompt_on_new=True,
-        )
+        ),
     )
 
     balance_adjustment_duration: float = Field(
@@ -102,9 +101,7 @@ class CrossExchangeMiningConfigMap(BaseTradingStrategyMakerTakerConfigMap):
         description="What is the minimum order amount required for bid or ask orders?: ",
         ge=0.0,
         client_data=ClientFieldData(
-            prompt=lambda mi: (
-                    "What is the minimum order amount required for bid or ask orders?: "
-            ),
+            prompt=lambda mi: ("What is the minimum order amount required for bid or ask orders?: "),
             prompt_on_new=True,
         ),
     )
@@ -114,7 +111,7 @@ class CrossExchangeMiningConfigMap(BaseTradingStrategyMakerTakerConfigMap):
         ge=0.0,
         client_data=ClientFieldData(
             prompt=lambda mi: (
-                    "Multiplier for rate curve for the adjustment of min profitability based on previous trades over last 24 hrs: "
+                "Multiplier for rate curve for the adjustment of min profitability based on previous trades over last 24 hrs: "
             ),
             prompt_on_new=True,
         ),
@@ -124,16 +121,14 @@ class CrossExchangeMiningConfigMap(BaseTradingStrategyMakerTakerConfigMap):
         description="Complete trade fee covering both taker and maker trades: ",
         ge=0.0,
         client_data=ClientFieldData(
-            prompt=lambda mi: (
-                    "Complete trade fee covering both taker and maker trades: "
-            ),
+            prompt=lambda mi: ("Complete trade fee covering both taker and maker trades: "),
             prompt_on_new=True,
         ),
     )
     # === prompts ===
 
     @classmethod
-    def order_amount_prompt(cls, model_instance: 'CrossExchangeMiningConfigMap') -> str:
+    def order_amount_prompt(cls, model_instance: "CrossExchangeMiningConfigMap") -> str:
         trading_pair = model_instance.maker_market_trading_pair
         base_asset, quote_asset = trading_pair.split("-")
         return f"The amount of {base_asset} for the strategy to maintain in wallet over exchanges (Will autobalance by buying or selling to maintain amount).?"

@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Any, Dict
 
-from pydantic import Field, SecretStr
+from pydantic.v1 import Field, SecretStr
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.core.data_type.trade_fee import TradeFeeSchema
@@ -12,7 +12,7 @@ EXAMPLE_PAIR = "ZRX-ETH"
 DEFAULT_FEES = TradeFeeSchema(
     maker_percent_fee_decimal=Decimal("0.001"),
     taker_percent_fee_decimal=Decimal("0.001"),
-    buy_percent_fee_deducted_from_returns=True
+    buy_percent_fee_deducted_from_returns=True,
 )
 
 
@@ -47,7 +47,7 @@ class BinanceConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     binance_api_secret: SecretStr = Field(
         default=...,
@@ -56,7 +56,7 @@ class BinanceConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     class Config:
@@ -80,7 +80,7 @@ class BinanceUSConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     binance_api_secret: SecretStr = Field(
         default=...,
@@ -89,7 +89,7 @@ class BinanceUSConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     class Config:

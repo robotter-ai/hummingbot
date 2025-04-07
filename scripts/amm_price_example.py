@@ -3,7 +3,7 @@ import os
 from decimal import Decimal
 from typing import Dict
 
-from pydantic import Field
+from pydantic.v1 import Field
 
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientFieldData
 from hummingbot.connector.connector_base import ConnectorBase
@@ -13,18 +13,27 @@ from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
 class DEXPriceConfig(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
-    connector: str = Field("jupiter", client_data=ClientFieldData(
-        prompt_on_new=True, prompt=lambda mi: "DEX to swap on"))
-    chain: str = Field("solana", client_data=ClientFieldData(
-        prompt_on_new=True, prompt=lambda mi: "Chain"))
-    network: str = Field("mainnet-beta", client_data=ClientFieldData(
-        prompt_on_new=True, prompt=lambda mi: "Network"))
-    trading_pair: str = Field("SOL-USDC", client_data=ClientFieldData(
-        prompt_on_new=True, prompt=lambda mi: "Trading pair in which the bot will place orders"))
-    is_buy: bool = Field(True, client_data=ClientFieldData(
-        prompt_on_new=True, prompt=lambda mi: "Buying or selling the base asset? (True for buy, False for sell)"))
-    amount: Decimal = Field(Decimal("0.01"), client_data=ClientFieldData(
-        prompt_on_new=True, prompt=lambda mi: "Amount of base asset to buy or sell"))
+    connector: str = Field(
+        "jupiter", client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "DEX to swap on")
+    )
+    chain: str = Field("solana", client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Chain"))
+    network: str = Field("mainnet-beta", client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Network"))
+    trading_pair: str = Field(
+        "SOL-USDC",
+        client_data=ClientFieldData(
+            prompt_on_new=True, prompt=lambda mi: "Trading pair in which the bot will place orders"
+        ),
+    )
+    is_buy: bool = Field(
+        True,
+        client_data=ClientFieldData(
+            prompt_on_new=True, prompt=lambda mi: "Buying or selling the base asset? (True for buy, False for sell)"
+        ),
+    )
+    amount: Decimal = Field(
+        Decimal("0.01"),
+        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Amount of base asset to buy or sell"),
+    )
 
 
 class DEXPrice(ScriptStrategyBase):
@@ -51,9 +60,7 @@ class DEXPrice(ScriptStrategyBase):
     async def async_task(self):
         # fetch price using GatewaySwap instead of direct HTTP call
         side = "buy" if self.config.is_buy else "sell"
-        msg = (f"Getting quote on {self.exchange} "
-               f"to {side} {self.config.amount} {self.base} "
-               f"for {self.quote}")
+        msg = f"Getting quote on {self.exchange} " f"to {side} {self.config.amount} {self.base} " f"for {self.quote}"
         try:
             self.log_with_clock(logging.INFO, msg)
             price = await self.connectors[self.exchange].get_quote_price(

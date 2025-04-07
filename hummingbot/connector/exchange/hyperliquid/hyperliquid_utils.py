@@ -1,8 +1,8 @@
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import Field, SecretStr
-from pydantic.class_validators import validator
+from pydantic.v1 import Field, SecretStr
+from pydantic.v1.class_validators import validator
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.core.data_type.trade_fee import TradeFeeSchema
@@ -11,7 +11,7 @@ from hummingbot.core.data_type.trade_fee import TradeFeeSchema
 DEFAULT_FEES = TradeFeeSchema(
     maker_percent_fee_decimal=Decimal("0"),
     taker_percent_fee_decimal=Decimal("0.00025"),
-    buy_percent_fee_deducted_from_returns=True
+    buy_percent_fee_deducted_from_returns=True,
 )
 
 CENTRALIZED = True
@@ -25,7 +25,7 @@ def validate_bool(value: str) -> Optional[str]:
     """
     Permissively interpret a string as a boolean
     """
-    valid_values = ('true', 'yes', 'y', 'false', 'no', 'n')
+    valid_values = ("true", "yes", "y", "false", "no", "n")
     if value.lower() not in valid_values:
         return f"Invalid value, please choose value from {valid_values}"
 
@@ -39,7 +39,7 @@ class HyperliquidConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     use_vault: bool = Field(
         default="no",
@@ -57,7 +57,7 @@ class HyperliquidConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     @validator("use_vault", pre=True)
@@ -87,7 +87,7 @@ class HyperliquidTestnetConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     use_vault: bool = Field(
         default="no",
@@ -105,7 +105,7 @@ class HyperliquidTestnetConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     class Config:

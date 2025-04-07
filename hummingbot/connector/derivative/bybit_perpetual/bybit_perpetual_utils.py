@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Any, Dict, List, Tuple
 
-from pydantic import Field, SecretStr
+from pydantic.v1 import Field, SecretStr
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
 from hummingbot.connector.utils import split_hb_trading_pair
@@ -28,8 +28,12 @@ def is_exchange_information_valid(exchange_info: Dict[str, Any]) -> bool:
     """
     contract_type = exchange_info.get("contractType")
     status = exchange_info.get("status")
-    valid = (status is not None and contract_type is not None
-             and status in ["Trading", "Settling"] and contract_type in ["LinearPerpetual", "InversePerpetual"])
+    valid = (
+        status is not None
+        and contract_type is not None
+        and status in ["Trading", "Settling"]
+        and contract_type in ["LinearPerpetual", "InversePerpetual"]
+    )
     return valid
 
 
@@ -70,7 +74,7 @@ class BybitPerpetualConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     bybit_perpetual_secret_key: SecretStr = Field(
         default=...,
@@ -79,7 +83,7 @@ class BybitPerpetualConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     class Config:
@@ -108,7 +112,7 @@ class BybitPerpetualTestnetConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
     bybit_perpetual_testnet_secret_key: SecretStr = Field(
         default=...,
@@ -117,13 +121,11 @@ class BybitPerpetualTestnetConfigMap(BaseConnectorConfigMap):
             is_secure=True,
             is_connect_key=True,
             prompt_on_new=True,
-        )
+        ),
     )
 
     class Config:
         title = "bybit_perpetual_testnet"
 
 
-OTHER_DOMAINS_KEYS = {
-    "bybit_perpetual_testnet": BybitPerpetualTestnetConfigMap.construct()
-}
+OTHER_DOMAINS_KEYS = {"bybit_perpetual_testnet": BybitPerpetualTestnetConfigMap.construct()}

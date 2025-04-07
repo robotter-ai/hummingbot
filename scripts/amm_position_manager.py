@@ -7,7 +7,7 @@ from itertools import permutations
 from typing import Any, Dict, List, Optional, Union
 
 # noinspection PyUnresolvedReferences
-from pydantic import Field
+from pydantic.v1 import Field
 
 from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.client.settings import GatewayConnectionSetting
@@ -675,28 +675,37 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     async def _update_database(self):
         """Atualiza o database com as informações mais recentes de forma eficiente"""
         current_time = time.time()
-        
+
         # Definir intervalos para cada tipo de atualização
         wallet_update_interval = 60  # 1 minuto
         token_update_interval = 300  # 5 minutos
-        pool_update_interval = 120   # 2 minutos
-        
+        pool_update_interval = 120  # 2 minutos
+
         # Inicializar a estrutura principal se ainda não existir
         if "connections" not in database:
             database["connections"] = {}
-        
+
         # Atualizar carteiras (menos frequente)
-        if not hasattr(self, '_last_wallet_update_time') or current_time - self._last_wallet_update_time >= wallet_update_interval:
+        if (
+            not hasattr(self, "_last_wallet_update_time")
+            or current_time - self._last_wallet_update_time >= wallet_update_interval
+        ):
             self._last_wallet_update_time = current_time
             await self._update_wallet_structure()
-        
+
         # Atualizar tokens (menos frequente)
-        if not hasattr(self, '_last_token_update_time') or current_time - self._last_token_update_time >= token_update_interval:
+        if (
+            not hasattr(self, "_last_token_update_time")
+            or current_time - self._last_token_update_time >= token_update_interval
+        ):
             self._last_token_update_time = current_time
             await self._update_token_information()
-        
+
         # Atualizar pools (mais frequente para preços)
-        if not hasattr(self, '_last_pool_update_time') or current_time - self._last_pool_update_time >= pool_update_interval:
+        if (
+            not hasattr(self, "_last_pool_update_time")
+            or current_time - self._last_pool_update_time >= pool_update_interval
+        ):
             self._last_pool_update_time = current_time
             await self._update_pool_information()
 
@@ -706,22 +715,22 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             # Garantir que a cadeia existe no database
             if chain not in database["connections"]:
                 database["connections"][chain] = {}
-            
+
             for network in self._configuration["connections"][chain].keys():
                 # Garantir que a rede existe no database
                 if network not in database["connections"][chain]:
                     database["connections"][chain][network] = {}
-                
+
                 for connector in self._configuration["connections"][chain][network].keys():
                     # Garantir que o connector existe no database
                     if connector not in database["connections"][chain][network]:
                         database["connections"][chain][network][connector] = {}
-                
+
                     # Garantir que as estruturas de wallets, tokens e pools existam
                     for structure in ["wallets", "tokens", "pools"]:
                         if structure not in database["connections"][chain][network][connector]:
                             database["connections"][chain][network][connector][structure] = {}
-                
+
                     # Agora podemos fazer a atualização usando o cache
                     await self._update_wallet_balances(chain, network, connector)
 
@@ -729,11 +738,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         """Atualiza os balances das carteiras usando o método de cache"""
         tokens = self._configuration["tokens"]
         wallets = self._configuration["connections"][chain][network][connector]["wallets"]
-        
+
         for wallet_address in wallets:
             # Criar o internal_id da carteira
             wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
-            
+
             # Garantir que a carteira existe na estrutura
             if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
                 database["connections"][chain][network][connector]["wallets"][wallet_address] = {
@@ -742,29 +751,36 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     "network": network,
                     "connector": connector,
                     "tokens": {},
-                    "pools": {}
+                    "pools": {},
                 }
-            
+
             # Atualizar balances da carteira
             for token_symbol in tokens:
                 balance = await self._get_token_balance_cached(chain, network, wallet_address, token_symbol)
-                
+
                 # Atualizar na estrutura do database
-                if token_symbol not in database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"]:
-                    database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][token_symbol] = {
+                if (
+                    token_symbol
+                    not in database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"]
+                ):
+                    database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][
+                        token_symbol
+                    ] = {
                         "balances": {
                             "free": balance,
                             "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                            "total": balance
+                            "total": balance,
                         }
                     }
                 else:
-                    token_data = database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][token_symbol]
+                    token_data = database["connections"][chain][network][connector]["wallets"][wallet_address][
+                        "tokens"
+                    ][token_symbol]
                     if "balances" not in token_data:
                         token_data["balances"] = {
                             "free": balance,
                             "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                            "total": balance
+                            "total": balance,
                         }
                     else:
                         token_data["balances"]["free"] = balance
@@ -1690,43 +1706,40 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     async def _get_token_balance_cached(self, chain, network, wallet_address, token_symbol, max_age_seconds=30):
         cache_key = f"{chain}_{network}_{wallet_address}_{token_symbol}"
         current_time = time.time()
-        
-        if cache_key in self._balance_cache and current_time - self._balance_cache[cache_key]["timestamp"] < max_age_seconds:
+
+        if (
+            cache_key in self._balance_cache
+            and current_time - self._balance_cache[cache_key]["timestamp"] < max_age_seconds
+        ):
             return self._balance_cache[cache_key]["balance"]
-        
+
         # Se não estiver em cache ou estiver expirado, buscar do gateway
         balances = await self._post_chain_balances(chain, network, wallet_address, [token_symbol])
-        
+
         if balances and "balances" in balances:
             balance = Decimal(str(balances["balances"].get(token_symbol, 0)))
-            self._balance_cache[cache_key] = {
-                "balance": balance,
-                "timestamp": current_time
-            }
+            self._balance_cache[cache_key] = {"balance": balance, "timestamp": current_time}
             return balance
-        
+
         return DECIMAL_ZERO
 
     def _find_most_promising_token_pairs(self):
         """Identificar pares de tokens com maior potencial de arbitragem"""
         tokens = self._configuration["tokens"]
         promising_pairs = []
-        
+
         for i in range(len(tokens)):
-            for j in range(i+1, len(tokens)):
+            for j in range(i + 1, len(tokens)):
                 token1, token2 = tokens[i], tokens[j]
                 pools = self._find_pools_with_token_pair(token1, token2)
-                
+
                 if len(pools) >= 2:  # Precisamos de pelo menos 2 pools para arbitragem
                     # Verificar liquidez e volume para determinar potencial
                     total_volume = sum(Decimal(str(p.get("volume", {}).get("24h", 0) or 0)) for p in pools)
-                    promising_pairs.append({
-                        "token1": token1,
-                        "token2": token2,
-                        "pools_count": len(pools),
-                        "total_volume": total_volume
-                    })
-        
+                    promising_pairs.append(
+                        {"token1": token1, "token2": token2, "pools_count": len(pools), "total_volume": total_volume}
+                    )
+
         # Ordenar por volume e quantidade de pools
         promising_pairs.sort(key=lambda x: (x["pools_count"], x["total_volume"]), reverse=True)
         return promising_pairs[:5]  # Retornar os 5 mais promissores
