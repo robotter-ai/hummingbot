@@ -855,6 +855,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             continue
 
                         pool_address = pool.get("address")
+
+                        # TODO remove!!!
+                        if connector == "raydium" or connector == "raydium_amm":
+                            pool_address = "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
+                            pool["address"] = pool_address
+
                         if not pool_address:
                             raise ValueError(f"Pool {pool} doesn't have an address")
 
