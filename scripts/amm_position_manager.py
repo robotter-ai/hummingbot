@@ -51,8 +51,8 @@ class PoolType(Enum):
 configuration: Dict[str, Any] = {
     "globals": {
         "maximum_slippage_percentage": "0.5",  # 0.5 means 0.5%, or 0.005, in the code
-        "minimum_profitability_percentage": "1",  # 1 means 1%, or 0.01, in the code
-        "arbitrage_check_interval_seconds": "30",  # Time between arbitrage checks
+        "minimum_profitability_percentage": "0.01",  # 1 means 1%, or 0.01, in the code
+        "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
         "minimum_trade_amount": "1",  # Minimum amount to consider for a trade
         "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
         "transaction_confirmation_delay": "2",  # Time delay between transaction confirmation
