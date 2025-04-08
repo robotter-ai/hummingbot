@@ -1,6 +1,5 @@
 import asyncio
 import inspect
-import sys
 from functools import wraps
 
 
@@ -11,7 +10,8 @@ class Logger:
         if frame:
             frame_info = f" [{frame.f_code.co_filename}:{frame.f_lineno}]"
 
-        print(f"DEBUG{frame_info}: {message}", file=sys.stderr)
+        with open("logs/debug.log", "a") as log_file:
+            print(f"DEBUG{frame_info}: {message}", file=log_file)
 
 
 logger = Logger()
