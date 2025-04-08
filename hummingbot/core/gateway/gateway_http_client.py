@@ -436,8 +436,6 @@ class GatewayHttpClient:
         if side not in [TradeType.BUY, TradeType.SELL]:
             raise ValueError("Only BUY and SELL prices are supported.")
 
-        connector_type = get_connector_type(connector)
-
         request_payload = {
             "network": network,
             "baseToken": base_asset,
@@ -447,7 +445,7 @@ class GatewayHttpClient:
         }
         if slippage_percentage is not None:
             request_payload["slippagePct"] = float(slippage_percentage)
-        if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
+        if pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
         return await self.api_request(
