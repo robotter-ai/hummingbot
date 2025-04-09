@@ -539,8 +539,6 @@ class GatewayHttpClient:
         if side not in [TradeType.BUY, TradeType.SELL]:
             raise ValueError("Only BUY and SELL prices are supported.")
 
-        connector_type = get_connector_type(connector)
-
         request_payload: Dict[str, Any] = {
             "network": network,
             "walletAddress": wallet_address,
@@ -555,7 +553,7 @@ class GatewayHttpClient:
         #     request_payload["limitPrice"] = limit_price
         if nonce is not None:
             request_payload["nonce"] = int(nonce)
-        if connector_type in (ConnectorType.CLMM, ConnectorType.AMM) and pool_address is not None:
+        if pool_address is not None:
             request_payload["poolAddress"] = pool_address
         return await self.api_request("post", f"{connector}/amm/execute-swap", request_payload)
 
