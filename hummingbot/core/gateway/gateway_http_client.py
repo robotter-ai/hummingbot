@@ -441,7 +441,7 @@ class GatewayHttpClient:
             "baseToken": base_asset,
             "quoteToken": quote_asset,
             "amount": float(amount),
-            "side": str(side.name),
+            "side": side.name,
         }
         if slippage_percentage is not None:
             request_payload["slippagePct"] = float(slippage_percentage)
@@ -545,7 +545,7 @@ class GatewayHttpClient:
             "baseToken": base_asset,
             "quoteToken": quote_asset,
             "amount": float(amount),
-            "side": str(side.name).lower(),
+            "side": side.name,
         }
         if slippage_percentage is not None:
             request_payload["slippagePct"] = float(slippage_percentage)
