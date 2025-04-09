@@ -10,7 +10,7 @@ class Logger:
         if frame:
             frame_info = f" [{frame.f_code.co_filename}:{frame.f_lineno}]"
 
-        with open("logs/debug.log", "a") as log_file:
+        with open("logs/logs_amm_portfolio_manager.log", "a") as log_file:
             print(f"DEBUG{frame_info}: {message}", file=log_file)
 
 
