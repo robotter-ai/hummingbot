@@ -28,7 +28,8 @@ DECIMAL_ONE_HUNDRED_PERCENT = Decimal("1")
 DECIMAL_ONE = Decimal("1")
 DECIMAL_ONE_HUNDRED = Decimal("100")
 DECIMAL_NOT_A_NUMBER = Decimal("NaN")
-DECIMAL_INFINITY = Decimal("Infinity")
+DECIMAL_POSITIVE_INFINITY = Decimal("Infinity")
+DECIMAL_NEGATIVE_INFINITY = Decimal("-Infinity")
 
 
 class PoolType(Enum):
@@ -51,7 +52,7 @@ class PoolType(Enum):
 configuration: Dict[str, Any] = {
     "globals": {
         "maximum_slippage_percentage": "0.5",  # 0.5 means 0.5%, or 0.005, in the code
-        "minimum_profitability_percentage": "0.01",  # 1 means 1%, or 0.01, in the code
+        "minimum_profitability_percentage": "-1",  # 1 means 1%, or 0.01, in the code
         "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
         "minimum_trade_amount": "1",  # Minimum amount to consider for a trade
         "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
@@ -1075,8 +1076,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             max_available,
         ]
 
-        best_amount = DECIMAL_ZERO
-        best_profit_percentage = DECIMAL_ZERO
+        best_amount = DECIMAL_NEGATIVE_INFINITY
+        best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
 
         for amount in test_amounts:
             if amount > max_available:
@@ -1215,7 +1216,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         for chain_name, chain in self._configuration["connections"].items():
             for network_name, network in chain.items():
                 for _, connector in network.items():
-                    for wallet_address in connector["wallets"].keys():
+                    for wallet_address in connector["wallets"]:
                         balances = await self._post_chain_balances(
                             chain_name, network_name, wallet_address, [token_symbol]
                         )
