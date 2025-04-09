@@ -686,6 +686,26 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if "connections" not in database:
             database["connections"] = {}
 
+        # Garantir que as estruturas dos mapas existam
+        if "maps" not in database:
+            database["maps"] = {
+                "pools_by_tokens": {},
+                "wallets_by_pool": {},
+                "pools_by_wallet": {},
+            }
+        else:
+            for map_type in ["pools_by_tokens", "wallets_by_pool", "pools_by_wallet"]:
+                if map_type not in database["maps"]:
+                    database["maps"][map_type] = {}
+
+        # Atualizar pools (esta ordem é importante pois precisamos dos pools primeiro)
+        if (
+            not hasattr(self, "_last_pool_update_time")
+            or current_time - self._last_pool_update_time >= pool_update_interval
+        ):
+            self._last_pool_update_time = current_time
+            await self._update_pool_information()
+
         # Atualizar carteiras (menos frequente)
         if (
             not hasattr(self, "_last_wallet_update_time")
@@ -701,14 +721,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         ):
             self._last_token_update_time = current_time
             await self._update_token_information()
-
-        # Atualizar pools (mais frequente para preços)
-        if (
-            not hasattr(self, "_last_pool_update_time")
-            or current_time - self._last_pool_update_time >= pool_update_interval
-        ):
-            self._last_pool_update_time = current_time
-            await self._update_pool_information()
 
     async def _update_wallet_structure(self):
         """Garante que a estrutura básica do database esteja inicializada corretamente"""
@@ -734,6 +746,9 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
                     # Agora podemos fazer a atualização usando o cache
                     await self._update_wallet_balances(chain, network, connector)
+
+                    # Link wallets to pools and vice-versa
+                    await self._link_wallets_and_pools(chain, network, connector)
 
     async def _update_wallet_balances(self, chain, network, connector):
         """Atualiza os balances das carteiras usando o método de cache"""
@@ -919,6 +934,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             if pool_internal_id not in database["maps"]["pools_by_tokens"][token_key]:
                                 database["maps"]["pools_by_tokens"][token_key].append(pool_internal_id)
 
+                        # Store pools in configuration for easy access during wallet updates
+                        if "pools" not in self._configuration["connections"][chain][network][connector]:
+                            self._configuration["connections"][chain][network][connector]["pools"] = []
+
+                        if pool_address not in self._configuration["connections"][chain][network][connector]["pools"]:
+                            self._configuration["connections"][chain][network][connector]["pools"].append(pool_address)
+
                         # Handle specific pool types
                         pool_type = pool.get("type", PoolType.UNKNOWN.value)
                         if (
@@ -992,7 +1014,111 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             }
                         )
 
+                    # Update wallet-pool connections after updating pools
+                    await self._link_wallets_and_pools(chain, network, connector)
+
         return database
+
+    async def _link_wallets_and_pools(self, chain, network, connector):
+        """Create mappings between wallets and pools for a specific connector"""
+        # Get the wallets and pools for this connector
+        wallets = self._configuration["connections"][chain][network][connector]["wallets"]
+        pools = self._configuration["connections"][chain][network][connector].get("pools", [])
+
+        # No pools to process
+        if not pools:
+            return
+
+        for wallet_address in wallets:
+            # Create the wallet's internal_id
+            wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
+
+            # Ensure the wallet has a pools structure
+            if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
+                continue
+
+            if "pools" not in database["connections"][chain][network][connector]["wallets"][wallet_address]:
+                database["connections"][chain][network][connector]["wallets"][wallet_address]["pools"] = {}
+
+            # For each pool, link it to this wallet
+            for pool_address in pools:
+                # Create the pool's internal_id
+                pool_internal_id = f"{chain}/{network}/{connector}/{pool_address}"
+
+                # Add this pool to the wallet's pools list if it's not already there
+                if (
+                    pool_address
+                    not in database["connections"][chain][network][connector]["wallets"][wallet_address]["pools"]
+                ):
+                    # Initialize the pool entry in the wallet's structure
+                    database["connections"][chain][network][connector]["wallets"][wallet_address]["pools"][
+                        pool_address
+                    ] = {"shares": DECIMAL_ZERO, "tokens": {}, "impermanent_loss": DECIMAL_ZERO}
+
+                    # Get the pool's tokens if available
+                    if (
+                        pool_address in database["connections"][chain][network][connector]["pools"]
+                        and "tokens_list" in database["connections"][chain][network][connector]["pools"][pool_address]
+                    ):
+                        pool_tokens = database["connections"][chain][network][connector]["pools"][pool_address][
+                            "tokens_list"
+                        ]
+
+                        # Initialize token balances to zero
+                        for token_symbol in pool_tokens:
+                            database["connections"][chain][network][connector]["wallets"][wallet_address]["pools"][
+                                pool_address
+                            ]["tokens"][token_symbol] = DECIMAL_ZERO
+
+                    # Update liquidity token information in wallet tokens structure
+                    for token_symbol in self._configuration["tokens"]:
+                        # Ensure token structure exists
+                        if (
+                            token_symbol
+                            not in database["connections"][chain][network][connector]["wallets"][wallet_address][
+                                "tokens"
+                            ]
+                        ):
+                            continue
+
+                        if (
+                            "balances"
+                            not in database["connections"][chain][network][connector]["wallets"][wallet_address][
+                                "tokens"
+                            ][token_symbol]
+                        ):
+                            continue
+
+                        # Initialize or update the liquidity pools mapping for this token
+                        token_balances = database["connections"][chain][network][connector]["wallets"][wallet_address][
+                            "tokens"
+                        ][token_symbol]["balances"]
+                        if "locked" not in token_balances:
+                            token_balances["locked"] = {
+                                "total": DECIMAL_ZERO,
+                                "liquidity": {"total": DECIMAL_ZERO, "pools": {}},
+                            }
+                        elif "liquidity" not in token_balances["locked"]:
+                            token_balances["locked"]["liquidity"] = {"total": DECIMAL_ZERO, "pools": {}}
+                        elif "pools" not in token_balances["locked"]["liquidity"]:
+                            token_balances["locked"]["liquidity"]["pools"] = {}
+
+                        # Add pool to token's liquidity pools with zero balance
+                        token_balances["locked"]["liquidity"]["pools"][pool_address] = DECIMAL_ZERO
+
+                # Add to the pools_by_wallet map
+                if wallet_internal_id not in database["maps"]["pools_by_wallet"]:
+                    database["maps"]["pools_by_wallet"][wallet_internal_id] = []
+
+                if pool_internal_id not in database["maps"]["pools_by_wallet"][wallet_internal_id]:
+                    database["maps"]["pools_by_wallet"][wallet_internal_id].append(pool_internal_id)
+
+                # Add to the wallets_by_pool map
+                if pool_internal_id not in database["maps"]["wallets_by_pool"]:
+                    database["maps"]["wallets_by_pool"][pool_internal_id] = []
+
+                if wallet_internal_id not in database["maps"]["wallets_by_pool"][pool_internal_id]:
+                    database["maps"]["wallets_by_pool"][pool_internal_id].append(wallet_internal_id)
 
     # noinspection PyMethodMayBeStatic
     def _generate_token_permutations(self, tokens: List[str]) -> List[str]:
