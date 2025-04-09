@@ -446,7 +446,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         return True
 
     async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
-        """Execute an arbitrage trade for each available wallet"""
+        """Execute an arbitrage trade between two pools using their respective wallet addresses"""
         base_token = opportunity["base_token"]
         quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
@@ -455,25 +455,29 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         self.logger().info(f"Executing arbitrage trade: {base_token}/{quote_token}")
 
+        # Get wallet address for buy pool
         buy_pool_wallet_addresses = self._get_wallet_addresses_for_pool(buy_pool)
-        buy_pool_wallet_address = (
-            buy_pool_wallet_addresses
-            if buy_pool_wallet_addresses and isinstance(buy_pool_wallet_addresses, list)
-            else None
-        )
+        buy_pool_wallet_address = buy_pool_wallet_addresses[0] if buy_pool_wallet_addresses else None
         if not buy_pool_wallet_address:
-            self.logger().error(f"No wallet address found for pool {buy_pool['address']}")
+            self.logger().error(f"No wallet address found for buy pool {buy_pool['address']}")
+            return False
+
+        # Get wallet address for sell pool
+        sell_pool_wallet_addresses = self._get_wallet_addresses_for_pool(sell_pool)
+        sell_pool_wallet_address = sell_pool_wallet_addresses[0] if sell_pool_wallet_addresses else None
+        if not sell_pool_wallet_address:
+            self.logger().error(f"No wallet address found for sell pool {sell_pool['address']}")
             return False
 
         # Track overall success
         overall_success = False
         maximum_slippage_percentage = self._maximum_slippage_percentage
 
-        # Execute trades for each wallet
-        self.logger().info(f"Attempting arbitrage with wallet: {buy_pool_wallet_address}")
+        # Execute first trade with buy pool wallet
+        self.logger().info(f"Attempting first swap with wallet: {buy_pool_wallet_address}")
 
         try:
-            # Record initial balance for this wallet
+            # Record initial balance for buy pool wallet
             initial_wallet_balances = await self._post_chain_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [base_token]
             )
@@ -492,7 +496,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 return False
 
             self.logger().info(
-                f"Step 1: Swap {trade_amount} {base_token} for {quote_token} in pool {buy_pool['address']}"
+                f"Step 1: Swap {trade_amount} {base_token} for {quote_token} in buy pool {buy_pool['address']}"
             )
 
             # Execute first swap: base_token -> quote_token in buy_pool
@@ -534,24 +538,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
             quote_token_balance = Decimal(str(updated_wallet_balances["balances"].get(quote_token, 0)))
 
-            # Execute second swap: quote_token -> base_token in sell_pool
+            # Execute second swap: quote_token -> base_token in sell_pool with sell pool wallet
             self.logger().info(
-                f"Step 2: Swap {quote_token_balance} {quote_token} back to {base_token} in pool {sell_pool['address']}"
+                f"Step 2: Swap {quote_token_balance} {quote_token} back to {base_token} in sell pool {sell_pool['address']} using wallet {sell_pool_wallet_address}"
             )
-
-            sell_pool_wallet_addresses = self._get_wallet_addresses_for_pool(sell_pool)
-            sell_pool_wallet_address = (
-                sell_pool_wallet_addresses
-                if sell_pool_wallet_addresses and isinstance(sell_pool_wallet_addresses, list)
-                else None
-            )
-            if not sell_pool_wallet_address:
-                self.logger().error(f"No wallet address found for pool {sell_pool['address']}")
-                return False
 
             second_swap_result = await self._post_execute_swap(
                 pool=sell_pool,
-                wallet_address=buy_pool_wallet_address,
+                wallet_address=sell_pool_wallet_address,  # Use sell pool wallet address
                 base_token=quote_token,
                 quote_token=base_token,
                 amount=quote_token_balance,
@@ -561,7 +555,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
             if not second_swap_result or "signature" not in second_swap_result:
                 self.logger().error(
-                    f"Second swap failed for wallet {buy_pool_wallet_address}: {quote_token} -> {base_token}"
+                    f"Second swap failed for wallet {sell_pool_wallet_address}: {quote_token} -> {base_token}"
                 )
                 return False
 
@@ -578,31 +572,43 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 )
                 return False
 
-            # Calculate actual profit
-            final_wallet_balances = await self._post_chain_balances(
+            # Calculate actual profit by checking final balance of both wallets
+            final_buy_wallet_balances = await self._post_chain_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [base_token]
             )
 
-            if not final_wallet_balances or "balances" not in final_wallet_balances:
-                self.logger().error(f"Failed to get final balance for wallet {buy_pool_wallet_address}")
+            final_sell_wallet_balances = await self._post_chain_balances(
+                sell_pool.get("chain"), sell_pool.get("network"), sell_pool_wallet_address, [base_token]
+            )
+
+            if not final_buy_wallet_balances or "balances" not in final_buy_wallet_balances:
+                self.logger().error(f"Failed to get final balance for buy wallet {buy_pool_wallet_address}")
                 return False
 
-            final_base_token_balance = Decimal(str(final_wallet_balances["balances"].get(base_token, 0)))
-            actual_profit = final_base_token_balance - initial_base_token_balance
-            actual_profit_percentage = (
-                (actual_profit / initial_base_token_balance) * 100 if initial_base_token_balance > 0 else 0
-            )
+            if not final_sell_wallet_balances or "balances" not in final_sell_wallet_balances:
+                self.logger().error(f"Failed to get final balance for sell wallet {sell_pool_wallet_address}")
+                return False
+
+            final_buy_base_token_balance = Decimal(str(final_buy_wallet_balances["balances"].get(base_token, 0)))
+            final_sell_base_token_balance = Decimal(str(final_sell_wallet_balances["balances"].get(base_token, 0)))
+
+            # Calculate total balance change across both wallets
+            initial_total_balance = initial_base_token_balance
+            final_total_balance = final_buy_base_token_balance + final_sell_base_token_balance
+            actual_profit = final_total_balance - initial_total_balance
+            actual_profit_percentage = (actual_profit / initial_total_balance) * 100 if initial_total_balance > 0 else 0
 
             # Record trade result in execution history
             trade_result = {
                 "timestamp": time.time(),
-                "wallet_address": buy_pool_wallet_address,
+                "buy_wallet_address": buy_pool_wallet_address,
+                "sell_wallet_address": sell_pool_wallet_address,
                 "base_token": base_token,
                 "quote_token": quote_token,
                 "buy_pool": buy_pool["address"],
                 "sell_pool": sell_pool["address"],
                 "initial_amount": initial_base_token_balance,
-                "final_amount": final_base_token_balance,
+                "final_amount": final_total_balance,
                 "profit": actual_profit,
                 "profit_percentage": actual_profit_percentage,
                 "first_swap_tx": first_swap_result["signature"],
@@ -613,16 +619,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
             if actual_profit > 0:
                 self.logger().info(
-                    f"Arbitrage trade successful for wallet {buy_pool_wallet_address}! Profit: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
+                    f"Arbitrage trade successful! Profit: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
                 )
                 overall_success = True
             else:
                 self.logger().warning(
-                    f"Arbitrage trade completed with loss for wallet {buy_pool_wallet_address}: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
+                    f"Arbitrage trade completed with loss: {actual_profit} {base_token} ({actual_profit_percentage:.2f}%)"
                 )
 
         except Exception as e:
-            self.logger().error(f"Error executing arbitrage for wallet {buy_pool_wallet_address}: {str(e)}")
+            self.logger().error(
+                f"Error executing arbitrage between wallets {buy_pool_wallet_address} and {sell_pool_wallet_address}: {str(e)}"
+            )
             return False
 
         return overall_success
