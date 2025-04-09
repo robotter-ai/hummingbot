@@ -682,21 +682,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         token_update_interval = 300  # 5 minutos
         pool_update_interval = 120  # 2 minutos
 
-        # Inicializar a estrutura principal se ainda não existir
-        if "connections" not in database:
-            database["connections"] = {}
-
-        # Garantir que as estruturas dos mapas existam
-        if "maps" not in database:
-            database["maps"] = {
-                "pools_by_tokens": {},
-                "wallets_by_pool": {},
-                "pools_by_wallet": {},
-            }
-        else:
-            for map_type in ["pools_by_tokens", "wallets_by_pool", "pools_by_wallet"]:
-                if map_type not in database["maps"]:
-                    database["maps"][map_type] = {}
+        # Inicializar a estrutura do database
+        await self._update_database_structure()
 
         # Atualizar pools (esta ordem é importante pois precisamos dos pools primeiro)
         if (
@@ -722,29 +709,125 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             self._last_token_update_time = current_time
             await self._update_token_information()
 
-    async def _update_wallet_structure(self):
-        """Garante que a estrutura básica do database esteja inicializada corretamente"""
-        for chain in self._configuration["connections"].keys():
-            # Garantir que a cadeia existe no database
+    async def _update_database_structure(self):
+        """Initialize and ensure the correct structure of the database based on configuration"""
+        # Initialize the root level structures if they don't exist
+        database_root_keys = ["connections", "arbitrage_opportunities", "execution_history", "maps"]
+        for key in database_root_keys:
+            if key not in database:
+                if key == "connections":
+                    database[key] = {}
+                elif key in ["arbitrage_opportunities", "execution_history"]:
+                    database[key] = []
+                elif key == "maps":
+                    database[key] = {}
+
+        # Initialize map structures
+        map_types = ["pools_by_tokens", "wallets_by_pool", "pools_by_wallet"]
+        for map_type in map_types:
+            if map_type not in database["maps"]:
+                database["maps"][map_type] = {}
+
+        # Initialize chain, network, and connector structures based on configuration
+        for chain in self._configuration["connections"]:
             if chain not in database["connections"]:
                 database["connections"][chain] = {}
 
-            for network in self._configuration["connections"][chain].keys():
-                # Garantir que a rede existe no database
+            for network in self._configuration["connections"][chain]:
                 if network not in database["connections"][chain]:
                     database["connections"][chain][network] = {}
 
-                for connector in self._configuration["connections"][chain][network].keys():
-                    # Garantir que o connector existe no database
+                for connector in self._configuration["connections"][chain][network]:
                     if connector not in database["connections"][chain][network]:
-                        database["connections"][chain][network][connector] = {}
+                        database["connections"][chain][network][connector] = {"wallets": {}, "tokens": {}, "pools": {}}
+                    else:
+                        # Ensure wallet, token, and pool structures exist
+                        for structure in ["wallets", "tokens", "pools"]:
+                            if structure not in database["connections"][chain][network][connector]:
+                                database["connections"][chain][network][connector][structure] = {}
 
-                    # Garantir que as estruturas de wallets, tokens e pools existam
-                    for structure in ["wallets", "tokens", "pools"]:
-                        if structure not in database["connections"][chain][network][connector]:
-                            database["connections"][chain][network][connector][structure] = {}
+                    # Initialize wallet structures if defined in configuration
+                    if "wallets" in self._configuration["connections"][chain][network][connector]:
+                        for wallet_address in self._configuration["connections"][chain][network][connector]["wallets"]:
+                            wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
 
-                    # Agora podemos fazer a atualização usando o cache
+                            if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
+                                database["connections"][chain][network][connector]["wallets"][wallet_address] = {
+                                    "internal_id": wallet_internal_id,
+                                    "chain": chain,
+                                    "network": network,
+                                    "connector": connector,
+                                    "tokens": {},
+                                    "pools": {},
+                                }
+
+                            # Initialize token structures for each wallet
+                            wallet_data = database["connections"][chain][network][connector]["wallets"][wallet_address]
+
+                            if "tokens" not in wallet_data:
+                                wallet_data["tokens"] = {}
+
+                            # Initialize tokens based on configuration
+                            for token_symbol in self._configuration["tokens"]:
+                                if token_symbol not in wallet_data["tokens"]:
+                                    wallet_data["tokens"][token_symbol] = {
+                                        "balances": {
+                                            "free": DECIMAL_ZERO,
+                                            "locked": {
+                                                "total": DECIMAL_ZERO,
+                                                "liquidity": {"total": DECIMAL_ZERO, "pools": {}},
+                                            },
+                                            "total": DECIMAL_ZERO,
+                                        }
+                                    }
+
+                    # Initialize token structures based on configuration tokens
+                    for token_symbol in self._configuration["tokens"]:
+                        if token_symbol not in database["connections"][chain][network][connector]["tokens"]:
+                            database["connections"][chain][network][connector]["tokens"][token_symbol] = {
+                                "internal_id": f"{chain}/{network}/{connector}/{token_symbol}",
+                                "chain": chain,
+                                "network": network,
+                                "connector": connector,
+                                "symbol": token_symbol,
+                                "name": token_symbol,
+                                "decimals": 18,  # Default, will be updated later
+                                "price": None,
+                            }
+
+                    # Initialize pool structures if defined in configuration
+                    if "pools" in self._configuration["connections"][chain][network][connector]:
+                        pool_addresses = self._configuration["connections"][chain][network][connector]["pools"]
+
+                        # Convert to list if it's not already
+                        if not isinstance(pool_addresses, list):
+                            pool_addresses = [pool_addresses]
+
+                        for pool_address in pool_addresses:
+                            pool_internal_id = f"{chain}/{network}/{connector}/{pool_address}"
+
+                            if pool_address not in database["connections"][chain][network][connector]["pools"]:
+                                database["connections"][chain][network][connector]["pools"][pool_address] = {
+                                    "internal_id": pool_internal_id,
+                                    "address": pool_address,
+                                    "chain": chain,
+                                    "network": network,
+                                    "connector": connector,
+                                    "type": PoolType.UNKNOWN.value,
+                                    "tokens": {},
+                                    "tokens_list": [],
+                                    "annual_percentage_rate": None,
+                                    "total_value_locked": None,
+                                    "impermanent_loss": None,
+                                    "volume": {"24h": None},
+                                }
+
+    async def _update_wallet_structure(self):
+        """Updates wallet structure in the database"""
+        for chain in self._configuration["connections"].keys():
+            for network in self._configuration["connections"][chain].keys():
+                for connector in self._configuration["connections"][chain][network].keys():
+                    # Now we can update using the cache since the structure is guaranteed to exist
                     await self._update_wallet_balances(chain, network, connector)
 
                     # Link wallets to pools and vice-versa
@@ -998,6 +1081,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             # Handle LBP pool specific logic here
                             # For now, we'll just log that we found an LBP pool
                             self.logger().info(f"Found LBP pool: {pool_address}")
+                        elif pool_type == PoolType.CPMM.value:
+                            # Handle CPMM pool specific logic here
+                            # For now, we'll just log that we found an CPMM pool
+                            self.logger().info(f"Found CPMM pool: {pool_address}")
+                        elif pool_type == PoolType.CLMM.value:
+                            # Handle CLMM pool specific logic here
+                            # For now, we'll just log that we found an CLMM pool
+                            self.logger().info(f"Found CLMM pool: {pool_address}")
                         else:
                             self.logger().warning(f"Pool type {pool_type} not supported yet")
                             raise NotImplementedError(f"Pool type {pool_type} not supported")
