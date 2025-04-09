@@ -54,7 +54,7 @@ configuration: Dict[str, Any] = {
         "maximum_slippage_percentage": "0.5",  # 0.5 means 0.5%, or 0.005, in the code
         "minimum_profitability_percentage": "-1",  # 1 means 1%, or 0.01, in the code
         "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
-        "minimum_trade_amount": "1",  # Minimum amount to consider for a trade
+        "minimum_trade_amount": "0.1",  # Minimum amount to consider for a trade
         "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
         "transaction_confirmation_delay": "2",  # Time delay between transaction confirmation
         "transaction_polling_interval": "2",  # Time delay between transaction polling
@@ -452,6 +452,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
         trade_amount = opportunity["trade_amount"]
+        expected_quote_token = opportunity["expected_quote_token"]
 
         self.logger().info(f"Executing arbitrage trade: {base_token}/{quote_token}")
 
@@ -479,7 +480,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         try:
             # Record initial balance for buy pool wallet
             initial_wallet_balances = await self._post_chain_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [base_token]
+                buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [base_token, quote_token]
             )
 
             if not initial_wallet_balances or "balances" not in initial_wallet_balances:
@@ -487,6 +488,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 return False
 
             initial_base_token_balance = Decimal(str(initial_wallet_balances["balances"].get(base_token, 0)))
+            initial_quote_token_balance = Decimal(str(initial_wallet_balances["balances"].get(quote_token, 0)))
 
             # Check if wallet has sufficient balance
             if initial_base_token_balance < trade_amount:
@@ -536,19 +538,41 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 self.logger().error(f"Failed to get updated balance for wallet {buy_pool_wallet_address}")
                 return False
 
-            quote_token_balance = Decimal(str(updated_wallet_balances["balances"].get(quote_token, 0)))
+            quote_token_balance_after_swap = Decimal(str(updated_wallet_balances["balances"].get(quote_token, 0)))
+
+            # Calculate actual amount of quote_token received from the first swap
+            quote_token_received = quote_token_balance_after_swap - initial_quote_token_balance
+
+            # Use the actual amount received for the second swap or the expected amount if there's an issue
+            second_swap_amount = quote_token_received if quote_token_received > 0 else expected_quote_token
+
+            if quote_token_received <= 0:
+                self.logger().warning(
+                    f"Couldn't determine actual quote token received, using expected amount: {expected_quote_token} {quote_token}"
+                )
 
             # Execute second swap: quote_token -> base_token in sell_pool with sell pool wallet
             self.logger().info(
-                f"Step 2: Swap {quote_token_balance} {quote_token} back to {base_token} in sell pool {sell_pool['address']} using wallet {sell_pool_wallet_address}"
+                f"Step 2: Swap {second_swap_amount} {quote_token} back to {base_token} in sell pool {sell_pool['address']} using wallet {sell_pool_wallet_address}"
             )
+
+            # Record initial balance for sell pool wallet
+            initial_sell_wallet_balances = await self._post_chain_balances(
+                sell_pool.get("chain"), sell_pool.get("network"), sell_pool_wallet_address, [base_token]
+            )
+
+            if not initial_sell_wallet_balances or "balances" not in initial_sell_wallet_balances:
+                self.logger().error(f"Failed to get initial balance for sell wallet {sell_pool_wallet_address}")
+                return False
+
+            initial_sell_base_token_balance = Decimal(str(initial_sell_wallet_balances["balances"].get(base_token, 0)))
 
             second_swap_result = await self._post_execute_swap(
                 pool=sell_pool,
-                wallet_address=sell_pool_wallet_address,  # Use sell pool wallet address
+                wallet_address=sell_pool_wallet_address,
                 base_token=quote_token,
                 quote_token=base_token,
-                amount=quote_token_balance,
+                amount=second_swap_amount,
                 side=TradeType.SELL,  # Selling quote_token to get back base_token
                 slippage_percentage=maximum_slippage_percentage,
             )
@@ -572,7 +596,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 )
                 return False
 
-            # Calculate actual profit by checking final balance of both wallets
+            # Calculate actual profit by checking final balance
             final_buy_wallet_balances = await self._post_chain_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [base_token]
             )
@@ -592,11 +616,17 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             final_buy_base_token_balance = Decimal(str(final_buy_wallet_balances["balances"].get(base_token, 0)))
             final_sell_base_token_balance = Decimal(str(final_sell_wallet_balances["balances"].get(base_token, 0)))
 
-            # Calculate total balance change across both wallets
-            initial_total_balance = initial_base_token_balance
-            final_total_balance = final_buy_base_token_balance + final_sell_base_token_balance
-            actual_profit = final_total_balance - initial_total_balance
-            actual_profit_percentage = (actual_profit / initial_total_balance) * 100 if initial_total_balance > 0 else 0
+            # Calculate profit for the buy wallet (negative indicates amount spent)
+            buy_wallet_profit = final_buy_base_token_balance - initial_base_token_balance
+
+            # Calculate profit for the sell wallet (positive indicates amount gained)
+            sell_wallet_profit = final_sell_base_token_balance - initial_sell_base_token_balance
+
+            # Total profit is the sum of both changes
+            actual_profit = buy_wallet_profit + sell_wallet_profit
+
+            # Calculate profit percentage based on initial investment
+            actual_profit_percentage = (actual_profit / trade_amount) * DECIMAL_ONE_HUNDRED if trade_amount > 0 else 0
 
             # Record trade result in execution history
             trade_result = {
@@ -607,8 +637,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 "quote_token": quote_token,
                 "buy_pool": buy_pool["address"],
                 "sell_pool": sell_pool["address"],
-                "initial_amount": initial_base_token_balance,
-                "final_amount": final_total_balance,
+                "trade_amount": trade_amount,
+                "quote_amount_received": quote_token_received,
+                "buy_wallet_balance_change": buy_wallet_profit,
+                "sell_wallet_balance_change": sell_wallet_profit,
                 "profit": actual_profit,
                 "profit_percentage": actual_profit_percentage,
                 "first_swap_tx": first_swap_result["signature"],
@@ -1300,11 +1332,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Try different trade amounts to find the optimal one
         test_amounts = [
             minimum_trade_amount,
-            max_available * DECIMAL_TEN_PERCENT,
-            max_available * DECIMAL_TWENTY_FIVE_PERCENT,
-            max_available * DECIMAL_FIFTY_PERCENT,
-            max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
-            max_available,
+            # max_available * DECIMAL_TEN_PERCENT,
+            # max_available * DECIMAL_TWENTY_FIVE_PERCENT,
+            # max_available * DECIMAL_FIFTY_PERCENT,
+            # max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
+            # max_available,
         ]
 
         best_amount = DECIMAL_NEGATIVE_INFINITY
