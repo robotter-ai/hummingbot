@@ -207,8 +207,11 @@ class AMMRobustPositionManagerConfiguration(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
 
 
+logger = Logger(path="logs/logs_amm_portfolio_manager.log", level=logging.DEBUG)
+
+
 # noinspection PyShadowingNames
-@logged_class(logger=Logger(path="logs/logs_amm_portfolio_manager.log", level=logging.DEBUG))
+@logged_class(logger=logger)
 class AMMRobustPositionManager(ScriptStrategyBase):
     markets: Dict[str, Any] = {}
     _configuration = None
