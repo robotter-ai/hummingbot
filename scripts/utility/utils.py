@@ -82,7 +82,7 @@ class Logger(object):
         self.log(logging.ERROR, prefix=prefix, message=message, frame=frame)
 
 
-def automatic_retry_with_timeout(retries=1, delay=0, timeout=None):
+def run_with_retry_and_timeout(retries=1, delay=0, timeout=None):
     def decorator(function):
         async def wrapper(*args, **kwargs):
             errors = []
