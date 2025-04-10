@@ -54,7 +54,7 @@ class Logger(object):
         if object:
             message = f"{message}:\n{dump(object)}"
 
-        message = f"{prefix} {filename}:{line_number} {function_name}: {message}"
+        message = f"{prefix} {filename}:{line_number} {function_name}: {message}\n\n"
 
         logging.log(level, message)
 
