@@ -19,14 +19,16 @@ def dump(target: Any):
     except (Exception,):
         return target
 
-from singleton.singleton import ThreadSafeSingleton
 
-
-@ThreadSafeSingleton
 class Logger(object):
-    def __init__(self, path: str = "logs/logs_hummingbot.log", level: int = logging.DEBUG, format: str = "%(asctime)s %(levelname)s %(message)s"):
+    def __init__(
+        self,
+        path: str = "logs/logs_hummingbot.log",
+        level: int = logging.DEBUG,
+        format: str = "%(asctime)s %(levelname)s %(message)s",
+    ):
         self._root_path = Path(__file__).parent.parent.parent
-        
+
         logger = logging.getLogger()
 
         logger.setLevel(level)
@@ -56,6 +58,21 @@ class Logger(object):
 
         logging.log(level, message)
 
+    def debug(self, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
+        self.log(logging.DEBUG, message, object, prefix, frame)
+
+    def info(self, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
+        self.log(logging.INFO, message, object, prefix, frame)
+
+    def warning(self, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
+        self.log(logging.WARNING, message, object, prefix, frame)
+
+    def error(self, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
+        self.log(logging.ERROR, message, object, prefix, frame)
+
+    def critical(self, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
+        self.log(logging.CRITICAL, message, object, prefix, frame)
+
     def ignore_exception(self, exception: Exception, prefix: str = "", frame=inspect.currentframe().f_back):
         formatted_exception = traceback.format_exception(type(exception), exception, exception.__traceback__)
         formatted_exception = "\n".join(formatted_exception)
@@ -63,9 +80,6 @@ class Logger(object):
         message = f"""Ignored exception: {type(exception).__name__} {str(exception)}:\n{formatted_exception}"""
 
         self.log(logging.ERROR, prefix=prefix, message=message, frame=frame)
-
-
-logger = Logger.instance()
 
 
 def automatic_retry_with_timeout(retries=1, delay=0, timeout=None):
@@ -97,96 +111,42 @@ def automatic_retry_with_timeout(retries=1, delay=0, timeout=None):
     return decorator
 
 
-def log_function_call(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        from core.logger import logger
-
-        frame = inspect.currentframe().f_back
-
-        # fully_qualified_name = f"{func.__module__}.{func.__qualname__}"
-        fully_qualified_name = func.__qualname__
-
-        logger.log(logging.DEBUG, f"{fully_qualified_name} input", {"args": args, "kwargs": kwargs}, frame=frame)
-
-        try:
-            output = func(*args, **kwargs)
-
-            logger.log(logging.DEBUG, f"{fully_qualified_name} output", output, frame=frame)
-            return output
-        except Exception as exception:
-            logger.log(logging.DEBUG, f"{fully_qualified_name} exception", exception, frame=frame)
-
-            raise
-
-    return wrapper
-
-
-def log_function_exception(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        from core.logger import logger
-
-        frame = inspect.currentframe().f_back
-        fully_qualified_name = func.__qualname__
-
-        try:
-            return func(*args, **kwargs)
-        except Exception as exception:
-            formatted_exception = traceback.format_exception(type(exception), exception, exception.__traceback__)
-            formatted_exception = "\n".join(formatted_exception)
-
-            logger.log(logging.DEBUG, f"{fully_qualified_name} input", {"args": args, "kwargs": kwargs}, frame=frame)
-            logger.log(logging.DEBUG, f"{fully_qualified_name} exception", formatted_exception, frame=frame)
-            raise
-
-    return wrapper
-
-
-def log_class_exceptions(cls):
-    for name, method in inspect.getmembers(cls, inspect.isfunction):
-        setattr(cls, name, log_function_exception(method))
-
-    return cls
-
-
-def log(level: int, message: str = "", object: Any = None):
-    from core.logger import logger
-
-    logger.log(level=level, message=message, object=object, frame=inspect.currentframe().f_back.f_back)
-
-
-def sync_logged_method(method):
+def sync_logged_method(method, logger: Logger):
     @wraps(method)
     def wrapper(*args, **kwargs):
         frame = inspect.currentframe().f_back
 
         # fully_qualified_name = f"{func.__module__}.{func.__qualname__}"
-        fully_qualified_name = func.__qualname__
+        fully_qualified_name = method.__qualname__
 
-        logger.debug(f"""Starting {method.__name__}...""", frame=frame)
+        logger.debug(f"""Starting {fully_qualified_name}...""", frame=frame)
+        # logger.debug(f"""Starting {fully_qualified_name}...""", {"args": args, "kwargs": kwargs}, frame=frame)
+
         try:
             result = method(*args, **kwargs)
 
             logger.debug(
-                f"""Successfully executed {method.__name__}.""",
-                # object={
-                # 	"args": args,
-                # 	"kwargs": kwargs,
-                # 	"result": result
-                # }
+                f"""Successfully executed {fully_qualified_name}.""",
+                object={
+                    # "args": args,
+                    # "kwargs": kwargs,
+                    # "result": result
+                },
                 frame=frame,
             )
 
             return result
         except Exception as exception:
+            formatted_exception = traceback.format_exception(type(exception), exception, exception.__traceback__)
+            formatted_exception = "\n".join(formatted_exception)
+
             logger.debug(
-                f"""Exception raised in {method.__name__}: {exception}.""",
-                # object={
-                # 	"args": args,
-                # 	"kwargs": kwargs,
-                # 	"exception": exception
-                # }
+                f"Exception raised in {fully_qualified_name}: {exception}\n{formatted_exception}",
+                object={
+                    # "args": args,
+                    # "kwargs": kwargs,
+                    # "exception": exception
+                },
                 frame=frame,
             )
 
@@ -195,34 +155,42 @@ def sync_logged_method(method):
     return wrapper
 
 
-def async_logged_method(method):
+def async_logged_method(method, logger: Logger):
     @wraps(method)
     async def wrapper(*args, **kwargs):
         frame = inspect.currentframe().f_back
 
-        logger.debug(f"""Starting {method.__name__}...""", frame=frame)
+        # fully_qualified_name = f"{func.__module__}.{func.__qualname__}"
+        fully_qualified_name = method.__qualname__
+
+        logger.debug(f"""Starting {fully_qualified_name}...""", frame=frame)
+        # logger.debug(f"""Starting {fully_qualified_name}...""", {"args": args, "kwargs": kwargs}, frame=frame)
+
         try:
             result = await method(*args, **kwargs)
 
             logger.debug(
-                f"""Successfully executed {method.__name__}.""",
-                # object={
-                # 	"args": args,
-                # 	"kwargs": kwargs,
-                # 	"result": result
-                # }
+                f"""Successfully executed {fully_qualified_name}.""",
+                object={
+                    # "args": args,
+                    # "kwargs": kwargs,
+                    # "result": result
+                },
                 frame=frame,
             )
 
             return result
         except Exception as exception:
+            formatted_exception = traceback.format_exception(type(exception), exception, exception.__traceback__)
+            formatted_exception = "\n".join(formatted_exception)
+
             logger.debug(
-                f"""Exception raised in {method.__name__}: {exception}.""",
-                # object={
-                # 	"args": args,
-                # 	"kwargs": kwargs,
-                # 	"exception": exception
-                # }
+                f"Exception raised in {fully_qualified_name}: {exception}\n{formatted_exception}",
+                object={
+                    # "args": args,
+                    # "kwargs": kwargs,
+                    # "exception": exception
+                },
                 frame=frame,
             )
 
@@ -231,12 +199,12 @@ def async_logged_method(method):
     return wrapper
 
 
-def logged_class(cls):
+def logged_class(cls, logger: Logger):
     for attr, method in cls.__dict__.items():
         if callable(method):
             if asyncio.iscoroutinefunction(method):
-                setattr(cls, attr, async_logged_method(method))
+                setattr(cls, attr, async_logged_method(method, logger))
             else:
-                setattr(cls, attr, sync_logged_method(method))
+                setattr(cls, attr, sync_logged_method(method, logger))
 
     return cls
