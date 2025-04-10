@@ -3,64 +3,49 @@ import inspect
 import logging
 import traceback
 from functools import wraps
-from logging import DEBUG
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
-from core.properties import properties
-from core.telegram.telegram import telegram
-from core.utils import dump, escape_html
+
+def dump(target: Any):
+    try:
+        if isinstance(target, str):
+            return target
+
+        if isinstance(target, Dict):
+            return str(target)
+
+        return str(target)
+    except (Exception,):
+        return target
+
 from singleton.singleton import ThreadSafeSingleton
 
 
 @ThreadSafeSingleton
 class Logger(object):
-    def __init__(self):
-        self.level = properties.get("logging.level")
-        self.levels = properties.get("logging.levels")
-        self.telegram_level: bool = properties.get("telegram.level")
-        self.use_telegram: bool = properties.get("logging.use_telegram")
-
-        directory = properties.get("logging.directory")
-        Path(directory).mkdir(parents=True, exist_ok=True)
-
-        format = properties.get("logging.format")
-
+    def __init__(self, path: str = "logs/logs_hummingbot.log", level: int = logging.DEBUG, format: str = "%(asctime)s %(levelname)s %(message)s"):
+        self._root_path = Path(__file__).parent.parent.parent
+        
         logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
 
-        for level in self.levels:
-            file_handler = logging.FileHandler(f"{directory}/{str(logging.getLevelName(level)).lower()}.log", mode="a")
-            file_handler.setLevel(level)
+        logger.setLevel(level)
 
-            # Create a filter to only log messages of a specific level
-            class SpecificLevelFilter(logging.Filter):
-                def __init__(self, level):
-                    super().__init__()
-                    self.__level = level
-
-                def filter(self, logRecord):
-                    return logRecord.levelno == self.__level
-
-            file_handler.addFilter(SpecificLevelFilter(level))
-            file_handler.setFormatter(logging.Formatter(format))
-            logger.addHandler(file_handler)
-
-        file_handler = logging.FileHandler(f"{directory}/all.log", mode="a")
-        file_handler.setLevel(logging.DEBUG)
+        file_handler = logging.FileHandler(path, mode="a")
+        file_handler.setLevel(level)
         file_handler.setFormatter(logging.Formatter(format))
         logger.addHandler(file_handler)
 
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(logging.Formatter(format))
-        stream_handler.setLevel(self.level)
+        stream_handler.setLevel(level)
         logger.addHandler(stream_handler)
 
     def log(self, level: int, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
         if not frame:
             frame = inspect.currentframe().f_back
 
-        filename = frame.f_code.co_filename.removeprefix(f"""{properties.get("root_path")}/""")
+        filename = frame.f_code.co_filename.removeprefix(f"""{self._root_path}/""")
         line_number = frame.f_lineno
         function_name = frame.f_code.co_name
 
@@ -70,14 +55,6 @@ class Logger(object):
         message = f"{prefix} {filename}:{line_number} {function_name}: {message}"
 
         logging.log(level, message)
-
-        if self.use_telegram and level >= self.level and level >= self.telegram_level:
-            if level >= logging.ERROR and not "/cc " in message:
-                message += f"\n/cc {telegram.admins}"
-
-            message = escape_html(message)
-
-            telegram.send(message)
 
     def ignore_exception(self, exception: Exception, prefix: str = "", frame=inspect.currentframe().f_back):
         formatted_exception = traceback.format_exception(type(exception), exception, exception.__traceback__)
@@ -89,20 +66,6 @@ class Logger(object):
 
 
 logger = Logger.instance()
-
-
-# class Logger:
-#     # noinspection PyMethodMayBeStatic
-#     def debug(self, message, frame=None, _object=None):
-#         frame_info = ""
-#         if frame:
-#             frame_info = f" [{frame.f_code.co_filename}:{frame.f_lineno}]"
-#
-#         with open("logs/logs_amm_portfolio_manager.log", "a") as log_file:
-#             print(f"DEBUG{frame_info}: {message}", file=log_file)
-#
-#
-# logger = Logger()
 
 
 def automatic_retry_with_timeout(retries=1, delay=0, timeout=None):
