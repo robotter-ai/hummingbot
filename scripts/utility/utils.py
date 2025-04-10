@@ -86,7 +86,7 @@ def run_with_retry_and_timeout(retries=1, delay=0, timeout=None):
     def decorator(function):
         async def wrapper(*args, **kwargs):
             errors = []
-            number_of_retries = range(1, retries + 1)
+            number_of_retries = range(1, retries + 2)
             for i in range(retries):
                 try:
                     result = await asyncio.wait_for(function(*args, **kwargs), timeout=timeout)
