@@ -16,7 +16,7 @@ from hummingbot.core.event.events import TradeType
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
-from scripts.utility.decorators import logged_class
+from scripts.utility.utils import logged_class
 
 DECIMAL_ZERO = Decimal("0")
 DECIMAL_ONE_PERCENT = Decimal("0.01")
