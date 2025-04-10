@@ -17,8 +17,9 @@ from hummingbot.core.event.events import TradeType
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
-from scripts.utility.utils import Logger, logged_class
+from scripts.utility.utils import Logger, logged_class, run_with_retry_and_timeout
 
+# Constants for Decimal calculations
 DECIMAL_ZERO = Decimal("0")
 DECIMAL_ONE_PERCENT = Decimal("0.01")
 DECIMAL_TEN_PERCENT = Decimal("0.1")
@@ -31,6 +32,11 @@ DECIMAL_ONE_HUNDRED = Decimal("100")
 DECIMAL_NOT_A_NUMBER = Decimal("NaN")
 DECIMAL_POSITIVE_INFINITY = Decimal("Infinity")
 DECIMAL_NEGATIVE_INFINITY = Decimal("-Infinity")
+
+# Constants for Gateway HTTP client retries
+GATEWAY_REQUEST_RETRIES = 3
+GATEWAY_REQUEST_DELAY = 1  # seconds
+GATEWAY_REQUEST_TIMEOUT = 30  # seconds
 
 
 class PoolType(Enum):
@@ -483,7 +489,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         try:
             # Record initial balance for buy pool wallet
-            initial_wallet_balances = await self._post_chain_balances(
+            initial_wallet_balances = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [base_token, quote_token]
             )
 
@@ -534,7 +540,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 return False
 
             # Get quote_token balance after first swap
-            updated_wallet_balances = await self._post_chain_balances(
+            updated_wallet_balances = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [quote_token]
             )
 
@@ -561,7 +567,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             )
 
             # Record initial balance for sell pool wallet
-            initial_sell_wallet_balances = await self._post_chain_balances(
+            initial_sell_wallet_balances = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_pool_wallet_address, [base_token]
             )
 
@@ -601,11 +607,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 return False
 
             # Calculate actual profit by checking final balance
-            final_buy_wallet_balances = await self._post_chain_balances(
+            final_buy_wallet_balances = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_pool_wallet_address, [base_token]
             )
 
-            final_sell_wallet_balances = await self._post_chain_balances(
+            final_sell_wallet_balances = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_pool_wallet_address, [base_token]
             )
 
@@ -697,7 +703,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         while time.time() - start_time < max_timeout:
             try:
                 # Poll transaction status
-                tx_status = await self._post_chain_poll(chain, network, tx_hash)
+                tx_status = await self._gateway_poll_transaction(chain, network, tx_hash)
 
                 # Check if transaction is confirmed (successful)
                 if tx_status and tx_status.get("txStatus") == 1:
@@ -719,6 +725,209 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self.logger().warning(f"Transaction {tx_hash} confirmation timed out after {max_timeout} seconds")
 
         return False
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_ping_gateway(self):
+        """Ping the gateway server to check if it's online"""
+        return await self._gateway_http_client.ping_gateway()
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_pools(self, connector: str, network: str):
+        """Fetch all available pools for a connector"""
+        return await self._gateway_http_client.amm_list_pools(connector, network)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_pool_info(self, connector: str, network: str, pool_address: str):
+        """Get detailed information about a liquidity pool"""
+        return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_quote_swap(
+        self,
+        network: str,
+        connector: str,
+        base_asset: str,
+        quote_asset: str,
+        amount: Decimal,
+        side: TradeType,
+        slippage_percentage: Decimal,
+        pool_address: str,
+    ):
+        """Get a quote for swapping tokens in a pool"""
+        return await self._gateway_http_client.amm_quote_swap(
+            network=network,
+            connector=connector,
+            base_asset=base_asset,
+            quote_asset=quote_asset,
+            amount=amount,
+            side=side,
+            slippage_percentage=slippage_percentage,
+            pool_address=pool_address,
+        )
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_quote_liquidity(
+        self,
+        connector: str,
+        network: str,
+        pool_address: str,
+        base_token_amount: Optional[Decimal] = None,
+        quote_token_amount: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
+    ):
+        """Get a quote for adding liquidity to a pool"""
+        return await self._gateway_http_client.amm_quote_liquidity(
+            connector=connector,
+            network=network,
+            pool_address=pool_address,
+            base_token_amount=base_token_amount,
+            quote_token_amount=quote_token_amount,
+            slippage_percentage=slippage_percentage,
+        )
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_execute_swap(
+        self,
+        network: str,
+        connector: str,
+        wallet_address: str,
+        base_asset: str,
+        quote_asset: str,
+        side: TradeType,
+        amount: Decimal,
+        slippage_percentage: Decimal,
+        pool_address: str,
+    ):
+        """Execute a token swap in the specified pool"""
+        return await self._gateway_http_client.amm_execute_swap(
+            network=network,
+            connector=connector,
+            wallet_address=wallet_address,
+            base_asset=base_asset,
+            quote_asset=quote_asset,
+            side=side,
+            amount=amount,
+            slippage_percentage=slippage_percentage,
+            pool_address=pool_address,
+        )
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_add_liquidity(
+        self,
+        connector: str,
+        network: str,
+        wallet_address: str,
+        pool_address: str,
+        base_token_amount: Optional[Decimal] = None,
+        quote_token_amount: Optional[Decimal] = None,
+        slippage_percentage: Optional[Decimal] = None,
+    ):
+        """Add liquidity to the specified pool"""
+        return await self._gateway_http_client.amm_add_liquidity(
+            connector=connector,
+            network=network,
+            wallet_address=wallet_address,
+            pool_address=pool_address,
+            base_token_amount=base_token_amount,
+            quote_token_amount=quote_token_amount,
+            slippage_percentage=slippage_percentage,
+        )
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_remove_liquidity(
+        self, connector: str, network: str, wallet_address: str, pool_address: str, percentage_to_remove: Decimal
+    ):
+        """Remove liquidity from the specified pool"""
+        return await self._gateway_http_client.amm_remove_liquidity(
+            connector=connector,
+            network=network,
+            wallet_address=wallet_address,
+            pool_address=pool_address,
+            percentage_to_remove=percentage_to_remove,
+        )
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_status(self):
+        """Get the status of the Gateway server"""
+        return await self._gateway_http_client.get_gateway_status()
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_config(self, chain_or_connector: Optional[str] = None):
+        """Get Gateway configuration settings"""
+        return await self._gateway_http_client.get_configuration(chain_or_connector)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_update_config(self, config_path: str, config_value: Any):
+        """Update Gateway configuration setting"""
+        return await self._gateway_http_client.update_config(config_path, config_value)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_connectors(self):
+        """Get all available connectors from Gateway"""
+        return await self._gateway_http_client.get_connectors()
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_wallets(self):
+        """Get wallet information for all connected chains"""
+        return await self._gateway_http_client.get_wallets()
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_network_status(self, chain: str, network: str):
+        """Get chain status"""
+        return await self._gateway_http_client.get_network_status(chain, network)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_poll_transaction(self, chain: str, network: str, tx_hash: str):
+        """Poll for transaction status"""
+        return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_tokens(
+        self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None
+    ):
+        """Get token information"""
+        return await self._gateway_http_client.get_tokens(chain, network, token_symbols)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_balances(
+        self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
+    ):
+        """Get token balances for a wallet address"""
+        return await self._gateway_http_client.get_balances(chain, network, address, token_symbols)
 
     async def _update_database(self):
         """Atualiza o database com as informações mais recentes de forma eficiente"""
@@ -1484,7 +1693,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             for network_name, network in chain.items():
                 for _, connector in network.items():
                     for wallet_address in connector["wallets"]:
-                        balances = await self._post_chain_balances(
+                        balances = await self._gateway_get_balances(
                             chain_name, network_name, wallet_address, [token_symbol]
                         )
 
@@ -1503,7 +1712,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         self.logger().info("Checking Gateway server status...")
         try:
-            if await self._gateway_http_client.ping_gateway():
+            if await self._gateway_ping_gateway():
                 self._gateway_is_ready = True
 
                 self.logger().info("Gateway server is online!")
@@ -1593,7 +1802,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing pools information
         """
-        return await self._gateway_http_client.amm_list_pools(connector, network)
+        return await self._gateway_get_pools(connector, network)
 
     async def _get_pool_information(self, pool: Dict[str, Any]):
         """
@@ -1612,7 +1821,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
+        return await self._gateway_get_pool_info(connector, network, pool_address)
 
     async def _get_quote_swap(
         self,
@@ -1644,15 +1853,15 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        return await self._gateway_http_client.amm_quote_swap(
-            network=network,
-            connector=connector,
-            base_asset=base_token,
-            quote_asset=quote_token,
-            amount=amount,
-            side=side,
-            slippage_percentage=slippage_percentage,
-            pool_address=pool_address,
+        return await self._gateway_quote_swap(
+            network,
+            connector,
+            base_token,
+            quote_token,
+            amount,
+            side,
+            slippage_percentage,
+            pool_address,
         )
 
     async def _get_quote_liquidity(
@@ -1681,13 +1890,13 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address]):
             return None
 
-        return await self._gateway_http_client.amm_quote_liquidity(
-            connector=connector,
-            network=network,
-            pool_address=pool_address,
-            base_token_amount=base_token_amount,
-            quote_token_amount=quote_token_amount,
-            slippage_percentage=slippage_percentage,
+        return await self._gateway_quote_liquidity(
+            connector,
+            network,
+            pool_address,
+            base_token_amount,
+            quote_token_amount,
+            slippage_percentage,
         )
 
     async def _post_execute_swap(
@@ -1721,16 +1930,16 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        return await self._gateway_http_client.amm_execute_swap(
-            network=network,
-            connector=connector,
-            wallet_address=wallet_address,
-            base_asset=base_token,
-            quote_asset=quote_token,
-            side=side,
-            amount=amount,
-            slippage_percentage=slippage_percentage,
-            pool_address=pool_address,
+        return await self._gateway_execute_swap(
+            network,
+            connector,
+            wallet_address,
+            base_token,
+            quote_token,
+            side,
+            amount,
+            slippage_percentage,
+            pool_address,
         )
 
     async def _post_add_liquidity(
@@ -1760,14 +1969,14 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        return await self._gateway_http_client.amm_add_liquidity(
-            connector=connector,
-            network=network,
-            wallet_address=wallet_address,
-            pool_address=pool_address,
-            base_token_amount=base_token_amount,
-            quote_token_amount=quote_token_amount,
-            slippage_percentage=slippage_percentage,
+        return await self._gateway_add_liquidity(
+            connector,
+            network,
+            wallet_address,
+            pool_address,
+            base_token_amount,
+            quote_token_amount,
+            slippage_percentage,
         )
 
     async def _post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: Decimal):
@@ -1789,12 +1998,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         if not all([network, connector, pool_address, wallet_address]):
             return None
 
-        return await self._gateway_http_client.amm_remove_liquidity(
-            connector=connector,
-            network=network,
-            wallet_address=wallet_address,
-            pool_address=pool_address,
-            percentage_to_remove=percentage_to_remove,
+        return await self._gateway_remove_liquidity(
+            connector,
+            network,
+            wallet_address,
+            pool_address,
+            percentage_to_remove,
         )
 
     async def _get_root_status(self):
@@ -1804,7 +2013,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing server status information
         """
-        return await self._gateway_http_client.get_gateway_status()
+        return await self._gateway_get_status()
 
     async def _get_config(self, chain_or_connector: Optional[str] = None):
         """
@@ -1816,7 +2025,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing Gateway configuration
         """
-        return await self._gateway_http_client.getself._configuration(chain_or_connector)
+        return await self._gateway_get_config(chain_or_connector)
 
     async def _post_config_update(self, config_path: str, config_value: Any):
         """
@@ -1829,7 +2038,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing operation result
         """
-        return await self._gateway_http_client.update_config(config_path, config_value)
+        return await self._gateway_update_config(config_path, config_value)
 
     async def _get_connectors(self):
         """
@@ -1838,7 +2047,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing available connectors information
         """
-        return await self._gateway_http_client.get_connectors()
+        return await self._gateway_get_connectors()
 
     async def _get_wallet(self):
         """
@@ -1847,7 +2056,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing wallet information
         """
-        return await self._gateway_http_client.get_wallets()
+        return await self._gateway_get_wallets()
 
     async def _get_chain_status(self, chain: str, network: str):
         """
@@ -1860,21 +2069,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing chain status information
         """
-        return await self._gateway_http_client.get_network_status(chain, network)
-
-    async def _post_chain_poll(self, chain: str, network: str, tx_hash: str):
-        """
-        Poll for transaction status.
-
-        Args:
-            chain: Chain identifier
-            network: Network identifier
-            tx_hash: Transaction hash to poll
-
-        Returns:
-            Dictionary containing transaction status
-        """
-        return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
+        return await self._gateway_get_network_status(chain, network)
 
     async def _get_chain_tokens(self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None):
         """
@@ -1888,24 +2083,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Returns:
             Dictionary containing token information
         """
-        return await self._gateway_http_client.get_tokens(chain, network, token_symbols)
-
-    async def _post_chain_balances(
-        self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
-    ):
-        """
-        Get token balances for a wallet address.
-
-        Args:
-            chain: Chain identifier
-            network: Network identifier
-            address: Wallet address
-            token_symbols: Optional token symbols to filter
-
-        Returns:
-            Dictionary containing token balances
-        """
-        return await self._gateway_http_client.get_balances(chain, network, address, token_symbols)
+        return await self._gateway_get_tokens(chain, network, token_symbols)
 
     async def _get_token_price(self, token_symbol: str, chain: str, network: str) -> Optional[Decimal]:
         """
@@ -1988,7 +2166,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             return self._balance_cache[cache_key]["balance"]
 
         # Se não estiver em cache ou estiver expirado, buscar do gateway
-        balances = await self._post_chain_balances(chain, network, wallet_address, [token_symbol])
+        balances = await self._gateway_get_balances(chain, network, wallet_address, [token_symbol])
 
         if balances and "balances" in balances:
             balance = Decimal(str(balances["balances"].get(token_symbol, 0)))
