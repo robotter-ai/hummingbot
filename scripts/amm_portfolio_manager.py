@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 from decimal import Decimal
@@ -16,7 +17,7 @@ from hummingbot.core.event.events import TradeType
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
-from scripts.utility.utils import logged_class
+from scripts.utility.utils import Logger, logged_class
 
 DECIMAL_ZERO = Decimal("0")
 DECIMAL_ONE_PERCENT = Decimal("0.01")
@@ -207,7 +208,7 @@ class AMMRobustPositionManagerConfiguration(BaseClientModel):
 
 
 # noinspection PyShadowingNames
-@logged_class
+@logged_class(logger=Logger(path="logs/logs_amm_portfolio_manager.log", level=logging.DEBUG))
 class AMMRobustPositionManager(ScriptStrategyBase):
     markets: Dict[str, Any] = {}
     _configuration = None

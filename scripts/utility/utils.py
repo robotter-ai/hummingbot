@@ -33,15 +33,15 @@ class Logger(object):
 
         logger.setLevel(level)
 
-        file_handler = logging.FileHandler(path, mode="a")
-        file_handler.setLevel(level)
-        file_handler.setFormatter(logging.Formatter(format))
-        logger.addHandler(file_handler)
+        # file_handler = logging.FileHandler(path, mode="a")
+        # file_handler.setLevel(level)
+        # file_handler.setFormatter(logging.Formatter(format))
+        # logger.addHandler(file_handler)
 
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(logging.Formatter(format))
-        stream_handler.setLevel(level)
-        logger.addHandler(stream_handler)
+        # stream_handler = logging.StreamHandler()
+        # stream_handler.setFormatter(logging.Formatter(format))
+        # stream_handler.setLevel(level)
+        # logger.addHandler(stream_handler)
 
     def log(self, level: int, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
         if not frame:
@@ -119,8 +119,7 @@ def sync_logged_method(method, logger: Logger):
         # fully_qualified_name = f"{func.__module__}.{func.__qualname__}"
         fully_qualified_name = method.__qualname__
 
-        logger.debug(f"""Starting {fully_qualified_name}...""", frame=frame)
-        # logger.debug(f"""Starting {fully_qualified_name}...""", {"args": args, "kwargs": kwargs}, frame=frame)
+        logger.debug(f"""Starting {fully_qualified_name}...""", {"args": args, "kwargs": kwargs}, frame=frame)
 
         try:
             result = method(*args, **kwargs)
@@ -130,7 +129,7 @@ def sync_logged_method(method, logger: Logger):
                 object={
                     # "args": args,
                     # "kwargs": kwargs,
-                    # "result": result
+                    "result": result
                 },
                 frame=frame,
             )
@@ -163,8 +162,7 @@ def async_logged_method(method, logger: Logger):
         # fully_qualified_name = f"{func.__module__}.{func.__qualname__}"
         fully_qualified_name = method.__qualname__
 
-        logger.debug(f"""Starting {fully_qualified_name}...""", frame=frame)
-        # logger.debug(f"""Starting {fully_qualified_name}...""", {"args": args, "kwargs": kwargs}, frame=frame)
+        logger.debug(f"""Starting {fully_qualified_name}...""", {"args": args, "kwargs": kwargs}, frame=frame)
 
         try:
             result = await method(*args, **kwargs)
@@ -174,7 +172,7 @@ def async_logged_method(method, logger: Logger):
                 object={
                     # "args": args,
                     # "kwargs": kwargs,
-                    # "result": result
+                    "result": result
                 },
                 frame=frame,
             )
@@ -199,12 +197,19 @@ def async_logged_method(method, logger: Logger):
     return wrapper
 
 
-def logged_class(cls, logger: Logger):
-    for attr, method in cls.__dict__.items():
-        if callable(method):
-            if asyncio.iscoroutinefunction(method):
-                setattr(cls, attr, async_logged_method(method, logger))
-            else:
-                setattr(cls, attr, sync_logged_method(method, logger))
+def logged_class(cls=None, logger: Logger = None):
+    def decorator(cls):
+        for attr, method in cls.__dict__.items():
+            if callable(method):
+                if asyncio.iscoroutinefunction(method):
+                    setattr(cls, attr, async_logged_method(method, logger))
+                else:
+                    setattr(cls, attr, sync_logged_method(method, logger))
+        return cls
 
-    return cls
+    # If called with @logged_class
+    if cls is not None:
+        return decorator(cls)
+
+    # If called with @logged_class(logger=...)
+    return decorator
