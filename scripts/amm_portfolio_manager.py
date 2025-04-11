@@ -163,7 +163,7 @@ class DataUpdateIntervals(BaseClientModel):
     token: int = Field(default=300)
     pool: int = Field(default=120)
 
-    @validator("wallet", "token", "pool")
+    @validator("wallet", "token", "pool", allow_reuse=True)
     def validate_positive_interval(cls, v):
         if v <= 0:
             raise ValueError("Update interval must be positive")
