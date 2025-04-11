@@ -54,6 +54,71 @@ DECIMAL_NEGATIVE_INFINITY = Decimal("-Infinity")
 GATEWAY_REQUEST_RETRIES = 3
 GATEWAY_REQUEST_DELAY = 1  # seconds
 GATEWAY_REQUEST_TIMEOUT = 30  # seconds
+LOCK_ACQUISITION_TIMEOUT = 5  # seconds
+
+
+# ==============================================================================
+# Database Lock Context Manager
+# ==============================================================================
+class DatabaseLock:
+    """
+    Context manager for handling database locks with ownership tracking and timeout.
+    """
+
+    # noinspection PyShadowingNames
+    def __init__(self, lock: asyncio.Lock, logger: logging.Logger, caller: str):
+        self.lock = lock
+        self.logger = logger
+        self.caller = caller
+        self._acquired = False
+        self._owner = None
+
+    async def __aenter__(self) -> bool:
+        """
+        Acquire the lock with timeout and ownership tracking.
+        Returns True if lock was acquired, False if timeout or already held.
+        """
+        try:
+            self._acquired = await asyncio.wait_for(self.lock.acquire(), timeout=LOCK_ACQUISITION_TIMEOUT)
+            if self._acquired:
+                self._owner = self.caller
+                self.logger.info(f"Lock acquired by {self.caller}")
+            else:
+                self.logger.warning(f"Failed to acquire lock for {self.caller}")
+        except asyncio.TimeoutError:
+            self.logger.error(f"Timeout while trying to acquire lock for {self.caller}")
+            self._acquired = False
+        except Exception as e:
+            self.logger.error(f"Error acquiring lock for {self.caller}: {str(e)}")
+            self._acquired = False
+        return self._acquired
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """
+        Release the lock and handle any exceptions.
+        """
+        if self._acquired:
+            try:
+                self.lock.release()
+                self._owner = None
+                self._acquired = False
+                self.logger.info(f"Lock released by {self.caller}")
+            except Exception as e:
+                self.logger.error(f"Error releasing lock from {self.caller}: {str(e)}")
+                # Reset lock state even if release fails
+                self._owner = None
+                self._acquired = False
+
+    @property
+    def is_acquired(self) -> bool:
+        """Check if the lock is currently acquired."""
+        return self._acquired
+
+    @property
+    def owner(self) -> Optional[str]:
+        """Get the current lock owner."""
+        return self._owner
+
 
 # ==============================================================================
 # Global Configuration and Database Schema
@@ -71,16 +136,16 @@ configuration: Dict[str, Any] = {
         "data_update_intervals": {
             "wallet": "60",  # Update wallet data every 60 seconds
             "token": "300",  # Update token data every 300 seconds
-            "pool": "120",  # Update pool data every 120 seconds
+            "pool": "30",  # Update pool data every 120 seconds
         },
-        "use_async_data_updates": False,
+        "use_async_data_updates": True,
     },
     "connections": {
         "polkadot": {
             "mainnet": {
                 "hydration": {
                     "wallets": ["5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt"],
-                    "pools": ["7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG"],
+                    "pools": [],
                 }
             },
         },
@@ -88,10 +153,7 @@ configuration: Dict[str, Any] = {
             "mainnet-beta": {
                 "raydium": {
                     "wallets": ["7pWpBM8xtVHJq7C4BBivumfBZAC2J8XndTWvmg9GGXDb"],
-                    "pools": [
-                        "2EXiumdi14E9b8Fy62QcA5Uh6WdHS2b38wtSxp72Mibj",
-                        "3NeUgARDmFgnKtkJLqUcEUNCfknFCcGsFfMJCtx6bAgx",
-                    ],
+                    "pools": [],
                 }
             }
         },
@@ -153,6 +215,7 @@ class DataUpdateIntervals(BaseClientModel):
     token: int = Field(default=300)
     pool: int = Field(default=120)
 
+    # noinspection PyMethodParameters
     @validator("wallet", "token", "pool", allow_reuse=True)
     def validate_positive_interval(cls, v):
         if v <= 0:
@@ -231,8 +294,10 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     _last_token_update_time: float = 0
     _last_pool_update_time: float = 0
     _use_async_data_updates: bool = True
-    _db_lock: asyncio.Lock = asyncio.Lock()
-    _initial_db_update_done: bool = False  # Set to True once dynamic update has completed at least once
+    _initial_db_update_done: bool = False
+    _db_lock: asyncio.Lock = None
+    _db_initialization_lock: asyncio.Lock = None
+    _db_initialization_done: bool = False
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
         """
@@ -243,15 +308,17 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             connectors: Dictionary of available connector instances.
         """
         super().__init__(connectors)
-        self._initialize()
+        self._db_lock = asyncio.Lock()
+        self._db_initialization_lock = asyncio.Lock()
+        safe_ensure_future(self._initialize())
 
-    def _initialize(self, strategy_configuration: Optional[AMMRobustPositionManagerConfiguration] = None):
+    async def _initialize(self, _strategy_configuration: Optional[AMMRobustPositionManagerConfiguration] = None):
         """
         Setup configuration, gateway client, and permanent database structure.
         Also, schedule asynchronous dynamic updates.
 
         Args:
-            strategy_configuration: Optional configuration; if None, global configuration is used.
+            _strategy_configuration: Optional configuration; if None, global configuration is used.
         """
         self._gateway_http_client = GatewayHttpClient.get_instance()
         self._configuration = configuration
@@ -278,7 +345,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self._all_gateway_connections = GatewayConnectionSetting.load()
         self._log_initialization()
         # Build permanent database structure.
-        asyncio.create_task(self._initialize_database_structure())
+        await self._initialize_database_structure()
         if self._use_async_data_updates:
             self._start_data_update_task()
 
@@ -307,7 +374,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                     if not self._gateway_is_ready:
                         await asyncio.sleep(5)
                         continue
-                await self._update_database()
+                try:
+                    self._is_already_running = True
+
+                    await self._update_database()
+                finally:
+                    self._is_already_running = False
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             self.logger().info("Data update task cancelled")
@@ -398,7 +470,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Build the permanent database structure exactly matching the provided schema.
         For each chain, network, and connector, store static wallet, token, and pool information.
         """
-        async with self._db_lock:
+        if self._db_initialization_done:
+            self.logger().info("Database structure already initialized")
+            return
+
+        try:
             for chain, chain_conf in self._configuration.get("connections", {}).items():
                 database["connections"].setdefault(chain, {})
                 for network, net_conf in chain_conf.items():
@@ -455,17 +531,28 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                                     "decimals": None,
                                     "price": None,
                                 }
-            await self._update_database_maps()
+            await self._update_database_maps(True)
+            self._db_initialization_done = True
             self.logger().info("Permanent database structure initialized.")
+        except Exception as e:
+            self.logger().error(f"Error initializing database structure: {str(e)}")
+            self._db_initialization_done = False
+            raise
 
-    async def _update_database_maps(self):
+    async def _update_database_maps(self, lock_acquired: bool):
         """
         Rebuild mapping dictionaries:
          - pools_by_tokens: "token1/token2" -> list of pool internal IDs
          - wallets_by_pool: pool internal ID -> list of wallet internal IDs
          - pools_by_wallet: wallet internal ID -> list of pool internal IDs
         """
-        async with self._db_lock:
+        self.logger().info("Starting database maps update...")
+
+        if not lock_acquired:
+            self.logger().info("Lock not acquired for maps update, skipping this cycle")
+            return
+
+        try:
             db_maps = database["maps"]
             db_maps["pools_by_tokens"].clear()
             db_maps["wallets_by_pool"].clear()
@@ -484,7 +571,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             for pool_addr in wallet.get("pools", {}).keys():
                                 db_maps["pools_by_wallet"].setdefault(wallet_id, []).append(pool_addr)
                                 db_maps["wallets_by_pool"].setdefault(pool_addr, []).append(wallet_id)
-            self.logger().info("Database mapping structures updated.")
+        except Exception as e:
+            self.logger().error(f"Error in database maps update: {str(e)}")
+            raise
+
+        self.logger().info("Database maps update completed.")
 
     # --------------------------------------------------------------------------
     # Dynamic Database Update Methods
@@ -497,38 +588,58 @@ class AMMRobustPositionManager(ScriptStrategyBase):
          - Token information (price, decimals, name)
         After all updates are performed at least once, set flag to allow arbitrage execution.
         """
+        self.logger().info("Starting database update...")
         current_time = time.time()
         wallet_interval = self._data_update_intervals.get("wallet", 60)
         token_interval = self._data_update_intervals.get("token", 300)
         pool_interval = self._data_update_intervals.get("pool", 120)
 
-        if (not hasattr(self, "_last_pool_update_time")) or (
-            current_time - self._last_pool_update_time >= pool_interval
-        ):
-            self._last_pool_update_time = current_time
-            await self._update_pool_information()
+        async with DatabaseLock(self._db_lock, self.logger(), "_update_database") as lock_acquired:
+            if not lock_acquired:
+                self.logger().warning("Could not acquire lock for database update, skipping this cycle")
+                return
 
-        if (not hasattr(self, "_last_wallet_update_time")) or (
-            current_time - self._last_wallet_update_time >= wallet_interval
-        ):
-            self._last_wallet_update_time = current_time
-            await self._update_wallet_balances()
+            try:
+                if (not hasattr(self, "_last_token_update_time")) or (
+                    current_time - self._last_token_update_time >= token_interval
+                ):
+                    self.logger().info("Token update interval reached, updating token information...")
+                    self._last_token_update_time = current_time
+                    await self._update_token_information(lock_acquired)
 
-        if (not hasattr(self, "_last_token_update_time")) or (
-            current_time - self._last_token_update_time >= token_interval
-        ):
-            self._last_token_update_time = current_time
-            await self._update_token_information()
+                if (not hasattr(self, "_last_pool_update_time")) or (
+                    current_time - self._last_pool_update_time >= pool_interval
+                ):
+                    self.logger().info("Pool update interval reached, updating pool information...")
+                    self._last_pool_update_time = current_time
+                    await self._update_pool_information(lock_acquired)
 
-        await self._update_database_maps()
-        self._initial_db_update_done = True
+                if (not hasattr(self, "_last_wallet_update_time")) or (
+                    current_time - self._last_wallet_update_time >= wallet_interval
+                ):
+                    self.logger().info("Wallet update interval reached, updating wallet balances...")
+                    self._last_wallet_update_time = current_time
+                    await self._update_wallet_balances(lock_acquired)
 
-    async def _update_pool_information(self):
+                self.logger().info("Updating database maps...")
+                await self._update_database_maps(lock_acquired)
+                self._initial_db_update_done = True
+                self.logger().info("Database update completed successfully")
+            except Exception as e:
+                self.logger().error(f"Error during database update: {str(e)}")
+                raise
+
+    async def _update_pool_information(self, lock_acquired: bool):
         """
         Update dynamic pool statistics (APR, TVL, volume, token prices) by querying the gateway.
         """
-        self.logger().info("Updating pool information...")
-        async with self._db_lock:
+        self.logger().info("Starting pool information update...")
+
+        if not lock_acquired:
+            self.logger().info("Lock not acquired for pool update, skipping this cycle")
+            return
+
+        try:
             for chain, chain_conf in database["connections"].items():
                 for network, net_conf in chain_conf.items():
                     for connector, hydration in net_conf.items():
@@ -545,20 +656,29 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                                         pool["type"] = pool_info.get("type")
                             except Exception as e:
                                 self.logger().error(f"Failed to update pool {pool_addr}: {str(e)}")
+        except Exception as e:
+            self.logger().error(f"Error in pool information update: {str(e)}")
+            raise
+
         self.logger().info("Pool information update completed.")
 
-    async def _update_wallet_balances(self):
+    async def _update_wallet_balances(self, lock_acquired: bool):
         """
         Update wallet dynamic data: balances and pool positions by querying the gateway.
         """
-        self.logger().info("Updating wallet balances...")
-        async with self._db_lock:
+        self.logger().info("Starting wallet balances update...")
+
+        if not lock_acquired:
+            self.logger().info("Lock not acquired for wallet update, skipping this cycle")
+            return
+
+        try:
             for chain, chain_conf in database["connections"].items():
                 for network, net_conf in chain_conf.items():
                     for connector, hydration in net_conf.items():
                         for wallet_addr, wallet in hydration["wallets"].items():
                             try:
-                                wallet_info = await self._gateway_get_wallet_info(chain, network, wallet_addr)
+                                wallet_info = await self._gateway_get_balances(chain, network, wallet_addr)
                                 if wallet_info and "tokens" in wallet_info:
                                     for token_sym, bal_data in wallet_info["tokens"].items():
                                         wallet["tokens"][token_sym] = {
@@ -578,34 +698,51 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                                     wallet["pools"] = wallet_info["pools"]
                             except Exception as e:
                                 self.logger().error(f"Failed to update wallet {wallet_addr}: {str(e)}")
+        except Exception as e:
+            self.logger().error(f"Error in wallet balances update: {str(e)}")
+            raise
+
         self.logger().info("Wallet balances update completed.")
 
-    async def _update_token_information(self):
+    async def _update_token_information(self, lock_acquired: bool):
         """
         Update token static information (price, decimals, name) by querying the gateway.
         """
-        self.logger().info("Updating token information...")
-        async with self._db_lock:
-            for chain, chain_conf in database["connections"].items():
-                for network, net_conf in chain_conf.items():
-                    for connector, hydration in net_conf.items():
+        self.logger().info("Starting token information update...")
+
+        if not lock_acquired:
+            self.logger().info("Lock not acquired for token update, skipping this cycle")
+            return
+
+        try:
+            for chain_name, chain in database["connections"].items():
+                for network_name, network in chain.items():
+                    for connector_name, connector in network.items():
                         try:
-                            token_info = await self._gateway_get_tokens(
-                                chain, network, self._configuration.get("tokens", [])
-                            )
-                            if token_info:
-                                for token_sym, info in token_info.items():
-                                    if token_sym in hydration["tokens"]:
-                                        hydration["tokens"][token_sym].update(
-                                            {
-                                                "address": info.get("address"),
-                                                "name": info.get("name"),
-                                                "decimals": info.get("decimals"),
-                                                "price": info.get("price"),
-                                            }
-                                        )
+                            tokens = (
+                                await self._gateway_get_tokens(
+                                    chain_name, network_name, self._configuration.get("tokens", [])
+                                )
+                            ).get("tokens")
+
+                            for token in tokens:
+                                if token.get("symbol") in connector["tokens"]:
+                                    connector["tokens"][token.get("symbol")].update(
+                                        {
+                                            "address": token.get("address"),
+                                            "name": token.get("name"),
+                                            "decimals": token.get("decimals"),
+                                            "price": token.get("price"),
+                                        }
+                                    )
                         except Exception as e:
-                            self.logger().error(f"Failed to update tokens for {chain}/{network}/{connector}: {str(e)}")
+                            self.logger().error(
+                                f"Failed to update tokens for {chain_name}/{network_name}/{connector_name}: {str(e)}"
+                            )
+        except Exception as e:
+            self.logger().error(f"Error in token information update: {str(e)}")
+            raise
+
         self.logger().info("Token information update completed.")
 
     # --------------------------------------------------------------------------
@@ -648,6 +785,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         promising_pairs.sort(key=lambda x: (x["price_variance"], x["pools_count"], x["total_volume"]), reverse=True)
         return promising_pairs[:5]
 
+    # noinspection PyMethodMayBeStatic
     def _find_pools_with_token_pair(self, token1: str, token2: str) -> List[Dict[str, Any]]:
         """
         Search the database for pools that contain both tokens.
@@ -668,6 +806,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                             result.append(pool)
         return result
 
+    # noinspection PyMethodMayBeStatic
     def _get_cached_token_price_in_pool(
         self, base_token: str, quote_token: str, pool: Dict[str, Any]
     ) -> Optional[Decimal]:
@@ -1051,6 +1190,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 for network_data in chain_data.values():
                     for connector_data in network_data.values():
                         for wallet in connector_data.get("wallets", {}).values():
+                            # noinspection PyBroadException
                             try:
                                 bal = wallet.get("tokens", {}).get(token, {}).get("balances", {}).get("free", 0)
                                 total += Decimal(str(bal))
@@ -1205,13 +1345,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     async def _gateway_get_pool_info(self, connector: str, network: str, pool_address: str):
         """Retrieve pool details from the gateway."""
         return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
-
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_wallet_info(self, chain: str, network: str, wallet_address: str):
-        """Retrieve wallet details from the gateway."""
-        return await self._gateway_http_client.get_wallets_info(chain, network, wallet_address)
 
     @run_with_retry_and_timeout(
         retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
