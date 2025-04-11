@@ -883,34 +883,34 @@ class GatewayHttpClient:
             fail_silently=fail_silently,
         )
 
-    def __getattr__(self, name: str) -> Any:
-        """
-        Magic method to dynamically handle method calls based on naming convention.
-        Format: {http_method}_{route_path} where underscores in route_path become slashes
-        Example: get_network_status converts to GET /network/status
-
-        :param name: The method name being called
-        :return: An async function that makes the appropriate API request
-        """
-
-        async def dynamic_api_request(**kwargs) -> Dict[str, Any]:
-            # Split the method name to extract HTTP method and route path
-            parts = name.split("_")
-            if not parts:
-                raise ValueError(f"Invalid method name: {name}")
-
-            # Extract the HTTP method (first part)
-            http_method = parts[0].lower()
-            if http_method not in ["get", "post", "put", "delete"]:
-                raise ValueError(f"Unsupported HTTP method: {http_method}")
-
-            # Convert remaining parts to route path with slashes
-            route_path = "/".join(parts[1:])
-
-            # Extract fail_silently if provided, default to False
-            fail_silently = kwargs.pop("fail_silently", False)
-
-            # Make the API request
-            return await self.api_request(http_method, route_path, kwargs, fail_silently=fail_silently)
-
-        return dynamic_api_request
+    # def __getattr__(self, name: str) -> Any:
+    #     """
+    #     Magic method to dynamically handle method calls based on naming convention.
+    #     Format: {http_method}_{route_path} where underscores in route_path become slashes
+    #     Example: get_network_status converts to GET /network/status
+    #
+    #     :param name: The method name being called
+    #     :return: An async function that makes the appropriate API request
+    #     """
+    #
+    #     async def dynamic_api_request(**kwargs) -> Dict[str, Any]:
+    #         # Split the method name to extract HTTP method and route path
+    #         parts = name.split("_")
+    #         if not parts:
+    #             raise ValueError(f"Invalid method name: {name}")
+    #
+    #         # Extract the HTTP method (first part)
+    #         http_method = parts[0].lower()
+    #         if http_method not in ["get", "post", "put", "delete"]:
+    #             raise ValueError(f"Unsupported HTTP method: {http_method}")
+    #
+    #         # Convert remaining parts to route path with slashes
+    #         route_path = "/".join(parts[1:])
+    #
+    #         # Extract fail_silently if provided, default to False
+    #         fail_silently = kwargs.pop("fail_silently", False)
+    #
+    #         # Make the API request
+    #         return await self.api_request(http_method, route_path, kwargs, fail_silently=fail_silently)
+    #
+    #     return dynamic_api_request
