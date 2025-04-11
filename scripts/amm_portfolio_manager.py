@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import threading
 import time
 from decimal import Decimal
 from enum import Enum
@@ -70,6 +69,7 @@ configuration: Dict[str, Any] = {
             "token": "300",  # Update token data every 300 seconds
             "pool": "120",  # Update pool data every 120 seconds
         },
+        "use_async_data_updates": True,  # Flag to control async data updates
     },
     "connections": {
         "polkadot": {
@@ -181,6 +181,7 @@ class GlobalConfig(BaseClientModel):
     transaction_confirmation_delay: int = Field(default=2)
     transaction_polling_interval: int = Field(default=2)
     data_update_intervals: DataUpdateIntervals = Field(default_factory=DataUpdateIntervals)
+    use_async_data_updates: bool = Field(default=True)  # Flag to control async data updates
 
 
 class AMMRobustPositionManagerConfiguration(BaseClientModel):
@@ -215,7 +216,6 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     Key features:
     - Multi-chain and multi-pool support
     - Efficient data caching to minimize API calls
-    - Separate threads for data collection and strategy execution
     - Configurable parameters for risk management
     - Advanced opportunity validation with slippage simulation
     """
@@ -234,13 +234,12 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     _transaction_confirmation_delay: Decimal = DECIMAL_ZERO
     _maximum_transaction_confirmation_timeout: int = 60
     _balance_cache: Dict[str, Dict[str, Any]] = {}
-    _data_update_thread = None
-    _stop_threads = False
+    _data_update_task = None
     _data_update_intervals = {"wallet": 60, "token": 300, "pool": 120}
     _last_wallet_update_time = 0
     _last_token_update_time = 0
     _last_pool_update_time = 0
-    _thread_lock = threading.Lock()
+    _use_async_data_updates: bool = True
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
         """
@@ -284,6 +283,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self._transaction_polling_interval = int(
             self._configuration["globals"].get("transaction_polling_interval", DECIMAL_ZERO)
         )
+        self._use_async_data_updates = bool(self._configuration["globals"].get("use_async_data_updates", True))
 
         # Initialize data update intervals
         data_update_intervals = self._configuration["globals"].get("data_update_intervals", {})
@@ -303,44 +303,40 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         self._log_initialization()
 
-        # Start data update thread
-        self._start_data_update_thread()
+        # Start data update task if async updates are enabled
+        if self._use_async_data_updates:
+            self._start_data_update_task()
 
     def _log_initialization(self):
         """Log the initialization of the strategy"""
         self.logger().info(f"Starting {self.__class__.__name__} strategy")
+        self.logger().info(f"Using async data updates: {self._use_async_data_updates}")
 
-    def _start_data_update_thread(self):
-        """Start a separate thread for data collection and updates"""
-        self._stop_threads = False
-        self._data_update_thread = threading.Thread(target=self._run_data_update_loop)
-        self._data_update_thread.daemon = True
-        self._data_update_thread.start()
-        self.logger().info("Data update thread started")
+    def _start_data_update_task(self):
+        """Start an async task for data collection and updates"""
+        self._data_update_task = safe_ensure_future(self._run_data_update_loop())
+        self.logger().info("Data update task started")
 
-    def _run_data_update_loop(self):
-        """Run the data update loop in a separate thread"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
+    async def _run_data_update_loop(self):
+        """Run the data update loop in an async task"""
         try:
-            while not self._stop_threads:
+            while True:
                 # Check gateway status first
                 if not self._gateway_is_ready:
-                    loop.run_until_complete(self._check_gateway_status())
+                    await self._check_gateway_status()
                     if not self._gateway_is_ready:
-                        time.sleep(5)  # Wait before retrying
+                        await asyncio.sleep(5)  # Wait before retrying
                         continue
 
                 # Update database with latest information
-                loop.run_until_complete(self._update_database())
+                await self._update_database()
 
                 # Sleep for a short interval before checking again
-                time.sleep(1)
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.logger().info("Data update task cancelled")
         except Exception as e:
-            self.logger().error(f"Error in data update thread: {str(e)}")
-        finally:
-            loop.close()
+            self.logger().error(f"Error in data update task: {str(e)}")
 
     def on_tick(self):
         """
@@ -351,7 +347,11 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     async def _async_on_tick(self):
         """Main strategy execution logic that runs on each tick"""
-        # We don't need to check gateway status here as it's done in the data update thread
+        # If not using async data updates, update data here
+        if not self._use_async_data_updates:
+            await self._update_database()
+
+        # We don't need to check gateway status here as it's done in the data update task
         if not self._gateway_is_ready:
             return
 
@@ -365,9 +365,8 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
     def stop(self):
         """Stop the strategy and clean up resources"""
-        self._stop_threads = True
-        if self._data_update_thread and self._data_update_thread.is_alive():
-            self._data_update_thread.join(timeout=10)
+        if self._data_update_task and not self._data_update_task.done():
+            self._data_update_task.cancel()
         super().stop()
 
     async def _run_arbitrage_strategy(self):
