@@ -197,14 +197,26 @@ def async_logged_method(method, logger: Logger):
     return wrapper
 
 
-def logged_class(cls=None, logger: Logger = None):
+def logged_class(
+    cls=None, logger: Logger = None, allowed_methods: list[str] = None, disallowed_methods: list[str] = None
+):
     def decorator(cls):
         for attr, method in cls.__dict__.items():
-            if callable(method):
-                if asyncio.iscoroutinefunction(method):
-                    setattr(cls, attr, async_logged_method(method, logger))
-                else:
-                    setattr(cls, attr, sync_logged_method(method, logger))
+            if not callable(method):
+                continue
+
+            # Skip if method is in disallowed list
+            if disallowed_methods and attr in disallowed_methods:
+                continue
+
+            # Skip if allowed methods are specified and method is not in allowed list
+            if allowed_methods and attr not in allowed_methods:
+                continue
+
+            if asyncio.iscoroutinefunction(method):
+                setattr(cls, attr, async_logged_method(method, logger))
+            else:
+                setattr(cls, attr, sync_logged_method(method, logger))
         return cls
 
     # If called with @logged_class
