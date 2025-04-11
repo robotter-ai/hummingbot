@@ -1,14 +1,14 @@
 import asyncio
 import logging
 import os
+import threading
 import time
 from decimal import Decimal
 from enum import Enum
 from itertools import permutations
 from typing import Any, Dict, List, Optional, Union
 
-# noinspection PyUnresolvedReferences
-from pydantic.v1 import Field
+from pydantic.v1 import Field, validator
 
 from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.client.settings import GatewayConnectionSetting
@@ -65,6 +65,11 @@ configuration: Dict[str, Any] = {
         "time_delay_between_arbitrages": "1",  # Time delay between arbitrage trades
         "transaction_confirmation_delay": "2",  # Time delay between transaction confirmation
         "transaction_polling_interval": "2",  # Time delay between transaction polling
+        "data_update_intervals": {
+            "wallet": "60",  # Update wallet data every 60 seconds
+            "token": "300",  # Update token data every 300 seconds
+            "pool": "120",  # Update pool data every 120 seconds
+        },
     },
     "connections": {
         "polkadot": {
@@ -108,95 +113,6 @@ configuration: Dict[str, Any] = {
     ],
 }
 
-# Example structure)
-# database: Dict[str, Any] = {
-#     "connections": {
-#         "polkadot": {
-#             "mainnet": {
-#                 "hydration": {
-#                     "wallets": {
-#                         "<wallet_address>": {
-#                             "internal_id": "<chain>/<network>/<connector>/<wallet_address>",
-#                             "chain": "<chain>",
-#                             "network": "<network>",
-#                             "connector": "<connector>",
-#                             "tokens": {
-#                                 "<token_symbol>": {
-#                                     "balances": {
-#                                         "free": "<free_token_balance>",
-#                                         "locked": {
-#                                             "total": "<locked_token_balance>",
-#                                             "liquidity": {
-#                                                 "total": "<liquidity_token_balance>",
-#                                                 "pools": {
-#                                                     "<pool_address>": "<pool_token_balance>"
-#                                                 }
-#                                             }
-#                                         },
-#                                         "total": "<token_balance>"
-#                                     }
-#                                 }
-#                             },
-#                             "pools": {
-#                                 "<pool_address>": {
-#                                     "shares": "<pool_shares>",
-#                                     "tokens": {
-#                                         "<token_symbol>": "<pool_token_balance>",
-#                                     },
-#                                     "impermanent_loss": "<pool_impermanent_loss>",
-#                                 }
-#                             }
-#                         }
-#                     },
-#                     "tokens": {
-#                         "<token_symbol>": {
-#                             "internal_id": "<chain>/<network>/<connector>/<token_address>",
-#                             "address": "<token_address>",
-#                             "chain": "<chain>",
-#                             "network": "<network>",
-#                             "connector": "<connector>",
-#                             "symbol": "<token_symbol>",
-#                             "name": "<token_name>",
-#                             "decimals": "<token_decimals>",
-#                             "price": "<token_price>"
-#                         }
-#                     },
-#                     "pools": {
-#                         "<pool_address>": {
-#                             "internal_id": "<chain>/<network>/<connector>/<pool_address>",
-#                             "address": "<pool_address>",
-#                             "chain": "<chain>",
-#                             "network": "<network>",
-#                             "connector": "<connector>",
-#                             "type": "<pool_type>",
-#                             "tokens_list": ["token_1_symbol", "token_2_symbol"],
-#                             "tokens": {
-#                                 "<token_1_symbol>": {
-#                                     "price": "<token_1_price>",
-#                                 },
-#                                 "<token_2_symbol>": {
-#                                     "price": "<token_2_price>",
-#                                 },
-#                             },
-#                             "annual_percentage_rate": "<pool_annual_percentage_rate>",
-#                             "total_value_locked": "<pool_total_value_locked>",
-#                             "volume": {
-#                                 "24h": "<pool_24h_volume>",
-#                             }
-#                         }
-#                     }
-#                 },
-#             }
-#         }
-#     },
-#     "arbitrage_opportunities": [],
-#     "execution_history": [],
-#     "maps": {
-#         "pools_by_tokens": {},  # Format: "token1/token2" -> [pool_internal_id1, pool_internal_id2, ...]
-#         "wallets_by_pool": {},  # Format: pool_internal_id -> [wallet_internal_id1, wallet_internal_id2, ...]
-#         "pools_by_wallet": {},  # Format: wallet_internal_id -> [pool_internal_id1, pool_internal_id2, ...]
-#     }
-# }
 database: Dict[str, Any] = {
     "connections": {},
     "arbitrage_opportunities": [],
@@ -209,16 +125,101 @@ database: Dict[str, Any] = {
 }
 
 
+class WalletConfig(BaseClientModel):
+    """Configuration for a wallet"""
+
+    address: str = Field(...)
+
+
+class PoolConfig(BaseClientModel):
+    """Configuration for a pool"""
+
+    address: str = Field(...)
+
+
+class ConnectorConfig(BaseClientModel):
+    """Configuration for a connector with wallets and pools"""
+
+    wallets: List[str] = Field(default_factory=list)
+    pools: List[str] = Field(default_factory=list)
+
+
+class NetworkConfig(BaseClientModel):
+    """Configuration for a network with connectors"""
+
+    connectors: Dict[str, ConnectorConfig] = Field(default_factory=dict)
+
+
+class ChainConfig(BaseClientModel):
+    """Configuration for a chain with networks"""
+
+    networks: Dict[str, NetworkConfig] = Field(default_factory=dict)
+
+
+class DataUpdateIntervals(BaseClientModel):
+    """Configuration for data update intervals"""
+
+    wallet: int = Field(default=60)
+    token: int = Field(default=300)
+    pool: int = Field(default=120)
+
+    @validator("wallet", "token", "pool")
+    def validate_positive_interval(cls, v):
+        if v <= 0:
+            raise ValueError("Update interval must be positive")
+        return v
+
+
+class GlobalConfig(BaseClientModel):
+    """Global configuration parameters"""
+
+    maximum_slippage_percentage: Decimal = Field(default=Decimal("0.5"))
+    minimum_profitability_percentage: Decimal = Field(default=Decimal("-1"))
+    arbitrage_check_interval_seconds: int = Field(default=60)
+    minimum_trade_amount: Decimal = Field(default=Decimal("0.1"))
+    time_delay_between_arbitrages: int = Field(default=1)
+    transaction_confirmation_delay: int = Field(default=2)
+    transaction_polling_interval: int = Field(default=2)
+    data_update_intervals: DataUpdateIntervals = Field(default_factory=DataUpdateIntervals)
+
+
 class AMMRobustPositionManagerConfiguration(BaseClientModel):
+    """
+    Configuration for the AMM Robust Position Manager strategy.
+
+    This model reflects the structure of the global configuration object that controls
+    various aspects of the strategy's behavior including slippage tolerances,
+    update intervals, and connection details.
+    """
+
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
+    globals: GlobalConfig = Field(default_factory=GlobalConfig)
+    chains: Dict[str, ChainConfig] = Field(default_factory=dict)
+    tokens: List[str] = Field(default_factory=list)
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
-logger = Logger(path="logs/logs_amm_portfolio_manager.log", level=logging.DEBUG)
+logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
 
 
-# noinspection PyShadowingNames
 @logged_class(logger=logger)
 class AMMRobustPositionManager(ScriptStrategyBase):
+    """
+    AMM Robust Position Manager - A strategy for managing and optimizing positions across AMM pools.
+
+    This strategy monitors multiple AMM pools across different chains and networks, identifies
+    arbitrage opportunities, and executes trades to capitalize on price discrepancies.
+
+    Key features:
+    - Multi-chain and multi-pool support
+    - Efficient data caching to minimize API calls
+    - Separate threads for data collection and strategy execution
+    - Configurable parameters for risk management
+    - Advanced opportunity validation with slippage simulation
+    """
+
     markets: Dict[str, Any] = {}
     _configuration = None
     _gateway_is_ready = False
@@ -233,14 +234,31 @@ class AMMRobustPositionManager(ScriptStrategyBase):
     _transaction_confirmation_delay: Decimal = DECIMAL_ZERO
     _maximum_transaction_confirmation_timeout: int = 60
     _balance_cache: Dict[str, Dict[str, Any]] = {}
+    _data_update_thread = None
+    _stop_threads = False
+    _data_update_intervals = {"wallet": 60, "token": 300, "pool": 120}
+    _last_wallet_update_time = 0
+    _last_token_update_time = 0
+    _last_pool_update_time = 0
+    _thread_lock = threading.Lock()
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
-        super().__init__(connectors)
+        """
+        Initialize the AMM Robust Position Manager strategy.
 
+        Args:
+            connectors: Dictionary of available connectors
+        """
+        super().__init__(connectors)
         self._initialize()
 
     def _initialize(self, _strategy_configuration: AMMRobustPositionManagerConfiguration = None):
-        """Initialize the strategy with configuration parameters."""
+        """
+        Initialize the strategy with configuration parameters.
+
+        Args:
+            _strategy_configuration: Optional configuration to use instead of the default
+        """
         self._gateway_http_client = GatewayHttpClient.get_instance()
 
         # Set configuration
@@ -263,10 +281,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         self._transaction_confirmation_delay = Decimal(
             self._configuration["globals"].get("transaction_confirmation_delay", DECIMAL_ZERO)
         )
-
         self._transaction_polling_interval = int(
             self._configuration["globals"].get("transaction_polling_interval", DECIMAL_ZERO)
         )
+
+        # Initialize data update intervals
+        data_update_intervals = self._configuration["globals"].get("data_update_intervals", {})
+        if data_update_intervals:
+            self._data_update_intervals = {
+                "wallet": int(data_update_intervals.get("wallet", 60)),
+                "token": int(data_update_intervals.get("token", 300)),
+                "pool": int(data_update_intervals.get("pool", 120)),
+            }
 
         # Set transaction confirmation timeout to 5x the configured delay as a safety measure
         # If the configured delay is 0, use the default timeout (60 seconds)
@@ -277,22 +303,57 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         self._log_initialization()
 
+        # Start data update thread
+        self._start_data_update_thread()
+
     def _log_initialization(self):
+        """Log the initialization of the strategy"""
         self.logger().info(f"Starting {self.__class__.__name__} strategy")
 
+    def _start_data_update_thread(self):
+        """Start a separate thread for data collection and updates"""
+        self._stop_threads = False
+        self._data_update_thread = threading.Thread(target=self._run_data_update_loop)
+        self._data_update_thread.daemon = True
+        self._data_update_thread.start()
+        self.logger().info("Data update thread started")
+
+    def _run_data_update_loop(self):
+        """Run the data update loop in a separate thread"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            while not self._stop_threads:
+                # Check gateway status first
+                if not self._gateway_is_ready:
+                    loop.run_until_complete(self._check_gateway_status())
+                    if not self._gateway_is_ready:
+                        time.sleep(5)  # Wait before retrying
+                        continue
+
+                # Update database with latest information
+                loop.run_until_complete(self._update_database())
+
+                # Sleep for a short interval before checking again
+                time.sleep(1)
+        except Exception as e:
+            self.logger().error(f"Error in data update thread: {str(e)}")
+        finally:
+            loop.close()
+
     def on_tick(self):
+        """
+        Strategy execution that runs on each tick.
+        This method triggers the strategy logic.
+        """
         safe_ensure_future(self._async_on_tick())
 
     async def _async_on_tick(self):
         """Main strategy execution logic that runs on each tick"""
-        # First check gateway status
+        # We don't need to check gateway status here as it's done in the data update thread
         if not self._gateway_is_ready:
-            await self._check_gateway_status()
-            if not self._gateway_is_ready:
-                return
-
-        # Update database with latest information
-        await self._update_database()
+            return
 
         # Check if it's time to run arbitrage check
         current_time = Decimal(time.time())
@@ -302,77 +363,199 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             self._last_arbitrage_check_time = current_time
             await self._run_arbitrage_strategy()
 
+    def stop(self):
+        """Stop the strategy and clean up resources"""
+        self._stop_threads = True
+        if self._data_update_thread and self._data_update_thread.is_alive():
+            self._data_update_thread.join(timeout=10)
+        super().stop()
+
     async def _run_arbitrage_strategy(self):
-        """Execute the arbitrage strategy"""
+        """
+        Execute the arbitrage strategy.
+        This method finds and validates arbitrage opportunities across pools.
+        """
         self.logger().info("Checking for arbitrage opportunities...")
 
-        opportunities = await self._find_arbitrage_opportunities()
+        # Find the most promising token pairs first for optimization
+        promising_pairs = self._find_most_promising_token_pairs()
 
+        if not promising_pairs:
+            self.logger().info("No promising token pairs found")
+            return
+
+        self.logger().info(f"Found {len(promising_pairs)} promising token pairs")
+
+        # Find arbitrage opportunities using promising pairs
+        opportunities = await self._find_arbitrage_opportunities(promising_pairs)
+
+        if not opportunities:
+            self.logger().info("No arbitrage opportunities found")
+            return
+
+        self.logger().info(f"Found {len(opportunities)} potential arbitrage opportunities")
+
+        # Validate and execute opportunities
         for opportunity in opportunities:
             if await self._validate_opportunity(opportunity):
                 await self._execute_arbitrage(opportunity)
+                # Wait between arbitrages
+                if self._time_delay_between_arbitrages > 0:
+                    await asyncio.sleep(float(self._time_delay_between_arbitrages))
 
-    async def _find_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
-        """Find arbitrage opportunities across pools and tokens"""
-        opportunities = []
+    def _find_most_promising_token_pairs(self):
+        """
+        Identify token pairs with highest arbitrage potential.
 
-        # Get all available tokens and pools from the database
+        Returns:
+            List[Dict]: List of token pairs sorted by potential
+        """
         tokens = self._configuration["tokens"]
+        promising_pairs = []
 
-        # Minimum profit percentage required for arbitrage
+        for i in range(len(tokens)):
+            for j in range(i + 1, len(tokens)):
+                token1, token2 = tokens[i], tokens[j]
+                pools = self._find_pools_with_token_pair(token1, token2)
+
+                if len(pools) >= 2:  # Need at least 2 pools for arbitrage
+                    # Check liquidity and volume to determine potential
+                    total_volume = sum(Decimal(str(p.get("volume", {}).get("24h", 0) or 0)) for p in pools)
+                    total_liquidity = sum(Decimal(str(p.get("total_value_locked", 0) or 0)) for p in pools)
+
+                    # Calculate price variance between pools
+                    prices = []
+                    for pool in pools:
+                        price = self._get_cached_token_price_in_pool(token1, token2, pool)
+                        if price is not None:
+                            prices.append(price)
+
+                    price_variance = 0
+                    if len(prices) >= 2:
+                        min_price = min(prices)
+                        max_price = max(prices)
+                        if min_price > 0:
+                            price_variance = (max_price - min_price) / min_price * 100
+
+                    promising_pairs.append(
+                        {
+                            "token1": token1,
+                            "token2": token2,
+                            "pools_count": len(pools),
+                            "total_volume": total_volume,
+                            "total_liquidity": total_liquidity,
+                            "price_variance": price_variance,
+                        }
+                    )
+
+        # Sort by price variance, pool count, and volume
+        promising_pairs.sort(key=lambda x: (x["price_variance"], x["pools_count"], x["total_volume"]), reverse=True)
+        return promising_pairs[:5]  # Return top 5 most promising pairs
+
+    def _get_cached_token_price_in_pool(self, base_token, quote_token, pool):
+        """
+        Get token price from cached pool data.
+
+        Args:
+            base_token: Base token symbol
+            quote_token: Quote token symbol
+            pool: Pool data dictionary
+
+        Returns:
+            Decimal: Token price or None if not available
+        """
+        try:
+            if (
+                "tokens" in pool
+                and base_token in pool["tokens"]
+                and "prices" in pool["tokens"][base_token]
+                and quote_token in pool["tokens"][base_token]["prices"]
+            ):
+                return pool["tokens"][base_token]["prices"][quote_token]
+        except (KeyError, TypeError):
+            pass
+        return None
+
+    async def _find_arbitrage_opportunities(self, promising_pairs=None) -> List[Dict[str, Any]]:
+        """
+        Find arbitrage opportunities across pools and tokens.
+
+        Args:
+            promising_pairs: Optional list of promising token pairs to check
+
+        Returns:
+            List[Dict]: List of arbitrage opportunities
+        """
+        opportunities = []
         minimum_profitability_percentage = self._minimum_profitability_percentage
 
-        # Iterate through all token pairs and pool combinations
-        for token_idx in range(len(tokens)):
-            base_token = tokens[token_idx]
-            for quote_idx in range(token_idx + 1, len(tokens)):
-                quote_token = tokens[quote_idx]
-                # Find pools that contain both tokens
-                relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
+        # Use provided promising pairs or get all token pairs
+        if promising_pairs:
+            token_pairs = [(pair["token1"], pair["token2"]) for pair in promising_pairs]
+        else:
+            tokens = self._configuration["tokens"]
+            token_pairs = [(tokens[i], tokens[j]) for i in range(len(tokens)) for j in range(i + 1, len(tokens))]
 
-                # Check for arbitrage opportunities between different pools
-                for pool_idx in range(len(relevant_pools)):
-                    pool_1 = relevant_pools[pool_idx]
-                    for pool_2_idx in range(pool_idx + 1, len(relevant_pools)):
-                        pool_2 = relevant_pools[pool_2_idx]
-                        # Calculate price difference between the two pools
-                        price_difference_percentage = await self._calculate_price_difference_percentage(
-                            base_token, quote_token, pool_1, pool_2
+        # Check each token pair for arbitrage opportunities
+        for base_token, quote_token in token_pairs:
+            # Find pools containing both tokens
+            relevant_pools = self._find_pools_with_token_pair(base_token, quote_token)
+
+            if len(relevant_pools) < 2:
+                continue
+
+            # Check for arbitrage between different pools
+            for pool_idx in range(len(relevant_pools)):
+                pool_1 = relevant_pools[pool_idx]
+                for pool_2_idx in range(pool_idx + 1, len(relevant_pools)):
+                    pool_2 = relevant_pools[pool_2_idx]
+
+                    # Calculate price difference
+                    price_difference_percentage = await self._calculate_price_difference_percentage(
+                        base_token, quote_token, pool_1, pool_2
+                    )
+
+                    if price_difference_percentage is None:
+                        continue
+
+                    # Check if difference exceeds profitability threshold
+                    if abs(price_difference_percentage) > minimum_profitability_percentage:
+                        # Determine which pool to buy from and which to sell to
+                        buy_pool, sell_pool = (pool_1, pool_2) if price_difference_percentage > 0 else (pool_2, pool_1)
+
+                        opportunity = {
+                            "base_token": base_token,
+                            "quote_token": quote_token,
+                            "buy_pool": buy_pool,
+                            "sell_pool": sell_pool,
+                            "price_difference_percentage": price_difference_percentage,
+                            "timestamp": time.time(),
+                        }
+
+                        opportunities.append(opportunity)
+
+                        self.logger().info(
+                            f"Found arbitrage opportunity: {base_token}/{quote_token} with "
+                            f"{price_difference_percentage:.2f}% difference between "
+                            f"{buy_pool['address']} and {sell_pool['address']}"
                         )
 
-                        if price_difference_percentage is None:
-                            continue
-
-                        # If price difference exceeds minimum profit threshold
-                        if abs(price_difference_percentage) > minimum_profitability_percentage:
-                            # Determine which pool to buy from and which to sell to
-                            buy_pool, sell_pool = (
-                                (pool_1, pool_2) if price_difference_percentage > 0 else (pool_2, pool_1)
-                            )
-
-                            opportunity = {
-                                "base_token": base_token,
-                                "quote_token": quote_token,
-                                "buy_pool": buy_pool,
-                                "sell_pool": sell_pool,
-                                "price_difference_percentage": price_difference_percentage,
-                                "timestamp": time.time(),
-                            }
-
-                            opportunities.append(opportunity)
-
-                            self.logger().info(
-                                f"Found arbitrage opportunity: {base_token}/{quote_token} with {price_difference_percentage:.2f}% difference "
-                                f"between {buy_pool['address']} and {sell_pool['address']}"
-                            )
-
-        # Update the database with found opportunities
-        database["arbitrage_opportunities"] = opportunities
+        # Update the database with opportunities
+        with self._thread_lock:
+            database["arbitrage_opportunities"] = opportunities
 
         return opportunities
 
     async def _validate_opportunity(self, opportunity: Dict[str, Any]) -> bool:
-        """Validate an arbitrage opportunity by checking slippage and available balances"""
+        """
+        Validate an arbitrage opportunity by checking slippage and available balances.
+
+        Args:
+            opportunity: Dictionary containing arbitrage opportunity details
+
+        Returns:
+            bool: True if opportunity is valid, False otherwise
+        """
         base_token = opportunity["base_token"]
         quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
@@ -381,79 +564,141 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         # Get token balances
         base_token_balance = await self._get_total_token_balance_from_all_wallets(base_token)
 
-        # Check if we have enough balance for the trade
+        # Check if we have enough balance
         minimum_trade_amount = self._minimum_trade_amount
         if base_token_balance < minimum_trade_amount:
             self.logger().info(f"Insufficient balance of {base_token} for arbitrage: {base_token_balance}")
             return False
 
-        # Calculate optimal trade amount (considering slippage)
+        # Calculate optimal trade amount
         trade_amount = await self._calculate_optimal_trade_amount(opportunity, base_token_balance)
 
         if not trade_amount or trade_amount <= DECIMAL_ZERO:
-            self.logger().info("Optimal trade amount calculation resulted in an invalid or non-positive amount")
+            self.logger().info("Optimal trade amount calculation resulted in zero or negative amount")
             return False
 
         # Check slippage for both trades
         maximum_slippage_percentage = self._maximum_slippage_percentage
 
-        # Get quote for buying quote_token with base_token in buy_pool
-        buy_quote = await self._get_quote_swap(
-            buy_pool,
-            base_token,
-            quote_token,
-            trade_amount,
-            TradeType.SELL,  # Selling base_token to buy quote_token
-            maximum_slippage_percentage,
-        )
-
-        if not buy_quote or "estimatedAmountOut" not in buy_quote:
-            self.logger().info(f"Failed to get buy quote for {base_token}/{quote_token} in pool {buy_pool['address']}")
-            return False
-
-        expected_quote_token = Decimal(str(buy_quote["estimatedAmountOut"]))
-
-        # Get quote for selling quote_token for base_token in sell_pool
-        sell_quote = await self._get_quote_swap(
-            sell_pool,
-            quote_token,
-            base_token,
-            expected_quote_token,
-            TradeType.SELL,  # Selling quote_token to get back base_token
-            maximum_slippage_percentage,
-        )
-
-        if not sell_quote or "estimatedAmountOut" not in sell_quote:
-            self.logger().info(
-                f"Failed to get sell quote for {quote_token}/{base_token} in pool {sell_pool['address']}"
+        try:
+            # Get quote for buying quote_token with base_token in buy_pool
+            buy_quote = await self._get_quote_swap(
+                buy_pool,
+                base_token,
+                quote_token,
+                trade_amount,
+                TradeType.SELL,  # Selling base_token to buy quote_token
+                maximum_slippage_percentage,
             )
-            return False
 
-        expected_base_token_return = Decimal(str(sell_quote["estimatedAmountOut"]))
+            if not buy_quote or "estimatedAmountOut" not in buy_quote:
+                self.logger().info(
+                    f"Failed to get buy quote for {base_token}/{quote_token} in pool {buy_pool['address']}"
+                )
+                return False
 
-        # Calculate expected profit
-        expected_profit = expected_base_token_return - trade_amount
-        expected_profit_percentage = (expected_profit / trade_amount) * DECIMAL_ONE_HUNDRED
+            expected_quote_token = Decimal(str(buy_quote["estimatedAmountOut"]))
 
-        # Add profit details to the opportunity
-        opportunity["trade_amount"] = trade_amount
-        opportunity["expected_quote_token"] = expected_quote_token
-        opportunity["expected_base_token_return"] = expected_base_token_return
-        opportunity["expected_profit"] = expected_profit
-        opportunity["expected_profit_percentage"] = expected_profit_percentage
-
-        # Validate that the opportunity is still profitable after slippage
-        minimum_profitability_percentage = self._minimum_profitability_percentage
-        if expected_profit_percentage < minimum_profitability_percentage:
-            self.logger().info(
-                f"Arbitrage opportunity no longer profitable after slippage: {expected_profit_percentage:.2f}% < {minimum_profitability_percentage}%"
+            # Get quote for selling quote_token for base_token in sell_pool
+            sell_quote = await self._get_quote_swap(
+                sell_pool,
+                quote_token,
+                base_token,
+                expected_quote_token,
+                TradeType.SELL,  # Selling quote_token to get back base_token
+                maximum_slippage_percentage,
             )
+
+            if not sell_quote or "estimatedAmountOut" not in sell_quote:
+                self.logger().info(
+                    f"Failed to get sell quote for {quote_token}/{base_token} in pool {sell_pool['address']}"
+                )
+                return False
+
+            expected_base_token_return = Decimal(str(sell_quote["estimatedAmountOut"]))
+
+            # Calculate expected profit
+            expected_profit = expected_base_token_return - trade_amount
+            expected_profit_percentage = (expected_profit / trade_amount) * DECIMAL_ONE_HUNDRED
+
+            # Add profit details to the opportunity
+            opportunity["trade_amount"] = trade_amount
+            opportunity["expected_quote_token"] = expected_quote_token
+            opportunity["expected_base_token_return"] = expected_base_token_return
+            opportunity["expected_profit"] = expected_profit
+            opportunity["expected_profit_percentage"] = expected_profit_percentage
+
+            # Check if still profitable after slippage
+            minimum_profitability_percentage = self._minimum_profitability_percentage
+
+            if expected_profit_percentage < minimum_profitability_percentage:
+                self.logger().info(
+                    f"Arbitrage opportunity no longer profitable after slippage: "
+                    f"{expected_profit_percentage:.2f}% < {minimum_profitability_percentage}%"
+                )
+                return False
+
+            self.logger().info(
+                f"Validated arbitrage opportunity: {base_token}/{quote_token} with "
+                f"expected profit of {expected_profit_percentage:.2f}%"
+            )
+            return True
+
+        except Exception as e:
+            self.logger().error(f"Error validating opportunity: {str(e)}")
             return False
 
-        self.logger().info(
-            f"Validated arbitrage opportunity: {base_token}/{quote_token} with expected profit of {expected_profit_percentage:.2f}%"
-        )
-        return True
+    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: Decimal) -> Decimal:
+        """
+        Calculate the optimal amount to trade based on slippage considerations.
+
+        Args:
+            opportunity: Dictionary containing arbitrage opportunity details
+            max_available: Maximum available balance
+
+        Returns:
+            Decimal: Optimal trade amount
+        """
+        minimum_trade_amount = self._minimum_trade_amount
+
+        # Try different trade amounts to find the optimal one
+        test_amounts = [
+            minimum_trade_amount,
+            max_available * DECIMAL_TEN_PERCENT,
+            max_available * DECIMAL_TWENTY_FIVE_PERCENT,
+            max_available * DECIMAL_FIFTY_PERCENT,
+            max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
+            max_available,
+        ]
+
+        best_amount = DECIMAL_ZERO
+        best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
+
+        # Use a faster search approach
+        # First check min and max amounts to determine if scaling is worth it
+        min_profit = await self._simulate_arbitrage_profit(opportunity, minimum_trade_amount)
+        max_profit = await self._simulate_arbitrage_profit(opportunity, max_available)
+
+        # If profit decreases with size, use minimum amount
+        if min_profit >= max_profit:
+            return minimum_trade_amount
+
+        # If profit increases with size, try intermediate amounts
+        for amount in sorted(test_amounts):
+            if amount > max_available:
+                continue
+
+            # Skip amounts that are too close to previously tested ones
+            if best_amount > DECIMAL_ZERO and abs(amount - best_amount) / best_amount < DECIMAL_TEN_PERCENT:
+                continue
+
+            profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
+
+            if profit_percentage > best_profit_percentage:
+                best_profit_percentage = profit_percentage
+                best_amount = amount
+
+        return best_amount if best_amount > DECIMAL_ZERO else minimum_trade_amount
 
     async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
         """Execute an arbitrage trade between two pools using their respective wallet addresses"""
@@ -677,6 +922,118 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return overall_success
 
+    async def _get_quote_swap(
+        self,
+        pool: Dict[str, Any],
+        base_token: str,
+        quote_token: str,
+        amount: Decimal,
+        side: TradeType,
+        slippage_percentage: Decimal,
+    ):
+        """
+        Get a quote for swapping tokens in a pool.
+
+        Args:
+            pool: Dictionary containing pool configuration parameters
+            base_token: Symbol of the base token
+            quote_token: Symbol of the quote token
+            amount: Amount to swap as Decimal
+            side: Trade side (BUY or SELL)
+            slippage_percentage: Maximum acceptable slippage as a Decimal
+
+        Returns:
+            Dictionary containing swap quote information
+        """
+        network = pool.get("network")
+        connector = pool.get("connector")
+        pool_address = pool.get("address")
+
+        if not all([network, connector, pool_address]):
+            return None
+
+        try:
+            # Use a cache key based on all parameters
+            cache_key = f"quote_{network}_{connector}_{pool_address}_{base_token}_{quote_token}_{amount}_{side.name}_{slippage_percentage}"
+
+            # Check if we have this quote cached
+            if hasattr(self, "_quote_cache") and cache_key in self._quote_cache:
+                cached_data = self._quote_cache[cache_key]
+                # Only use cache if it's recent (last 10 seconds)
+                if time.time() - cached_data["timestamp"] < 10:
+                    return cached_data["data"]
+
+            # Get fresh quote
+            quote_result = await self._gateway_quote_swap(
+                network,
+                connector,
+                base_token,
+                quote_token,
+                amount,
+                side,
+                slippage_percentage,
+                pool_address,
+            )
+
+            # Cache the result
+            if not hasattr(self, "_quote_cache"):
+                self._quote_cache = {}
+
+            self._quote_cache[cache_key] = {"data": quote_result, "timestamp": time.time()}
+
+            return quote_result
+        except Exception as e:
+            self.logger().error(f"Error getting quote for swap: {str(e)}")
+            return None
+
+    async def _post_execute_swap(
+        self,
+        pool: Dict[str, Any],
+        wallet_address: str,
+        base_token: str,
+        quote_token: str,
+        amount: Decimal,
+        side: TradeType,
+        slippage_percentage: Decimal,
+    ):
+        """
+        Execute a token swap in the specified pool.
+
+        Args:
+            pool: Dictionary containing pool configuration parameters
+            wallet_address: Address of the wallet executing the swap
+            base_token: Symbol of the base token
+            quote_token: Symbol of the quote token
+            amount: Amount to swap
+            side: Trade side (BUY or SELL)
+            slippage_percentage: Maximum acceptable slippage
+
+        Returns:
+            Dictionary containing swap execution result
+        """
+        network = pool.get("network")
+        connector = pool.get("connector")
+        pool_address = pool.get("address")
+
+        if not all([network, connector, pool_address, wallet_address]):
+            return None
+
+        try:
+            return await self._gateway_execute_swap(
+                network,
+                connector,
+                wallet_address,
+                base_token,
+                quote_token,
+                side,
+                amount,
+                slippage_percentage,
+                pool_address,
+            )
+        except Exception as e:
+            self.logger().error(f"Error executing swap: {str(e)}")
+            return None
+
     async def _wait_for_transaction_confirmation(
         self, chain: str, network: str, tx_hash: str, max_timeout: int = None
     ) -> bool:
@@ -687,7 +1044,7 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             chain: Chain identifier
             network: Network identifier
             tx_hash: Transaction hash to poll
-            max_timeout: Maximum time to wait for confirmation in seconds (default: use class default)
+            max_timeout: Maximum time to wait for confirmation in seconds
 
         Returns:
             bool: True if transaction was confirmed, False otherwise
@@ -726,653 +1083,414 @@ class AMMRobustPositionManager(ScriptStrategyBase):
 
         return False
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_ping_gateway(self):
-        """Ping the gateway server to check if it's online"""
-        return await self._gateway_http_client.ping_gateway()
+    async def _calculate_price_difference_percentage(
+        self, base_token: str, quote_token: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
+    ) -> Optional[Decimal]:
+        """
+        Calculate price difference between two pools for a token pair.
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_pools(self, connector: str, network: str):
-        """Fetch all available pools for a connector"""
-        return await self._gateway_http_client.amm_list_pools(connector, network)
+        Args:
+            base_token: Base token symbol
+            quote_token: Quote token symbol
+            pool_1: First pool data
+            pool_2: Second pool data
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_pool_info(self, connector: str, network: str, pool_address: str):
-        """Get detailed information about a liquidity pool"""
-        return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
+        Returns:
+            Decimal: Price difference as percentage
+        """
+        # Try to get prices from cache first
+        price_1 = self._get_cached_token_price_in_pool(base_token, quote_token, pool_1)
+        price_2 = self._get_cached_token_price_in_pool(base_token, quote_token, pool_2)
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_quote_swap(
-        self,
-        network: str,
-        connector: str,
-        base_asset: str,
-        quote_asset: str,
-        amount: Decimal,
-        side: TradeType,
-        slippage_percentage: Decimal,
-        pool_address: str,
-    ):
-        """Get a quote for swapping tokens in a pool"""
-        return await self._gateway_http_client.amm_quote_swap(
-            network=network,
-            connector=connector,
-            base_asset=base_asset,
-            quote_asset=quote_asset,
-            amount=amount,
-            side=side,
-            slippage_percentage=slippage_percentage,
-            pool_address=pool_address,
-        )
+        # If not in cache, fetch from API
+        if price_1 is None:
+            price_1 = await self._get_token_price_in_pool(base_token, quote_token, pool_1)
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_quote_liquidity(
-        self,
-        connector: str,
-        network: str,
-        pool_address: str,
-        base_token_amount: Optional[Decimal] = None,
-        quote_token_amount: Optional[Decimal] = None,
-        slippage_percentage: Optional[Decimal] = None,
-    ):
-        """Get a quote for adding liquidity to a pool"""
-        return await self._gateway_http_client.amm_quote_liquidity(
-            connector=connector,
-            network=network,
-            pool_address=pool_address,
-            base_token_amount=base_token_amount,
-            quote_token_amount=quote_token_amount,
-            slippage_percentage=slippage_percentage,
-        )
+        if price_2 is None:
+            price_2 = await self._get_token_price_in_pool(base_token, quote_token, pool_2)
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_execute_swap(
-        self,
-        network: str,
-        connector: str,
-        wallet_address: str,
-        base_asset: str,
-        quote_asset: str,
-        side: TradeType,
-        amount: Decimal,
-        slippage_percentage: Decimal,
-        pool_address: str,
-    ):
-        """Execute a token swap in the specified pool"""
-        return await self._gateway_http_client.amm_execute_swap(
-            network=network,
-            connector=connector,
-            wallet_address=wallet_address,
-            base_asset=base_asset,
-            quote_asset=quote_asset,
-            side=side,
-            amount=amount,
-            slippage_percentage=slippage_percentage,
-            pool_address=pool_address,
-        )
+        if price_1 is None:
+            self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_1['address']}")
+            return None
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_add_liquidity(
-        self,
-        connector: str,
-        network: str,
-        wallet_address: str,
-        pool_address: str,
-        base_token_amount: Optional[Decimal] = None,
-        quote_token_amount: Optional[Decimal] = None,
-        slippage_percentage: Optional[Decimal] = None,
-    ):
-        """Add liquidity to the specified pool"""
-        return await self._gateway_http_client.amm_add_liquidity(
-            connector=connector,
-            network=network,
-            wallet_address=wallet_address,
-            pool_address=pool_address,
-            base_token_amount=base_token_amount,
-            quote_token_amount=quote_token_amount,
-            slippage_percentage=slippage_percentage,
-        )
+        if price_2 is None:
+            self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_2['address']}")
+            return None
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_remove_liquidity(
-        self, connector: str, network: str, wallet_address: str, pool_address: str, percentage_to_remove: Decimal
-    ):
-        """Remove liquidity from the specified pool"""
-        return await self._gateway_http_client.amm_remove_liquidity(
-            connector=connector,
-            network=network,
-            wallet_address=wallet_address,
-            pool_address=pool_address,
-            percentage_to_remove=percentage_to_remove,
-        )
+        if price_1 == DECIMAL_ZERO:
+            self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_1['address']} is 0")
+            return None
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_status(self):
-        """Get the status of the Gateway server"""
-        return await self._gateway_http_client.get_gateway_status()
+        if price_2 == DECIMAL_ZERO:
+            self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_2['address']} is 0")
+            return None
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_config(self, chain_or_connector: Optional[str] = None):
-        """Get Gateway configuration settings"""
-        return await self._gateway_http_client.get_configuration(chain_or_connector)
+        # Calculate price difference percentage
+        price_difference = DECIMAL_ONE_HUNDRED * ((price_2 - price_1) / price_1)
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_update_config(self, config_path: str, config_value: Any):
-        """Update Gateway configuration setting"""
-        return await self._gateway_http_client.update_config(config_path, config_value)
+        return price_difference
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_connectors(self):
-        """Get all available connectors from Gateway"""
-        return await self._gateway_http_client.get_connectors()
+    async def _get_token_price_in_pool(
+        self, base_token: str, quote_token: str, pool: Dict[str, Any]
+    ) -> Optional[Decimal]:
+        """
+        Get the price of quote_token in terms of base_token in the given pool.
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_wallets(self):
-        """Get wallet information for all connected chains"""
-        return await self._gateway_http_client.get_wallets()
+        Args:
+            base_token: Base token symbol
+            quote_token: Quote token symbol
+            pool: Pool data
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_network_status(self, chain: str, network: str):
-        """Get chain status"""
-        return await self._gateway_http_client.get_network_status(chain, network)
+        Returns:
+            Decimal: Token price
+        """
+        try:
+            # First check if we have the price cached in the pool data
+            cached_price = self._get_cached_token_price_in_pool(base_token, quote_token, pool)
+            if cached_price is not None:
+                return cached_price
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_poll_transaction(self, chain: str, network: str, tx_hash: str):
-        """Poll for transaction status"""
-        return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
+            # If not cached, get quote for a small amount to determine price
+            maximum_slippage_percentage = self._maximum_slippage_percentage
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_tokens(
-        self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None
-    ):
-        """Get token information"""
-        return await self._gateway_http_client.get_tokens(chain, network, token_symbols)
+            # Use a small fixed amount for consistent price estimations
+            quote = await self._get_quote_swap(
+                pool, base_token, quote_token, DECIMAL_ONE, TradeType.SELL, maximum_slippage_percentage
+            )
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
-    async def _gateway_get_balances(
-        self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
-    ):
-        """Get token balances for a wallet address"""
-        return await self._gateway_http_client.get_balances(chain, network, address, token_symbols)
+            if not quote or "estimatedAmountOut" not in quote:
+                return None
 
-    async def _update_database(self):
-        """Atualiza o database com as informações mais recentes de forma eficiente"""
-        current_time = time.time()
+            expected_out = Decimal(str(quote["estimatedAmountOut"]))
 
-        # Definir intervalos para cada tipo de atualização
-        wallet_update_interval = 60  # 1 minuto
-        token_update_interval = 300  # 5 minutos
-        pool_update_interval = 120  # 2 minutos
+            # Cache the price in the pool data structure
+            chain = pool.get("chain")
+            network = pool.get("network")
+            connector = pool.get("connector")
+            pool_address = pool.get("address")
 
-        # Inicializar a estrutura do database
-        await self._update_database_structure()
+            if (
+                chain
+                and network
+                and connector
+                and pool_address
+                and chain in database["connections"]
+                and network in database["connections"][chain]
+                and connector in database["connections"][chain][network]
+                and "pools" in database["connections"][chain][network][connector]
+                and pool_address in database["connections"][chain][network][connector]["pools"]
+            ):
+                pool_data = database["connections"][chain][network][connector]["pools"][pool_address]
 
-        # Atualizar pools (esta ordem é importante pois precisamos dos pools primeiro)
-        if (
-            not hasattr(self, "_last_pool_update_time")
-            or current_time - self._last_pool_update_time >= pool_update_interval
-        ):
-            self._last_pool_update_time = current_time
-            await self._update_pool_information()
+                if "tokens" not in pool_data:
+                    pool_data["tokens"] = {}
 
-        # Atualizar carteiras (menos frequente)
-        if (
-            not hasattr(self, "_last_wallet_update_time")
-            or current_time - self._last_wallet_update_time >= wallet_update_interval
-        ):
-            self._last_wallet_update_time = current_time
-            await self._update_wallet_structure()
+                if base_token not in pool_data["tokens"]:
+                    pool_data["tokens"][base_token] = {}
 
-        # Atualizar tokens (menos frequente)
-        if (
-            not hasattr(self, "_last_token_update_time")
-            or current_time - self._last_token_update_time >= token_update_interval
-        ):
-            self._last_token_update_time = current_time
-            await self._update_token_information()
+                if "prices" not in pool_data["tokens"][base_token]:
+                    pool_data["tokens"][base_token]["prices"] = {}
 
-    async def _update_database_structure(self):
-        """Initialize and ensure the correct structure of the database based on configuration"""
-        # Initialize the root level structures if they don't exist
-        database_root_keys = ["connections", "arbitrage_opportunities", "execution_history", "maps"]
-        for key in database_root_keys:
-            if key not in database:
-                if key == "connections":
-                    database[key] = {}
-                elif key in ["arbitrage_opportunities", "execution_history"]:
-                    database[key] = []
-                elif key == "maps":
-                    database[key] = {}
+                pool_data["tokens"][base_token]["prices"][quote_token] = expected_out
 
-        # Initialize map structures
-        map_types = ["pools_by_tokens", "wallets_by_pool", "pools_by_wallet"]
-        for map_type in map_types:
-            if map_type not in database["maps"]:
-                database["maps"][map_type] = {}
+            return expected_out
+        except Exception as e:
+            self.logger().error(f"Error getting token price in pool: {str(e)}")
+            return None
 
-        # Initialize chain, network, and connector structures based on configuration
-        for chain in self._configuration["connections"]:
-            if chain not in database["connections"]:
-                database["connections"][chain] = {}
+    def format_status(self) -> str:
+        """
+        Format the strategy status for display.
 
-            for network in self._configuration["connections"][chain]:
-                if network not in database["connections"][chain]:
-                    database["connections"][chain][network] = {}
+        Returns:
+            str: Formatted status string
+        """
+        if not self._gateway_is_ready:
+            return "Gateway is not ready. Please check connection."
 
-                for connector in self._configuration["connections"][chain][network]:
-                    if connector not in database["connections"][chain][network]:
-                        database["connections"][chain][network][connector] = {"wallets": {}, "tokens": {}, "pools": {}}
-                    else:
-                        # Ensure wallet, token, and pool structures exist
-                        for structure in ["wallets", "tokens", "pools"]:
-                            if structure not in database["connections"][chain][network][connector]:
-                                database["connections"][chain][network][connector][structure] = {}
+        # Get recent arbitrage opportunities
+        opportunities = database.get("arbitrage_opportunities", [])
+        recent_opportunities = [
+            opportunity for opportunity in opportunities if time.time() - opportunity.get("timestamp", 0) < 3600
+        ]  # Last hour
 
-                    # Initialize wallet structures if defined in configuration
-                    if "wallets" in self._configuration["connections"][chain][network][connector]:
-                        for wallet_address in self._configuration["connections"][chain][network][connector]["wallets"]:
-                            wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
+        # Get recent executions
+        executions = database.get("execution_history", [])
+        recent_executions = [
+            execution for execution in executions if time.time() - execution.get("timestamp", 0) < 3600
+        ]  # Last hour
 
-                            if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
-                                database["connections"][chain][network][connector]["wallets"][wallet_address] = {
-                                    "internal_id": wallet_internal_id,
-                                    "chain": chain,
-                                    "network": network,
-                                    "connector": connector,
-                                    "tokens": {},
-                                    "pools": {},
-                                }
+        # Calculate profit statistics
+        total_profit = DECIMAL_ZERO
+        for ex in executions:
+            profit = ex.get("profit")
+            if profit is not None:
+                total_profit += Decimal(str(profit))
 
-                            # Initialize token structures for each wallet
-                            wallet_data = database["connections"][chain][network][connector]["wallets"][wallet_address]
-
-                            if "tokens" not in wallet_data:
-                                wallet_data["tokens"] = {}
-
-                            # Initialize tokens based on configuration
-                            for token_symbol in self._configuration["tokens"]:
-                                if token_symbol not in wallet_data["tokens"]:
-                                    wallet_data["tokens"][token_symbol] = {
-                                        "balances": {
-                                            "free": DECIMAL_ZERO,
-                                            "locked": {
-                                                "total": DECIMAL_ZERO,
-                                                "liquidity": {"total": DECIMAL_ZERO, "pools": {}},
-                                            },
-                                            "total": DECIMAL_ZERO,
-                                        }
-                                    }
-
-                    # Initialize token structures based on configuration tokens
-                    for token_symbol in self._configuration["tokens"]:
-                        if token_symbol not in database["connections"][chain][network][connector]["tokens"]:
-                            database["connections"][chain][network][connector]["tokens"][token_symbol] = {
-                                "internal_id": f"{chain}/{network}/{connector}/{token_symbol}",
-                                "chain": chain,
-                                "network": network,
-                                "connector": connector,
-                                "symbol": token_symbol,
-                                "name": token_symbol,
-                                "decimals": 18,  # Default, will be updated later
-                                "price": None,
-                            }
-
-                    # Initialize pool structures if defined in configuration
-                    if "pools" in self._configuration["connections"][chain][network][connector]:
-                        pool_addresses = self._configuration["connections"][chain][network][connector]["pools"]
-
-                        # Convert to list if it's not already
-                        if not isinstance(pool_addresses, list):
-                            pool_addresses = [pool_addresses]
-
-                        for pool_address in pool_addresses:
-                            pool_internal_id = f"{chain}/{network}/{connector}/{pool_address}"
-
-                            if pool_address not in database["connections"][chain][network][connector]["pools"]:
-                                database["connections"][chain][network][connector]["pools"][pool_address] = {
-                                    "internal_id": pool_internal_id,
-                                    "address": pool_address,
-                                    "chain": chain,
-                                    "network": network,
-                                    "connector": connector,
-                                    "type": PoolType.UNKNOWN.value,
-                                    "tokens": {},
-                                    "tokens_list": [],
-                                    "annual_percentage_rate": None,
-                                    "total_value_locked": None,
-                                    "impermanent_loss": None,
-                                    "volume": {"24h": None},
-                                }
-
-    async def _update_wallet_structure(self):
-        """Updates wallet structure in the database"""
-        for chain in self._configuration["connections"].keys():
-            for network in self._configuration["connections"][chain].keys():
-                for connector in self._configuration["connections"][chain][network].keys():
-                    # Now we can update using the cache since the structure is guaranteed to exist
-                    await self._update_wallet_balances(chain, network, connector)
-
-                    # Link wallets to pools and vice-versa
-                    await self._link_wallets_and_pools(chain, network, connector)
-
-    async def _update_wallet_balances(self, chain, network, connector):
-        """Atualiza os balances das carteiras usando o método de cache"""
+        # Get cached token balances
+        balances_summary = []
         tokens = self._configuration["tokens"]
-        wallets = self._configuration["connections"][chain][network][connector]["wallets"]
+        if tokens:
+            for token in tokens:
+                try:
+                    balance = self._get_total_token_balance_from_cached_sources(token)
+                except Exception as exception:
+                    logger.ignore_exception(exception)
+                    balance = DECIMAL_ZERO
+                balances_summary.append(f"{token}: {balance:.4f}")
 
-        for wallet_address in wallets:
-            # Criar o internal_id da carteira
-            wallet_internal_id = f"{chain}/{network}/{connector}/{wallet_address}"
+        # Format status message
+        current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        status = [
+            "AMM Robust Position Manager Status:",
+            f"Time: {current_time}",
+            f"Gateway Status: {'Ready' if self._gateway_is_ready else 'Not Ready'}",
+            f"Opportunities Found (last hour): {len(recent_opportunities)}",
+            f"Trades Executed (last hour): {len(recent_executions)}",
+            f"Total Profit: {total_profit:.4f}",
+            "\nToken Balances:",
+            *balances_summary,
+        ]
 
-            # Garantir que a carteira existe na estrutura
-            if wallet_address not in database["connections"][chain][network][connector]["wallets"]:
-                database["connections"][chain][network][connector]["wallets"][wallet_address] = {
-                    "internal_id": wallet_internal_id,
-                    "chain": chain,
-                    "network": network,
-                    "connector": connector,
-                    "tokens": {},
-                    "pools": {},
-                }
+        if recent_executions:
+            status.append("\nRecent Trades:")
+            for ex in reversed(recent_executions[-5:]):  # Show last 5 trades, most recent first
+                token = ex.get("base_token", "")
+                profit = ex.get("profit")
+                profit_percentage = ex.get("profit_percentage")
+                timestamp = ex.get("timestamp", 0)
+                time_str = time.strftime("%H:%M:%S", time.localtime(timestamp))
 
-            # Atualizar balances da carteira
-            for token_symbol in tokens:
-                balance = await self._get_token_balance_cached(chain, network, wallet_address, token_symbol)
+                if profit is not None and profit_percentage is not None:
+                    profit_decimal = Decimal(str(profit))
+                    profit_percentage_decimal = Decimal(str(profit_percentage))
+                    status.append(f"  {time_str} - {token}: {profit_decimal:.4f} ({profit_percentage_decimal:.2f}%)")
 
-                # Atualizar na estrutura do database
-                if (
-                    token_symbol
-                    not in database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"]
-                ):
-                    database["connections"][chain][network][connector]["wallets"][wallet_address]["tokens"][
-                        token_symbol
-                    ] = {
-                        "balances": {
-                            "free": balance,
-                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                            "total": balance,
-                        }
-                    }
-                else:
-                    token_data = database["connections"][chain][network][connector]["wallets"][wallet_address][
-                        "tokens"
-                    ][token_symbol]
-                    if "balances" not in token_data:
-                        token_data["balances"] = {
-                            "free": balance,
-                            "locked": {"total": 0, "liquidity": {"total": 0, "pools": {}}},
-                            "total": balance,
-                        }
+        return "\n".join(status)
+
+    def _get_total_token_balance_from_cached_sources(self, token_symbol):
+        """
+        Get total token balance from all cached wallet data.
+
+        Args:
+            token_symbol: Token symbol
+
+        Returns:
+            Decimal: Total token balance
+        """
+        total = DECIMAL_ZERO
+
+        # Check cache for all keys containing this token
+        for key, data in self._balance_cache.items():
+            if key.endswith(f"_{token_symbol}"):
+                total += data["balance"]
+
+        return total
+
+    # noinspection PyMethodMayBeStatic
+    def _generate_token_permutations(self, tokens: List[str]) -> List[str]:
+        """
+        Generate all possible permutations of token pairs for a given list of tokens.
+
+        Args:
+            tokens: List of token symbols
+
+        Returns:
+            List[str]: List of token pair strings (e.g., "TOKEN1/TOKEN2")
+        """
+        token_pairs = []
+
+        for permutation in permutations(tokens, len(tokens)):
+            # Join tokens with '/' to create the key
+            token_key = "/".join(permutation)
+            token_pairs.append(token_key)
+
+        return token_pairs
+
+    # noinspection PyMethodMayBeStatic
+    def _find_pools_with_token_pair(self, base_token: str, quote_token: str) -> List[Dict[str, Any]]:
+        """
+        Find pools that contain both tokens.
+
+        Args:
+            base_token: Base token symbol
+            quote_token: Quote token symbol
+
+        Returns:
+            List[Dict]: List of pool data dictionaries
+        """
+        matching_pools = []
+        token_key = f"{base_token}/{quote_token}"
+
+        # Get pool internal IDs from the map
+        pool_internal_ids = database["maps"]["pools_by_tokens"].get(token_key, [])
+
+        # Convert internal IDs to full pool information
+        for pool_internal_id in pool_internal_ids:
+            chain, network, connector, pool_address = pool_internal_id.split("/")
+            if (
+                chain in database["connections"]
+                and network in database["connections"][chain]
+                and connector in database["connections"][chain][network]
+                and "pools" in database["connections"][chain][network][connector]
+                and pool_address in database["connections"][chain][network][connector]["pools"]
+            ):
+                matching_pools.append(database["connections"][chain][network][connector]["pools"][pool_address])
+
+        return matching_pools
+
+    # noinspection PyMethodMayBeStatic
+    def _get_wallet_addresses_for_pool(self, pool: Dict[str, Any]) -> Optional[List[str]]:
+        """
+        Get wallet addresses that can be used for a specific pool.
+
+        Args:
+            pool: Pool data dictionary
+
+        Returns:
+            Optional[List[str]]: List of wallet addresses or None
+        """
+        pool_internal_id = pool.get("internal_id")
+        if not pool_internal_id:
+            return None
+
+        # Get wallet internal IDs from the map
+        wallet_internal_ids = database["maps"]["wallets_by_pool"].get(pool_internal_id, [])
+        if not wallet_internal_ids:
+            return None
+
+        # Convert internal IDs to wallet addresses
+        wallet_addresses = []
+        for wallet_internal_id in wallet_internal_ids:
+            chain, network, connector, wallet_address = wallet_internal_id.split("/")
+            if (
+                chain in database["connections"]
+                and network in database["connections"][chain]
+                and connector in database["connections"][chain][network]
+                and "wallets" in database["connections"][chain][network][connector]
+                and wallet_address in database["connections"][chain][network][connector]["wallets"]
+            ):
+                wallet_addresses.append(wallet_address)
+
+        return wallet_addresses if wallet_addresses else None
+
+    async def _get_total_token_balance_from_all_wallets(self, token_symbol: str) -> Decimal:
+        """
+        Get token balance across all wallets.
+
+        Args:
+            token_symbol: Token symbol
+
+        Returns:
+            Decimal: Total token balance
+        """
+        # First check if we have recent cached balances
+        total_from_cache = self._get_total_token_balance_from_cached_sources(token_symbol)
+        if total_from_cache > DECIMAL_ZERO:
+            return total_from_cache
+
+        # If not in cache, fetch from gateway
+        total_balance = DECIMAL_ZERO
+
+        for chain_name, chain in self._configuration["connections"].items():
+            for network_name, network in chain.items():
+                for connector_name, connector in network.items():
+                    for wallet_address in connector["wallets"]:
+                        balances = await self._gateway_get_balances(
+                            chain_name, network_name, wallet_address, [token_symbol]
+                        )
+
+                        if balances and "balances" in balances:
+                            balance = balances["balances"].get(token_symbol)
+                            if balance is not None:
+                                wallet_balance = Decimal(str(balance))
+                                total_balance += wallet_balance
+
+                                # Update cache
+                                cache_key = f"{chain_name}_{network_name}_{wallet_address}_{token_symbol}"
+                                self._balance_cache[cache_key] = {"balance": wallet_balance, "timestamp": time.time()}
+
+        return total_balance
+
+    async def _check_gateway_status(self):
+        """
+        Check if Gateway server is online and verify wallet connections.
+        This method sets _gateway_is_ready flag based on connectivity.
+        """
+        # Skip if gateway is already verified as ready
+        if self._gateway_is_ready:
+            return
+
+        self.logger().info("Checking Gateway server status...")
+        try:
+            if await self._gateway_ping_gateway():
+                self._gateway_is_ready = True
+                self.logger().info("Gateway server is online!")
+                await self._verify_wallet_connections()
+            else:
+                self._set_gateway_as_not_ready(
+                    "Gateway server is offline! Make sure Gateway is running before using this strategy."
+                )
+        except Exception as exception:
+            self._set_gateway_as_not_ready(f"Error connecting to Gateway server: {str(exception)}")
+
+    def _set_gateway_as_not_ready(self, error_message: str):
+        """
+        Set gateway as not ready with appropriate error message.
+
+        Args:
+            error_message: Error message to log
+        """
+        self._gateway_is_ready = False
+        self.logger().error(error_message)
+
+    async def _verify_wallet_connections(self):
+        """
+        Verify wallet connections for all configured pools.
+        This method validates that wallets exist and are properly connected.
+        """
+        if not self._all_gateway_connections or len(self._all_gateway_connections) == 0:
+            self.logger().error("No wallet connections found. Please connect a wallet using 'gateway connect'.")
+            return
+
+        # Check connections for each chain/network/connector in configuration
+        for chain, chain_data in self._configuration["connections"].items():
+            for network, network_data in chain_data.items():
+                for connector, connector_data in network_data.items():
+                    # Find matching gateway connection
+                    gateway_connection = next(
+                        (
+                            conn
+                            for conn in self._all_gateway_connections
+                            if conn.get("chain") == chain
+                            and conn.get("network") == network
+                            and conn.get("connector") == connector
+                        ),
+                        None,
+                    )
+
+                    if not gateway_connection:
+                        self.logger().error(
+                            f"No gateway connection found for {chain}/{connector}/{network}. "
+                            f"Please connect using 'gateway connect'."
+                        )
                     else:
-                        token_data["balances"]["free"] = balance
-                        token_data["balances"]["total"] = balance
-
-    async def _update_token_information(self):
-        """Update token information in the database"""
-
-        for chain in self._configuration["connections"].keys():
-            for network in self._configuration["connections"][chain].keys():
-                for connector in self._configuration["connections"][chain][network].keys():
-                    tokens = self._configuration["tokens"]
-
-                    # Initialize connector tokens if not exists
-                    if not database["connections"][chain][network][connector].get("tokens"):
-                        database["connections"][chain][network][connector]["tokens"] = {}
-
-                    # Get token information
-                    token_info = await self._get_chain_tokens(chain, network, tokens)
-
-                    if token_info and "tokens" in token_info:
-                        for token in token_info["tokens"]:
-                            symbol = token.get("symbol")
-                            address = token.get("address")
-
-                            if not symbol or not address:
-                                continue
-
-                            # Create internal_id for token
-                            internal_id = f"{chain}/{network}/{connector}/{address}"
-
-                            # Get token price if available
-                            token_price = await self._get_token_price(symbol, chain, network)
-
-                            database["connections"][chain][network][connector]["tokens"][symbol] = {
-                                "internal_id": internal_id,
-                                "address": address,
-                                "chain": chain,
-                                "network": network,
-                                "connector": connector,
-                                "symbol": symbol,
-                                "name": token.get("name", symbol),
-                                "decimals": token.get("decimals", 18),
-                                "price": token_price,
-                            }
-
-        return database
-
-    async def _update_pool_information(self):
-        """Update pool information in the database"""
-
-        for chain in self._configuration["connections"].keys():
-            for network in self._configuration["connections"][chain].keys():
-                for connector in self._configuration["connections"][chain][network].keys():
-                    if "pools" not in database["connections"][chain][network][connector]:
-                        database["connections"][chain][network][connector]["pools"] = {}
-
-                    pools_info = await self._get_pools(chain, connector, network)
-
-                    if not pools_info:
-                        continue
-
-                    pools = pools_info.get("pools", [])
-
-                    # Check if pools_info is a list
-                    if not isinstance(pools, list):
-                        continue
-
-                    # Update pool information in database for each pool
-                    for pool in pools:
-                        if not isinstance(pool, dict):
-                            continue
-
-                        pool_address = pool.get("address")
-
-                        # TODO remove!!!
-                        if connector == "raydium":
-                            if pool_address != "2EXiumdi14E9b8Fy62QcA5Uh6WdHS2b38wtSxp72Mibj":
-                                continue
-                            else:
-                                pool_address = "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
-                                pool["address"] = pool_address
-
-                        if not pool_address:
-                            raise ValueError(f"Pool {pool} doesn't have an address")
-
-                        should_ignore = False
-                        for token in pool.get("tokens", []):
-                            if token not in self._configuration["tokens"]:
-                                if (
-                                    pool.get("address")
-                                    not in self._configuration["connections"][chain][network][connector]["pools"]
-                                ):
-                                    should_ignore = True
-                                    break
-                        if should_ignore:
-                            continue
-
-                        # Get detailed pool information
-                        detailed_pool_info = await self._get_pool_information(
-                            {"network": network, "connector": connector, "pool_address": pool_address}
+                        self.logger().info(
+                            f"Found wallet connection for {chain}/{connector}/{network}: "
+                            f"{gateway_connection.get('wallet_address')}"
                         )
-
-                        if not detailed_pool_info:
-                            continue
-
-                        # Get pool tokens
-                        pool_tokens = pool.get("tokens", [])
-                        if not pool_tokens:
-                            continue
-
-                        # Create internal_id for pool
-                        pool_internal_id = f"{chain}/{network}/{connector}/{pool_address}"
-
-                        # Initialize the tokens structure in the database
-                        database["connections"][chain][network][connector]["pools"][pool_address] = {
-                            "internal_id": pool_internal_id,
-                            "chain": chain,
-                            "network": network,
-                            "connector": connector,
-                            "address": pool_address,
-                            "type": pool.get("type", PoolType.UNKNOWN.value),
-                            "tokens": {},
-                            "tokens_list": pool_tokens,
-                            "annual_percentage_rate": detailed_pool_info.get("apr"),
-                            "total_value_locked": detailed_pool_info.get("tvl"),
-                            "impermanent_loss": 0,
-                            "volume": {"24h": detailed_pool_info.get("volume24h")},
-                        }
-
-                        # Generate all possible token permutations for this pool
-                        token_permutations = self._generate_token_permutations(pool_tokens)
-
-                        # Add pool to all token permutations in the map
-                        for token_key in token_permutations:
-                            if token_key not in database["maps"]["pools_by_tokens"]:
-                                database["maps"]["pools_by_tokens"][token_key] = []
-                            if pool_internal_id not in database["maps"]["pools_by_tokens"][token_key]:
-                                database["maps"]["pools_by_tokens"][token_key].append(pool_internal_id)
-
-                        # Store pools in configuration for easy access during wallet updates
-                        if "pools" not in self._configuration["connections"][chain][network][connector]:
-                            self._configuration["connections"][chain][network][connector]["pools"] = []
-
-                        if pool_address not in self._configuration["connections"][chain][network][connector]["pools"]:
-                            self._configuration["connections"][chain][network][connector]["pools"].append(pool_address)
-
-                        # Handle specific pool types
-                        pool_type = pool.get("type", PoolType.UNKNOWN.value)
-                        if (
-                            pool_type == PoolType.XYK.value
-                            or pool_type == PoolType.STABLE.value
-                            or pool_type == PoolType.AMM.value
-                        ):
-                            if len(pool_tokens) == 2:
-                                base_token = pool_tokens[0]
-                                quote_token = pool_tokens[1]
-                                pool_price = detailed_pool_info.get("price", None)
-
-                                if pool_price is None:
-                                    self.logger().warning(f"Could not get price for pool {pool_address}")
-                                    continue
-
-                                # Update pool tokens information
-                                for token_symbol in pool_tokens:
-                                    database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                                        token_symbol
-                                    ] = {
-                                        "price": {
-                                            f"{pool_address}": detailed_pool_info.get(
-                                                "price"
-                                            ),  # TODO fix this on the gateway!!!
-                                        },
-                                    }
-
-                                # Initialize base token
-                                database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                                    base_token
-                                ] = {
-                                    "balance": Decimal(str(detailed_pool_info.get("baseTokenAmount", "0"))),
-                                    "prices": {
-                                        quote_token: Decimal(str(pool_price)),  # Direct price
-                                    },
-                                }
-
-                                # Initialize quote token
-                                database["connections"][chain][network][connector]["pools"][pool_address]["tokens"][
-                                    quote_token
-                                ] = {
-                                    "balance": Decimal(str(detailed_pool_info.get("quoteTokenAmount", "0"))),
-                                    "prices": {
-                                        base_token: Decimal("1") / Decimal(str(pool_price))
-                                        if Decimal(str(pool_price)) != DECIMAL_ZERO
-                                        else None,  # Inverse price
-                                    },
-                                }
-                        elif pool_type == PoolType.OMNIPOOL.value:
-                            # Handle Omni pool specific logic here
-                            # For now, we'll just log that we found an Omni pool
-                            self.logger().info(f"Found Omni pool: {pool_address}")
-                        elif pool_type == PoolType.LBP.value:
-                            # Handle LBP pool specific logic here
-                            # For now, we'll just log that we found an LBP pool
-                            self.logger().info(f"Found LBP pool: {pool_address}")
-                        elif pool_type == PoolType.CPMM.value:
-                            # Handle CPMM pool specific logic here
-                            # For now, we'll just log that we found an CPMM pool
-                            self.logger().info(f"Found CPMM pool: {pool_address}")
-                        elif pool_type == PoolType.CLMM.value:
-                            # Handle CLMM pool specific logic here
-                            # For now, we'll just log that we found an CLMM pool
-                            self.logger().info(f"Found CLMM pool: {pool_address}")
-                        else:
-                            self.logger().warning(f"Pool type {pool_type} not supported yet")
-                            raise NotImplementedError(f"Pool type {pool_type} not supported")
-
-                        # Update pool with additional information
-                        database["connections"][chain][network][connector]["pools"][pool_address].update(
-                            {
-                                "address": pool_address,
-                                "type": pool.get("type", PoolType.UNKNOWN.value),
-                                "annual_percentage_rate": detailed_pool_info.get("apr", None),
-                                "total_value_locked": detailed_pool_info.get("tvl", None),
-                                "impermanent_loss": None,
-                                "volume": {"24h": detailed_pool_info.get("volume24h", None)},
-                            }
-                        )
-
-                    # Update wallet-pool connections after updating pools
-                    await self._link_wallets_and_pools(chain, network, connector)
-
-        return database
 
     async def _link_wallets_and_pools(self, chain, network, connector):
-        """Create mappings between wallets and pools for a specific connector"""
+        """
+        Create mappings between wallets and pools.
+
+        Args:
+            chain: Chain identifier
+            network: Network identifier
+            connector: Connector identifier
+        """
         # Get the wallets and pools for this connector
-        wallets = self._configuration["connections"][chain][network][connector]["wallets"]
+        wallets = self._configuration["connections"][chain][network][connector].get("wallets", [])
         pools = self._configuration["connections"][chain][network][connector].get("pools", [])
 
         # No pools to process
@@ -1470,608 +1588,160 @@ class AMMRobustPositionManager(ScriptStrategyBase):
                 if wallet_internal_id not in database["maps"]["wallets_by_pool"][pool_internal_id]:
                     database["maps"]["wallets_by_pool"][pool_internal_id].append(wallet_internal_id)
 
-    # noinspection PyMethodMayBeStatic
-    def _generate_token_permutations(self, tokens: List[str]) -> List[str]:
-        """Generate all possible permutations of token pairs for a given list of tokens"""
-        token_pairs = []
-
-        for permutation in permutations(tokens, len(tokens)):
-            # Join tokens with '/' to create the key
-            token_key = "/".join(permutation)
-            token_pairs.append(token_key)
-
-        return token_pairs
-
-    async def _calculate_price_difference_percentage(
-        self, base_token: str, quote_token: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
-    ) -> Optional[Decimal]:
+    # Gateway API wrapper methods with retry and timeout
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_ping_gateway(self):
         """
-        Calculate price difference between two pools for a token pair
+        Ping the gateway server to check if it's online.
 
         Returns:
-            Decimal: Price difference as a decimal (0.01 = 1%)
+            bool: True if gateway is online, False otherwise
         """
-        # Get price of quote_token in terms of base_token in pool_1
-        price_1 = await self._get_token_price_in_pool(base_token, quote_token, pool_1)
-
-        # Get price of quote_token in terms of base_token in pool_2
-        price_2 = await self._get_token_price_in_pool(base_token, quote_token, pool_2)
-
-        if price_1 is None:
-            self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_1['address']}")
-            return None
-
-        if price_2 is None:
-            self.logger().warning(f"Failed to get price for {base_token}/{quote_token} in pool {pool_2['address']}")
-            return None
-
-        if price_1 == DECIMAL_ZERO:
-            self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_1['address']} is 0")
-            return None
-
-        if price_2 == DECIMAL_ZERO:
-            self.logger().warning(f"Price for {base_token}/{quote_token} in pool {pool_2['address']} is 0")
-            return None
-
-        # Calculate price difference
-        price_difference = DECIMAL_ONE_HUNDRED * ((price_2 - price_1) / price_1)
-
-        return price_difference
-
-    async def _get_token_price_in_pool(
-        self, base_token: str, quote_token: str, pool: Dict[str, Any]
-    ) -> Optional[Decimal]:
-        """Get the price of quote_token in terms of base_token in the given pool"""
-        # First try to get a quote for a small amount to determine price
-        maximum_slippage_percentage = self._maximum_slippage_percentage
-
-        quote = await self._get_quote_swap(
-            pool, base_token, quote_token, DECIMAL_ONE, TradeType.SELL, maximum_slippage_percentage
-        )
-
-        if not quote or "estimatedAmountOut" not in quote:
-            return None
-
-        expected_out = Decimal(str(quote["estimatedAmountOut"]))
-
-        price = expected_out
-
-        return price
-
-    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: Decimal) -> Decimal:
-        """Calculate the optimal amount to trade based on slippage considerations"""
-        minimum_trade_amount = self._minimum_trade_amount
-
-        # Try different trade amounts to find the optimal one
-        test_amounts = [
-            minimum_trade_amount,
-            # max_available * DECIMAL_TEN_PERCENT,
-            # max_available * DECIMAL_TWENTY_FIVE_PERCENT,
-            # max_available * DECIMAL_FIFTY_PERCENT,
-            # max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
-            # max_available,
-        ]
-
-        best_amount = DECIMAL_NEGATIVE_INFINITY
-        best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
-
-        for amount in test_amounts:
-            if amount > max_available:
-                continue
-
-            # Skip amounts that are too close to previously tested ones
-            if best_amount > DECIMAL_ZERO and abs(amount - best_amount) / best_amount < DECIMAL_TEN_PERCENT:
-                continue
-
-            profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
-
-            if profit_percentage > best_profit_percentage:
-                best_profit_percentage = profit_percentage
-                best_amount = amount
-
-        return best_amount
-
-    async def _simulate_arbitrage_profit(self, opportunity: Dict[str, Any], trade_amount: Decimal) -> Decimal:
-        """Simulate an arbitrage trade to calculate expected profit percentage"""
-        base_token = opportunity["base_token"]
-        quote_token = opportunity["quote_token"]
-        buy_pool = opportunity["buy_pool"]
-        sell_pool = opportunity["sell_pool"]
-
-        maximum_slippage_percentage = self._maximum_slippage_percentage
-
-        # Simulate first swap: base_token -> quote_token in buy_pool
-        buy_quote = await self._get_quote_swap(
-            buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, maximum_slippage_percentage
-        )
-
-        if not buy_quote or "estimatedAmountOut" not in buy_quote:
-            return DECIMAL_ZERO
-
-        expected_quote_token = Decimal(str(buy_quote["estimatedAmountOut"]))
-
-        # Simulate second swap: quote_token -> base_token in sell_pool
-        sell_quote = await self._get_quote_swap(
-            sell_pool, quote_token, base_token, expected_quote_token, TradeType.SELL, maximum_slippage_percentage
-        )
-
-        if not sell_quote or "estimatedAmountOut" not in sell_quote:
-            return DECIMAL_ZERO
-
-        expected_base_token_return = Decimal(str(sell_quote["estimatedAmountOut"]))
-
-        # Calculate expected profit percentage
-        expected_profit = expected_base_token_return - trade_amount
-        expected_profit_percentage = (expected_profit / trade_amount) * DECIMAL_ONE_HUNDRED
-
-        return expected_profit_percentage
-
-    # noinspection PyMethodMayBeStatic
-    def _get_all_tokens_from_database(self) -> List[str]:
-        """Get all tokens from the database"""
-        tokens = set()
-
-        for chain in database["connections"]:
-            for network in database["connections"][chain]:
-                for connector in database["connections"][chain][network]:
-                    if "tokens" in database["connections"][chain][network][connector]:
-                        tokens.update(database["connections"][chain][network][connector]["tokens"].keys())
-
-        return list(tokens)
-
-    # noinspection PyMethodMayBeStatic
-    def _get_all_pools_from_database(self) -> List[Dict[str, Any]]:
-        """Get all pools from the database"""
-        pools = []
-
-        for chain in database["connections"]:
-            for network in database["connections"][chain]:
-                for connector in database["connections"][chain][network]:
-                    if "pools" in database["connections"][chain][network][connector]:
-                        for pool_address, pool_info in database["connections"][chain][network][connector][
-                            "pools"
-                        ].items():
-                            pools.append(pool_info)
-
-        return pools
-
-    # noinspection PyMethodMayBeStatic
-    def _find_pools_with_token_pair(self, base_token: str, quote_token: str) -> List[Dict[str, Any]]:
-        """Find pools that contain both tokens"""
-        matching_pools = []
-        token_key = f"{base_token}/{quote_token}"
-
-        # Get pool internal IDs from the map
-        pool_internal_ids = database["maps"]["pools_by_tokens"].get(token_key, [])
-
-        # Convert internal IDs to full pool information
-        for pool_internal_id in pool_internal_ids:
-            chain, network, connector, pool_address = pool_internal_id.split("/")
-            if (
-                chain in database["connections"]
-                and network in database["connections"][chain]
-                and connector in database["connections"][chain][network]
-                and "pools" in database["connections"][chain][network][connector]
-                and pool_address in database["connections"][chain][network][connector]["pools"]
-            ):
-                matching_pools.append(database["connections"][chain][network][connector]["pools"][pool_address])
-
-        return matching_pools
-
-    # noinspection PyMethodMayBeStatic
-    def _get_wallet_addresses_for_pool(self, pool: Dict[str, Any]) -> Optional[List[str]]:
-        """Get wallet addresses that can be used for a specific pool"""
-        pool_internal_id = pool.get("internal_id")
-        if not pool_internal_id:
-            return None
-
-        # Get wallet internal IDs from the map
-        wallet_internal_ids = database["maps"]["wallets_by_pool"].get(pool_internal_id, [])
-        if not wallet_internal_ids:
-            return None
-
-        # Convert internal IDs to wallet addresses
-        wallet_addresses = []
-        for wallet_internal_id in wallet_internal_ids:
-            chain, network, connector, wallet_address = wallet_internal_id.split("/")
-            if (
-                chain in database["connections"]
-                and network in database["connections"][chain]
-                and connector in database["connections"][chain][network]
-                and "wallets" in database["connections"][chain][network][connector]
-                and wallet_address in database["connections"][chain][network][connector]["wallets"]
-            ):
-                wallet_addresses.append(wallet_address)
-
-        return wallet_addresses if wallet_addresses else None
-
-    async def _get_total_token_balance_from_all_wallets(self, token_symbol: str) -> Decimal:
-        """Get token balance across all wallets"""
-        total_balance = DECIMAL_ZERO
-
-        for chain_name, chain in self._configuration["connections"].items():
-            for network_name, network in chain.items():
-                for _, connector in network.items():
-                    for wallet_address in connector["wallets"]:
-                        balances = await self._gateway_get_balances(
-                            chain_name, network_name, wallet_address, [token_symbol]
-                        )
-
-                        if balances and "balances" in balances:
-                            balance = balances["balances"].get(token_symbol)
-                            if balance is not None:
-                                total_balance += Decimal(str(balance))
-
-        return total_balance
-
-    async def _check_gateway_status(self):
-        """Check if Gateway server is online and verify wallet connections for multiple pools"""
-        # Skip if gateway is already verified as not ready
-        if self._gateway_is_ready:
-            return
-
-        self.logger().info("Checking Gateway server status...")
-        try:
-            if await self._gateway_ping_gateway():
-                self._gateway_is_ready = True
-
-                self.logger().info("Gateway server is online!")
-
-                await self._verify_wallet_connections()
-            else:
-                self._set_gateway_as_not_ready(
-                    "Gateway server is offline! Make sure Gateway is running before using this strategy."
-                )
-        except Exception as exception:
-            self._set_gateway_as_not_ready(f"Error connecting to Gateway server: {str(exception)}")
-
-    def _set_gateway_as_not_ready(self, error_message: str):
-        """Set gateway as not ready with appropriate error message"""
-        self._gateway_is_ready = False
-        self.logger().error(error_message)
-
-    async def _verify_wallet_connections(self):
-        """Verify wallet connections for all configured pools"""
-
-        if not self._all_gateway_connections or len(self._all_gateway_connections) == 0:
-            self.logger().error("No wallet connections found. Please connect a wallet using 'gateway connect'.")
-            return
-
-        pools = getattr(self._configuration, "pools", [])
-        if not pools or len(pools) == 0:
-            self.logger().error("No pools configured. Please add pool configurations.")
-            return
-
-        for pool in pools:
-            await self._verify_pool_wallet(pool, self._all_gateway_connections)
-
-    async def _verify_pool_wallet(self, pool: Dict[str, Any], all_gateway_connections: List[Dict[str, Any]]):
-        """Verify wallet connection for a specific pool configuration"""
-        chain = pool.get("chain")
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("pool_address")
-        base_tokens = pool.get("base_tokens")
-        quote_tokens = pool.get("quote_tokens")
-
-        required_fields = {
-            "chain": chain,
-            "network": network,
-            "connector": connector,
-            "pool_address": pool_address,
-            "base_tokens": base_tokens,
-            "quote_tokens": quote_tokens,
-        }
-        missing_fields = [field for field, value in required_fields.items() if not value]
-
-        if missing_fields:
-            self.logger().error(f"Invalid pool configuration. Missing required fields: {', '.join(missing_fields)}")
-            return
-
-        gateway_connection = [
-            gateway_connection
-            for gateway_connection in all_gateway_connections
-            if gateway_connection["chain"] == chain
-            and gateway_connection["connector"] == connector
-            and gateway_connection["network"] == network
-        ]
-
-        if not gateway_connection:
-            self.logger().error(
-                f"""No gateway connection found for "{chain}/{connector}/{network}". Please connect using 'gateway connect'."""
-            )
-        else:
-            wallet_address = gateway_connection[0]["wallet_address"]
-            self.logger().info(f"""Found wallet connection for "{chain}/{connector}/{network}:{wallet_address}""")
-
-            # Store wallet address in pool config for later use
-            pool["wallet_address"] = wallet_address
-
-            # Get pool info to get token information
-            pool["information"] = await self._get_pool_information(pool)
-
-    async def _get_pools(self, _chain: str, connector: str, network: str):
+        return await self._gateway_http_client.ping_gateway()
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_pools(self, connector: str, network: str):
         """
         Fetch all available pools for a connector.
 
         Args:
-            _chain: Chain identifier
             connector: Connector identifier
             network: Network identifier
 
         Returns:
-            Dictionary containing pools information
+            Dict: Pool information
         """
-        return await self._gateway_get_pools(connector, network)
+        return await self._gateway_http_client.amm_list_pools(connector, network)
 
-    async def _get_pool_information(self, pool: Dict[str, Any]):
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_pool_info(self, connector: str, network: str, pool_address: str):
         """
         Get detailed information about a liquidity pool.
 
         Args:
-            pool: Dictionary containing pool configuration parameters
+            connector: Connector identifier
+            network: Network identifier
+            pool_address: Pool address
 
         Returns:
-            Dictionary containing pool information
+            Dict: Pool information
         """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("pool_address")
+        return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
 
-        if not all([network, connector, pool_address]):
-            return None
-
-        return await self._gateway_get_pool_info(connector, network, pool_address)
-
-    async def _get_quote_swap(
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_quote_swap(
         self,
-        pool: Dict[str, Any],
-        base_token: str,
-        quote_token: str,
+        network: str,
+        connector: str,
+        base_asset: str,
+        quote_asset: str,
         amount: Decimal,
         side: TradeType,
         slippage_percentage: Decimal,
+        pool_address: str,
     ):
         """
         Get a quote for swapping tokens in a pool.
 
         Args:
-            pool: Dictionary containing pool configuration parameters
-            base_token: Symbol of the base token
-            quote_token: Symbol of the quote token
-            amount: Amount to swap as Decimal
+            network: Network identifier
+            connector: Connector identifier
+            base_asset: Base token symbol
+            quote_asset: Quote token symbol
+            amount: Amount to swap
             side: Trade side (BUY or SELL)
-            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal("0.5") for 0.5%)
+            slippage_percentage: Maximum acceptable slippage
+            pool_address: Pool address
 
         Returns:
-            Dictionary containing swap quote information
+            Dict: Swap quote information
         """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("address")
-
-        if not all([network, connector, pool_address]):
-            return None
-
-        return await self._gateway_quote_swap(
-            network,
-            connector,
-            base_token,
-            quote_token,
-            amount,
-            side,
-            slippage_percentage,
-            pool_address,
+        return await self._gateway_http_client.amm_quote_swap(
+            network=network,
+            connector=connector,
+            base_asset=base_asset,
+            quote_asset=quote_asset,
+            amount=amount,
+            side=side,
+            slippage_percentage=slippage_percentage,
+            pool_address=pool_address,
         )
 
-    async def _get_quote_liquidity(
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_execute_swap(
         self,
-        pool: Dict[str, Any],
-        base_token_amount: Optional[Decimal] = None,
-        quote_token_amount: Optional[Decimal] = None,
-        slippage_percentage: Optional[Decimal] = None,
-    ):
-        """
-        Get a quote for adding liquidity to a pool.
-
-        Args:
-            pool: Dictionary containing pool configuration parameters
-            base_token_amount: Amount of base token to add
-            quote_token_amount: Amount of quote token to add
-            slippage_percentage: Maximum acceptable slippage as a percentage
-
-        Returns:
-            Dictionary containing liquidity quote information
-        """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("pool_address")
-
-        if not all([network, connector, pool_address]):
-            return None
-
-        return await self._gateway_quote_liquidity(
-            connector,
-            network,
-            pool_address,
-            base_token_amount,
-            quote_token_amount,
-            slippage_percentage,
-        )
-
-    async def _post_execute_swap(
-        self,
-        pool: Dict[str, Any],
+        network: str,
+        connector: str,
         wallet_address: str,
-        base_token: str,
-        quote_token: str,
-        amount: Decimal,
+        base_asset: str,
+        quote_asset: str,
         side: TradeType,
+        amount: Decimal,
         slippage_percentage: Decimal,
+        pool_address: str,
     ):
         """
         Execute a token swap in the specified pool.
 
         Args:
-            pool: Dictionary containing pool configuration parameters
-            base_token: Symbol of the base token
-            quote_token: Symbol of the quote token
-            amount: Amount to swap as Decimal
+            network: Network identifier
+            connector: Connector identifier
+            wallet_address: Wallet address
+            base_asset: Base token symbol
+            quote_asset: Quote token symbol
             side: Trade side (BUY or SELL)
-            slippage_percentage: Maximum acceptable slippage as a Decimal (e.g., Decimal("0.5") for 0.5%)
+            amount: Amount to swap
+            slippage_percentage: Maximum acceptable slippage
+            pool_address: Pool address
 
         Returns:
-            Dictionary containing swap execution result
+            Dict: Swap execution result
         """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("address")
-
-        if not all([network, connector, pool_address, wallet_address]):
-            return None
-
-        return await self._gateway_execute_swap(
-            network,
-            connector,
-            wallet_address,
-            base_token,
-            quote_token,
-            side,
-            amount,
-            slippage_percentage,
-            pool_address,
+        return await self._gateway_http_client.amm_execute_swap(
+            network=network,
+            connector=connector,
+            wallet_address=wallet_address,
+            base_asset=base_asset,
+            quote_asset=quote_asset,
+            side=side,
+            amount=amount,
+            slippage_percentage=slippage_percentage,
+            pool_address=pool_address,
         )
 
-    async def _post_add_liquidity(
-        self,
-        pool: Dict[str, Any],
-        base_token_amount: Optional[Decimal] = None,
-        quote_token_amount: Optional[Decimal] = None,
-        slippage_percentage: Optional[Decimal] = None,
-    ):
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_poll_transaction(self, chain: str, network: str, tx_hash: str):
         """
-        Add liquidity to the specified pool.
-
-        Args:
-            pool: Dictionary containing pool configuration parameters
-            base_token_amount: Amount of base token to add
-            quote_token_amount: Amount of quote token to add
-            slippage_percentage: Maximum acceptable slippage as a percentage
-
-        Returns:
-            Dictionary containing add liquidity operation result
-        """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("pool_address")
-        wallet_address = pool.get("wallet_address")
-
-        if not all([network, connector, pool_address, wallet_address]):
-            return None
-
-        return await self._gateway_add_liquidity(
-            connector,
-            network,
-            wallet_address,
-            pool_address,
-            base_token_amount,
-            quote_token_amount,
-            slippage_percentage,
-        )
-
-    async def _post_remove_liquidity(self, pool: Dict[str, Any], percentage_to_remove: Decimal):
-        """
-        Remove liquidity from the specified pool.
-
-        Args:
-            pool: Dictionary containing pool configuration parameters
-            percentage_to_remove: Percentage of liquidity to remove as a Decimal
-
-        Returns:
-            Dictionary containing remove liquidity operation result
-        """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("pool_address")
-        wallet_address = pool.get("wallet_address")
-
-        if not all([network, connector, pool_address, wallet_address]):
-            return None
-
-        return await self._gateway_remove_liquidity(
-            connector,
-            network,
-            wallet_address,
-            pool_address,
-            percentage_to_remove,
-        )
-
-    async def _get_root_status(self):
-        """
-        Get the status of the Gateway server.
-
-        Returns:
-            Dictionary containing server status information
-        """
-        return await self._gateway_get_status()
-
-    async def _get_config(self, chain_or_connector: Optional[str] = None):
-        """
-        Get Gateway configuration settings.
-
-        Args:
-            chain_or_connector: Optional chain or connector to filter configuration
-
-        Returns:
-            Dictionary containing Gateway configuration
-        """
-        return await self._gateway_get_config(chain_or_connector)
-
-    async def _post_config_update(self, config_path: str, config_value: Any):
-        """
-        Update Gateway configuration setting.
-
-        Args:
-            config_path: Path to the configuration setting
-            config_value: New value for the configuration setting
-
-        Returns:
-            Dictionary containing operation result
-        """
-        return await self._gateway_update_config(config_path, config_value)
-
-    async def _get_connectors(self):
-        """
-        Get all available connectors from Gateway.
-
-        Returns:
-            Dictionary containing available connectors information
-        """
-        return await self._gateway_get_connectors()
-
-    async def _get_wallet(self):
-        """
-        Get wallet information for all connected chains.
-
-        Returns:
-            Dictionary containing wallet information
-        """
-        return await self._gateway_get_wallets()
-
-    async def _get_chain_status(self, chain: str, network: str):
-        """
-        Get chain status.
+        Poll for transaction status.
 
         Args:
             chain: Chain identifier
             network: Network identifier
+            tx_hash: Transaction hash
 
         Returns:
-            Dictionary containing chain status information
+            Dict: Transaction status information
         """
-        return await self._gateway_get_network_status(chain, network)
+        return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
 
-    async def _get_chain_tokens(self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None):
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_tokens(
+        self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None
+    ):
         """
         Get token information.
 
@@ -2081,7 +1751,84 @@ class AMMRobustPositionManager(ScriptStrategyBase):
             token_symbols: Optional token symbols to filter
 
         Returns:
-            Dictionary containing token information
+            Dict: Token information
+        """
+        return await self._gateway_http_client.get_tokens(chain, network, token_symbols)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_balances(
+        self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
+    ):
+        """
+        Get token balances for a wallet address.
+
+        Args:
+            chain: Chain identifier
+            network: Network identifier
+            address: Wallet address
+            token_symbols: Optional token symbols to filter
+
+        Returns:
+            Dict: Balance information
+        """
+        return await self._gateway_http_client.get_balances(chain, network, address, token_symbols)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_status(self):
+        """
+        Get the status of the Gateway server.
+
+        Returns:
+            Dict: Server status information
+        """
+        return await self._gateway_http_client.get_gateway_status()
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_config(self, chain_or_connector: Optional[str] = None):
+        """
+        Get Gateway configuration settings.
+
+        Args:
+            chain_or_connector: Optional chain or connector to filter
+
+        Returns:
+            Dict: Gateway configuration
+        """
+        return await self._gateway_http_client.get_configuration(chain_or_connector)
+
+    @run_with_retry_and_timeout(
+        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
+    )
+    async def _gateway_get_network_status(self, chain: str, network: str):
+        """
+        Get chain status.
+
+        Args:
+            chain: Chain identifier
+            network: Network identifier
+
+        Returns:
+            Dict: Chain status information
+        """
+        return await self._gateway_http_client.get_network_status(chain, network)
+
+    async def _get_chain_tokens(self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None):
+        """
+        Get token information for a specific chain and network.
+
+        Args:
+            chain: Chain identifier
+            network: Network identifier
+            token_symbols: Optional token symbols to filter
+
+        Returns:
+            Dict: Token information
         """
         return await self._gateway_get_tokens(chain, network, token_symbols)
 
@@ -2090,108 +1837,18 @@ class AMMRobustPositionManager(ScriptStrategyBase):
         Get the price of a token from a price feed or API.
 
         Args:
-            token_symbol: Symbol of the token
+            token_symbol: Token symbol
             chain: Chain identifier
             network: Network identifier
 
         Returns:
-            Decimal price of the token or None if not available
+            Optional[Decimal]: Token price or None if unavailable
         """
         try:
             # This is a placeholder implementation
             # In a real implementation, you would fetch the price from a price feed or API
-            # For example, you might use CoinGecko, CoinMarketCap, or a DEX price feed
-
-            # For now, we'll return None to indicate that the price is not available
-            # You should implement the actual price fetching logic here
+            # For simplicity, we'll return None to indicate price is not available
             return None
         except Exception as e:
             self.logger().error(f"Error fetching price for {token_symbol}: {str(e)}")
             return None
-
-    def format_status(self) -> str:
-        """Format the strategy status for display"""
-        if not self._gateway_is_ready:
-            return "Gateway is not ready. Please check connection."
-
-        # Get recent arbitrage opportunities
-        opportunities = database.get("arbitrage_opportunities", [])
-        recent_opportunities = [
-            opportunity for opportunity in opportunities if time.time() - opportunity.get("timestamp", 0) < 3600
-        ]  # Last hour
-
-        # Get recent executions
-        executions = database.get("execution_history", [])
-        recent_executions = [
-            execution for execution in executions if time.time() - execution.get("timestamp", 0) < 3600
-        ]  # Last hour
-
-        # Calculate profit statistics
-        total_profit = DECIMAL_ZERO
-        for ex in executions:
-            profit = ex.get("profit")
-            if profit is not None:
-                total_profit += Decimal(str(profit))
-
-        # Format status message
-        status = [
-            "AMM Arbitrage Strategy Status:",
-            f"Gateway Status: {'Ready' if self._gateway_is_ready else 'Not Ready'}",
-            f"Opportunities Found (last hour): {len(recent_opportunities)}",
-            f"Trades Executed (last hour): {len(recent_executions)}",
-            f"Total Profit: {total_profit:.4f}",
-        ]
-
-        if recent_executions:
-            status.append("\nRecent Trades:")
-            for ex in recent_executions[-5:]:  # Show last 5 trades
-                token = ex.get("base_token", "")
-                profit = ex.get("profit")
-                profit_percentage = ex.get("profit_percentage")
-                if profit is not None and profit_percentage is not None:
-                    profit_decimal = Decimal(str(profit))
-                    profit_percentage_decimal = Decimal(str(profit_percentage))
-                    status.append(f"  {token}: {profit_decimal:.4f} ({profit_percentage_decimal:.2f}%)")
-
-        return "\n".join(status)
-
-    async def _get_token_balance_cached(self, chain, network, wallet_address, token_symbol, max_age_seconds=30):
-        cache_key = f"{chain}_{network}_{wallet_address}_{token_symbol}"
-        current_time = time.time()
-
-        if (
-            cache_key in self._balance_cache
-            and current_time - self._balance_cache[cache_key]["timestamp"] < max_age_seconds
-        ):
-            return self._balance_cache[cache_key]["balance"]
-
-        # Se não estiver em cache ou estiver expirado, buscar do gateway
-        balances = await self._gateway_get_balances(chain, network, wallet_address, [token_symbol])
-
-        if balances and "balances" in balances:
-            balance = Decimal(str(balances["balances"].get(token_symbol, 0)))
-            self._balance_cache[cache_key] = {"balance": balance, "timestamp": current_time}
-            return balance
-
-        return DECIMAL_ZERO
-
-    def _find_most_promising_token_pairs(self):
-        """Identificar pares de tokens com maior potencial de arbitragem"""
-        tokens = self._configuration["tokens"]
-        promising_pairs = []
-
-        for i in range(len(tokens)):
-            for j in range(i + 1, len(tokens)):
-                token1, token2 = tokens[i], tokens[j]
-                pools = self._find_pools_with_token_pair(token1, token2)
-
-                if len(pools) >= 2:  # Precisamos de pelo menos 2 pools para arbitragem
-                    # Verificar liquidez e volume para determinar potencial
-                    total_volume = sum(Decimal(str(p.get("volume", {}).get("24h", 0) or 0)) for p in pools)
-                    promising_pairs.append(
-                        {"token1": token1, "token2": token2, "pools_count": len(pools), "total_volume": total_volume}
-                    )
-
-        # Ordenar por volume e quantidade de pools
-        promising_pairs.sort(key=lambda x: (x["pools_count"], x["total_volume"]), reverse=True)
-        return promising_pairs[:5]  # Retornar os 5 mais promissores
