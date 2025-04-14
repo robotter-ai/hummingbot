@@ -282,9 +282,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _use_async_data_updates: bool = True
 
     # State control
-    _db_initialized: bool = False  # Indicates if database was initialized
+    _database_initialized: bool = False  # Indicates if database was initialized
     _is_updating: bool = False  # Indicates if an update is in progress
-    _db_lock: asyncio.Lock = None
+    _database_lock: asyncio.Lock = None
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
         """
@@ -302,7 +302,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         self.logger().info("Initializing AMM Portfolio Manager strategy")
 
-        self._db_lock = asyncio.Lock()
+        self._database_lock = asyncio.Lock()
 
         # Gateway client initialization
         self._all_gateway_connections = GatewayConnectionSetting.load()
@@ -378,7 +378,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 # Update database only if minimum interval has passed
                 if time_since_last_update >= min_update_interval:
-                    if self._db_initialized:
+                    if self._database_initialized:
                         try:
                             self._is_updating = True
                             await self._update_database()
@@ -403,7 +403,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     def on_tick(self):
         """Called on each tick to execute the strategy."""
-        if not self._is_updating and self._db_initialized:
+        if not self._is_updating and self._database_initialized:
             safe_ensure_future(self._async_on_tick())
 
     async def _async_on_tick(self):
@@ -516,7 +516,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Builds the database structure.
         For each chain, network and connector, stores static information about wallets, tokens and pools.
         """
-        if self._db_initialized:
+        if self._database_initialized:
             self.logger().info("Database already initialized")
 
             return
@@ -589,85 +589,17 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                     "price": None,
                                 }
 
-            # Adds hardcoded test pools
-            self._add_hardcoded_test_pools()
-
             # Initializes database maps
             await self._update_database_maps()
 
             # Marks the database as initialized
-            self._db_initialized = True
+            self._database_initialized = True
             self.logger().info("Database structure initialization completed successfully")
 
         except Exception as e:
             self.logger().error(f"Error initializing database: {str(e)}")
-            self._db_initialized = False
+            self._database_initialized = False
             raise
-
-    def _add_hardcoded_test_pools(self):
-        """
-        Adds hardcoded test pools.
-        # TODO: Make parametrizable or remove after tests.
-        """
-        self.logger().info("Adding hardcoded test pools")
-
-        # Specific pools for test in different networks
-        test_pools = {
-            "polkadot": {
-                "mainnet": {
-                    "hydration": [
-                        "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG",  # USDC-USDT pool
-                        # "7JP6TvcH5x31TsbC6qVJHEhsW7UNmpREMZuLBpK2bG1goJRS",  # USDC-DAI pool (commented)
-                    ]
-                }
-            },
-            "solana": {
-                "mainnet-beta": {
-                    "raydium": [
-                        "2EXiumdi14E9b8Fy62QcA5Uh6WdHS2b38wtSxp72Mibj",  # USDC-USDT pool
-                        "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF",  # USDC-USDT pool alternative
-                    ]
-                }
-            },
-        }
-
-        # Adds hardcoded pools to the database
-        for chain, chain_data in test_pools.items():
-            if chain in database["connections"]:
-                for network, network_data in chain_data.items():
-                    if network in database["connections"][chain]:
-                        for connector, pool_addresses in network_data.items():
-                            if connector in database["connections"][chain][network]:
-                                for pool_addr in pool_addresses:
-                                    if pool_addr not in database["connections"][chain][network][connector]["pools"]:
-                                        # Defines token pair for this pool (based on comment or name)
-                                        token_list = ["USDC", "USDT"]  # By default, we assume USDC-USDT
-                                        if "DAI" in pool_addr or "DAI" in str(locals()):
-                                            token_list = ["USDC", "DAI"]
-
-                                        database["connections"][chain][network][connector]["pools"][pool_addr] = {
-                                            "internal_id": f"{chain}/{network}/{connector}/{pool_addr}",
-                                            "address": pool_addr,
-                                            "chain": chain,
-                                            "network": network,
-                                            "connector": connector,
-                                            "type": "unknown",  # Will be updated from gateway
-                                            "tokens_list": token_list,
-                                            "tokens": {},
-                                            "annual_percentage_rate": None,
-                                            "total_value_locked": None,
-                                            "impermanent_loss": None,
-                                            "volume": {"24h": None},
-                                        }
-                                        self.logger().info(
-                                            f"Test pool added: {pool_addr} ({token_list[0]}-{token_list[1]})"
-                                        )
-
-        # Checks if pools were added
-        total_pools = sum(
-            len(c.get("pools", {})) for n in database["connections"].values() for cn in n.values() for c in cn.values()
-        )
-        self.logger().info(f"Total of {total_pools} pools in database after adding test pools")
 
     async def _update_database_maps(self):
         """
@@ -678,36 +610,32 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         self.logger().info("Updating database maps...")
 
-        try:
-            db_maps = database["maps"]
-            # Clears existing maps
-            db_maps["pools_by_tokens"].clear()
-            db_maps["wallets_by_pool"].clear()
-            db_maps["pools_by_wallet"].clear()
+        maps = database["maps"]
+        # Clears existing maps
+        maps["pools_by_tokens"].clear()
+        maps["wallets_by_pool"].clear()
+        maps["pools_by_wallet"].clear()
 
-            # Rebuilds maps
-            for chain, chain_conf in database["connections"].items():
-                for network, net_conf in chain_conf.items():
-                    for connector, hydration in net_conf.items():
-                        # Maps pools by tokens
-                        for pool_addr, pool in hydration["pools"].items():
-                            tokens_list = pool.get("tokens_list", [])
-                            for i in range(len(tokens_list)):
-                                for j in range(i + 1, len(tokens_list)):
-                                    key = f"{tokens_list[i]}/{tokens_list[j]}"
-                                    db_maps["pools_by_tokens"].setdefault(key, []).append(pool["internal_id"])
+        # Rebuilds maps
+        for _chain_name, chain_configuration in database["connections"].items():
+            for _network_name, network_configuration in chain_configuration.items():
+                for _connector_name, connector_configuration in network_configuration.items():
+                    # Maps pools by tokens
+                    for pool_address, pool_configuration in connector_configuration["pools"].items():
+                        tokens_list = pool_configuration.get("tokens_list", [])
+                        for base_token_index in range(len(tokens_list)):
+                            for quote_token_index in range(base_token_index + 1, len(tokens_list)):
+                                key = f"{tokens_list[base_token_index]}/{tokens_list[quote_token_index]}"
+                                maps["pools_by_tokens"].setdefault(key, []).append(pool_configuration["internal_id"])
 
-                        # Maps wallets to pools and vice versa
-                        for wallet_addr, wallet in hydration["wallets"].items():
-                            wallet_id = wallet["internal_id"]
-                            for pool_addr in wallet.get("pools", {}).keys():
-                                db_maps["pools_by_wallet"].setdefault(wallet_id, []).append(pool_addr)
-                                db_maps["wallets_by_pool"].setdefault(pool_addr, []).append(wallet_id)
+                    # Maps wallets to pools and vice versa
+                    for _wallet_address, wallet_configuration in connector_configuration["wallets"].items():
+                        wallet_id = wallet_configuration["internal_id"]
+                        for pool_address in wallet_configuration.get("pools", {}).keys():
+                            maps["pools_by_wallet"].setdefault(wallet_id, []).append(pool_address)
+                            maps["wallets_by_pool"].setdefault(pool_address, []).append(wallet_id)
 
-            self.logger().info("Database map update completed")
-        except Exception as e:
-            self.logger().error(f"Error in database map update: {str(e)}")
-            raise
+        self.logger().info("Database maps update completed")
 
     # --------------------------------------------------------------------------
     # Dynamic Database Update Methods
@@ -725,64 +653,59 @@ class AMMPortfolioManager(ScriptStrategyBase):
         current_time = time.time()
 
         # Update intervals configured
-        wallet_interval = self._data_update_intervals.get("wallet", 60)
-        token_interval = self._data_update_intervals.get("token", 300)
-        pool_interval = self._data_update_intervals.get("pool", 120)
+        wallet_interval = self._data_update_intervals["wallet"]
+        token_interval = self._data_update_intervals["token"]
+        pool_interval = self._data_update_intervals["pool"]
 
         # Flag to indicate if any update has been performed
         updates_performed = False
 
-        # Simplified lock usage - only one acquisition for entire update
-        # TODO: Refactor to remove lock usage if causing problems
-        async with DatabaseLock(self._db_lock, self.logger(), "_update_database") as lock_acquired:
+        async with DatabaseLock(self._database_lock, self.logger(), "_update_database") as lock_acquired:
             if not lock_acquired:
                 self.logger().warning("Unable to acquire lock for update, skipping this cycle")
+
                 return
 
-            try:
-                # Token update (less frequent)
-                if (not hasattr(self, "_last_token_update_time")) or (
-                    current_time - self._last_token_update_time >= token_interval
-                ):
-                    self.logger().info(f"Updating token information (interval: {token_interval}s)...")
-                    self._last_token_update_time = current_time
-                    await self._update_token_information()
-                    updates_performed = True
+            # Token update
+            if (not hasattr(self, "_last_token_update_time")) or (
+                current_time - self._last_token_update_time >= token_interval
+            ):
+                self.logger().info(f"Updating token information (interval: {token_interval}s)...")
+                self._last_token_update_time = current_time
+                await self._update_token_information()
+                updates_performed = True
 
-                # Pool update (medium frequency)
-                if (not hasattr(self, "_last_pool_update_time")) or (
-                    current_time - self._last_pool_update_time >= pool_interval
-                ):
-                    self.logger().info(f"Updating pool information (interval: {pool_interval}s)...")
-                    self._last_pool_update_time = current_time
-                    await self._update_pool_information()
-                    updates_performed = True
+            # Pool update
+            if (not hasattr(self, "_last_pool_update_time")) or (
+                current_time - self._last_pool_update_time >= pool_interval
+            ):
+                self.logger().info(f"Updating pool information (interval: {pool_interval}s)...")
+                self._last_pool_update_time = current_time
+                await self._update_pool_information()
+                updates_performed = True
 
-                # Wallet update (more frequent)
-                if (not hasattr(self, "_last_wallet_update_time")) or (
-                    current_time - self._last_wallet_update_time >= wallet_interval
-                ):
-                    self.logger().info(f"Updating wallet balances (interval: {wallet_interval}s)...")
-                    self._last_wallet_update_time = current_time
-                    await self._update_wallet_balances()
-                    updates_performed = True
+            # Wallet update
+            if (not hasattr(self, "_last_wallet_update_time")) or (
+                current_time - self._last_wallet_update_time >= wallet_interval
+            ):
+                self.logger().info(f"Updating wallet balances (interval: {wallet_interval}s)...")
+                self._last_wallet_update_time = current_time
+                await self._update_wallet_balances()
+                updates_performed = True
 
-                # Updates maps only if any update has been performed
-                if updates_performed:
-                    self.logger().info("Updating database maps after changes...")
-                    await self._update_database_maps()
-                else:
-                    self.logger().info("No updates performed in this cycle. Skipping map update.")
+            # Updates maps only if any update has been performed
+            if updates_performed:
+                self.logger().info("Updating database maps after changes...")
+                await self._update_database_maps()
+            else:
+                self.logger().info("No updates performed in this cycle. Skipping map update.")
 
-                # First time the method is executed, marks the database as initialized
-                if not self._db_initialized:
-                    self._db_initialized = True
-                    self.logger().info("Database marked as initialized after first update")
+            # First time the method is executed, marks the database as initialized
+            if not self._database_initialized:
+                self._database_initialized = True
+                self.logger().info("Database marked as initialized after first update")
 
-                self.logger().info("Database update completed successfully")
-            except Exception as e:
-                self.logger().error(f"Error during database update: {str(e)}")
-                raise
+            self.logger().info("Database update completed successfully")
 
     async def _update_pool_information(self):
         """
@@ -791,118 +714,85 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         self.logger().info("Updating pool information...")
 
-        try:
-            for chain, chain_conf in database["connections"].items():
-                for network, net_conf in chain_conf.items():
-                    for connector, hydration in net_conf.items():
-                        for pool_addr, pool in hydration["pools"].items():
-                            try:
-                                pool_info = await self._gateway_get_pool_info(connector, network, pool_addr)
+        for _chain_name, chain_configuration in database["connections"].items():
+            for network_name, network_configuration in chain_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
+                    for pool_address, pool_configuration in connector_configuration["pools"].items():
+                        pool_information = await self._gateway_get_pool_info(connector_name, network_name, pool_address)
 
-                                if pool_info:
-                                    # Updates pool fundamental data
-                                    pool["annual_percentage_rate"] = pool_info.get("annual_percentage_rate")
-                                    pool["total_value_locked"] = pool_info.get("total_value_locked")
-                                    pool["volume"]["24h"] = pool_info.get("volume", {}).get("24h")
+                        if pool_information:
+                            # TODO: Move this to a pool initialization method!!!
+                            pool_configuration["type"] = pool_information.get("poolType")
 
-                                    # Updates token information in pool
-                                    if "tokens" in pool_info:
-                                        pool["tokens"] = pool_info["tokens"]
+                            # TODO: Move this to a pool initialization method and correct fill the token data and tokens_list using the pool information and the already stored tokens!!!
+                            # pool_configuration["tokens"] = pool_information["tokens"]
+                            # pool_configuration["tokens_list"] = pool_information["tokens_list"]
 
-                                    # Updates pool type
-                                    if pool_info.get("type"):
-                                        pool["type"] = pool_info.get("type")
-                            except Exception as e:
-                                self.logger().error(f"Failed to update pool {pool_addr}: {str(e)}")
+                            pool_configuration["annual_percentage_rate"] = pool_information.get(
+                                "annual_percentage_rate"
+                            )
+                            pool_configuration["total_value_locked"] = pool_information.get("total_value_locked")
+                            pool_configuration["volume"]["24h"] = pool_information.get("volume", {}).get("24h")
 
             self.logger().info("Pool information update completed")
-        except Exception as e:
-            self.logger().error(f"Error in pool information update: {str(e)}")
-            raise
 
     async def _update_wallet_balances(self):
         """
         Updates dynamic wallet data: balances and positions in pools
         by querying the gateway.
         """
-        self.logger().info("Updating wallet balances...")
 
-        try:
-            for chain, chain_conf in database["connections"].items():
-                for network, net_conf in chain_conf.items():
-                    for connector, hydration in net_conf.items():
-                        for wallet_addr, wallet in hydration["wallets"].items():
-                            try:
-                                wallet_info = await self._gateway_get_balances(chain, network, wallet_addr)
+        for chain_name, chain_configuration in database["connections"].items():
+            for network_name, network_configuration in chain_configuration.items():
+                for _connector_name, connector_configuration in network_configuration.items():
+                    for wallet_address, wallet_configuration in connector_configuration["wallets"].items():
+                        wallet_balances = await self._gateway_get_balances(chain_name, network_name, wallet_address)
 
-                                if wallet_info and "tokens" in wallet_info:
-                                    # Updates token information
-                                    for token_sym, bal_data in wallet_info["tokens"].items():
-                                        wallet["tokens"][token_sym] = {
-                                            "balances": {
-                                                "free": bal_data.get("free"),
-                                                "locked": {
-                                                    "total": bal_data.get("locked"),
-                                                    "liquidity": {
-                                                        "total": bal_data.get("liquidity", {}).get("total"),
-                                                        "pools": bal_data.get("liquidity", {}).get("pools", {}),
-                                                    },
-                                                },
-                                                "total": bal_data.get("total"),
-                                            }
-                                        }
-
-                                # Updates pool information for wallet
-                                if "pools" in wallet_info:
-                                    wallet["pools"] = wallet_info["pools"]
-                            except Exception as e:
-                                self.logger().error(f"Failed to update wallet {wallet_addr}: {str(e)}")
-
-            self.logger().info("Wallet balances update completed")
-        except Exception as e:
-            self.logger().error(f"Error in wallet balances update: {str(e)}")
-            raise
+                        if wallet_balances and "balances" in wallet_balances:
+                            for token_symbol, balance in wallet_balances["balances"].items():
+                                wallet_configuration["tokens"][token_symbol] = {
+                                    "balances": {
+                                        "free": balance,
+                                        "locked": {
+                                            "total": None,
+                                            "liquidity": {
+                                                "total": None,
+                                                "pools": {},
+                                            },
+                                        },
+                                        "total": balance,
+                                    }
+                                }
 
     async def _update_token_information(self):
         """
         Updates static token information (price, decimals, name)
         by querying the gateway.
         """
-        self.logger().info("Updating token information...")
 
-        try:
-            for chain_name, chain in database["connections"].items():
-                for network_name, network in chain.items():
-                    for connector_name, connector in network.items():
-                        try:
-                            # Retrieves token information from the gateway
-                            token_response = await self._gateway_get_tokens(
-                                chain_name, network_name, self._configuration.get("tokens", [])
-                            )
+        for chain_name, chain_configuration in database["connections"].items():
+            for network_name, network_configuration in chain_configuration.items():
+                for _connector_name, connector_configuration in network_configuration.items():
+                    # Retrieves token information from the gateway
+                    token_response = await self._gateway_get_tokens(
+                        chain_name, network_name, self._configuration.get("tokens", [])
+                    )
 
-                            if token_response and "tokens" in token_response:
-                                tokens = token_response["tokens"]
+                    if token_response and "tokens" in token_response:
+                        tokens = token_response["tokens"]
 
-                                # Updates each found token
-                                for token in tokens:
-                                    if token.get("symbol") in connector["tokens"]:
-                                        connector["tokens"][token.get("symbol")].update(
-                                            {
-                                                "address": token.get("address"),
-                                                "name": token.get("name"),
-                                                "decimals": token.get("decimals"),
-                                                "price": token.get("price"),
-                                            }
-                                        )
-                        except Exception as e:
-                            self.logger().error(
-                                f"Failed to update tokens for {chain_name}/{network_name}/{connector_name}: {str(e)}"
-                            )
-
-            self.logger().info("Token information update completed")
-        except Exception as e:
-            self.logger().error(f"Error in token information update: {str(e)}")
-            raise
+                        # Updates each found token
+                        for token in tokens:
+                            if token.get("symbol") in connector_configuration["tokens"]:
+                                connector_configuration["tokens"][token.get("symbol")].update(
+                                    {
+                                        # TODO: Move this to a token initialization method!!!
+                                        "address": token.get("address"),
+                                        "name": token.get("name"),
+                                        "decimals": token.get("decimals"),
+                                        "price": token.get("price"),
+                                    }
+                                )
 
     # --------------------------------------------------------------------------
     # Arbitrage Opportunity Discovery and Trade Execution Methods
@@ -1441,7 +1331,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             List of wallet addresses.
         """
         pool_id = pool.get("address")
-        async with self._db_lock:
+        async with self._database_lock:
             mapping = database["maps"].get("wallets_by_pool", {})
             if pool_id in mapping:
                 return mapping[pool_id]
