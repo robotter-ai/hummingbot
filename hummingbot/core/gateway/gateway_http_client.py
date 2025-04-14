@@ -865,7 +865,16 @@ class GatewayHttpClient:
             fail_silently=fail_silently,
         )
 
-    async def amm_list_pools(self, connector: str, network: str, fail_silently: bool = False) -> Dict[str, Any]:
+    async def amm_list_pools(
+        self,
+        connector: str,
+        network: str,
+        tokens: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
+        fail_silently: bool = False,
+        max_number_of_pages: int = 3,
+        use_official_tokens: bool = True,
+    ) -> Dict[str, Any]:
         """
         Fetches all available AMM pools for a given connector and network
         :param connector: The connector/protocol (e.g., "raydium")
@@ -875,6 +884,10 @@ class GatewayHttpClient:
         """
         query_params = {
             "network": network,
+            "tokens": tokens,
+            "types": types,
+            "maxNumberOfPages": max_number_of_pages,
+            "useOfficialTokens": use_official_tokens,
         }
         return await self.api_request(
             "get",

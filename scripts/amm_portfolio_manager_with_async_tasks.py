@@ -119,6 +119,7 @@ class DatabaseLock:
     Simplified context manager for database with timeout.
     """
 
+    # noinspection PyShadowingNames
     def __init__(self, lock: asyncio.Lock, logger: logging.Logger, caller: str):
         self.lock = lock
         self.logger = logger
@@ -392,7 +393,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 # Wait appropriate interval before checking again
                 # Use at least 5 seconds or half the smallest configured interval
-                sleep_time = max(5, min_update_interval / 2)
+                sleep_time = max(5.0, min_update_interval / 2.0)
                 await asyncio.sleep(sleep_time)
 
         except asyncio.CancelledError:
@@ -602,61 +603,42 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     async def _initialize_pool_information(self):
         """
-        Initializes pool information by querying all pools containing
-        the configured tokens, and storing static data about each pool.
-        """
+        Initializes pool information by following this approach:
+        1. First add pools explicitly specified in the configuration
+        2. Then find pools by using combinations of token pairs from the configuration
+        3. Update detailed information for all found pools
 
+        All pools are assumed to have exactly 2 tokens.
+        """
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     connection = database["connections"][chain_name][network_name][connector_name]
+                    pool_addresses = set()
 
-                    # First, add pools from configuration
+                    # 1. Collect pools from configuration
                     for pool_address in connector_configuration.get("pools", []):
-                        if pool_address not in connection["pools"]:
-                            connection["pools"][pool_address] = {
-                                "internal_id": f"{chain_name}/{network_name}/{connector_name}/{pool_address}",
-                                "address": pool_address,
-                                "chain": chain_name,
-                                "network": network_name,
-                                "connector": connector_name,
-                                "type": None,
-                                "tokens_list": [],
-                                "tokens": {},
-                                "annual_percentage_rate": None,
-                                "total_value_locked": None,
-                                "impermanent_loss": None,
-                                "volume": {"24h": None},
-                            }
+                        pool_addresses.add(pool_address)
 
-                    # Get all pools from network that contain our tokens
-                    pools_info = await self._gateway_get_pools(connector_name, network_name)
+                    # 2. Find pools by token pairs from configuration
+                    tokens = self._configuration.get("tokens", [])
 
-                    if not pools_info or "pools" not in pools_info:
-                        continue
+                    # Generate all possible token pair combinations
+                    for i in range(len(tokens)):
+                        for j in range(i + 1, len(tokens)):
+                            base_token, quote_token = tokens[i], tokens[j]
 
-                    pools = pools_info.get("pools", [])
+                            # Find pools containing this token pair
+                            pools_for_pair = await self._gateway_find_pools_by_tokens(
+                                connector_name, network_name, [base_token, quote_token], ["amm", "xky"]
+                            )
 
-                    # Process each pool
-                    for pool in pools:
-                        if not isinstance(pool, dict):
-                            continue
+                            # Add found pools to our collection
+                            for pool_address in pools_for_pair:
+                                pool_addresses.add(pool_address)
 
-                        pool_address = pool.get("address")
-                        if not pool_address:
-                            continue
-
-                        # Check if pool contains any configured tokens
-                        pool_tokens = pool.get("tokens", [])
-                        has_configured_token = False
-                        for token in pool_tokens:
-                            if token in self._configuration.get("tokens", []):
-                                has_configured_token = True
-                                break
-
-                        if not has_configured_token and pool_address not in connector_configuration.get("pools", []):
-                            continue
-
+                    # 3. Update detailed information for all pools
+                    for pool_address in pool_addresses:
                         # Get detailed pool information
                         detailed_pool_info = await self._gateway_get_pool_info(
                             connector_name, network_name, pool_address
@@ -665,7 +647,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         if not detailed_pool_info:
                             continue
 
-                        # Initialize pool with static data
+                        # Create or update pool with detailed information
+                        pool_tokens = detailed_pool_info.get("tokens", [])
+
                         connection["pools"][pool_address] = {
                             "internal_id": f"{chain_name}/{network_name}/{connector_name}/{pool_address}",
                             "address": pool_address,
@@ -675,17 +659,17 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             "type": detailed_pool_info.get("poolType"),
                             "tokens_list": pool_tokens,
                             "tokens": {},
-                            "annual_percentage_rate": None,  # Dynamic data, updated separately
-                            "total_value_locked": None,  # Dynamic data, updated separately
-                            "impermanent_loss": None,  # Dynamic data, updated separately
-                            "volume": {"24h": None},  # Dynamic data, updated separately
+                            "annual_percentage_rate": None,
+                            "total_value_locked": None,
+                            "impermanent_loss": None,
+                            "volume": {"24h": None},
                         }
 
                         # Initialize tokens structure in pool
                         for token_symbol in pool_tokens:
                             connection["pools"][pool_address]["tokens"][token_symbol] = {
-                                "balance": None,  # Will be updated dynamically
-                                "prices": {},  # Will be populated with token pairs
+                                "balance": None,
+                                "prices": {},
                             }
 
     async def _initialize_wallet_information(self):
@@ -855,59 +839,54 @@ class AMMPortfolioManager(ScriptStrategyBase):
     async def _update_pool_information(self):
         """
         Updates dynamic pool statistics (APR, TVL, volume, token prices)
-        by querying the gateway.
+        by querying the gateway. All pools are assumed to have exactly 2 tokens,
+        with the first being the base token and the second being the quote token.
         """
-
         for chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     for pool_address, pool_configuration in connector_configuration["pools"].items():
+                        # Get updated pool information from gateway
                         pool_information = await self._gateway_get_pool_info(connector_name, network_name, pool_address)
 
-                        if pool_information:
-                            # Update only dynamic values
-                            pool_configuration["annual_percentage_rate"] = pool_information.get(
-                                "annual_percentage_rate"
+                        if not pool_information:
+                            continue
+
+                        # Update dynamic values
+                        pool_configuration["annual_percentage_rate"] = pool_information.get("annual_percentage_rate")
+                        pool_configuration["total_value_locked"] = pool_information.get("total_value_locked")
+                        pool_configuration["volume"]["24h"] = pool_information.get("volume", {}).get("24h")
+
+                        # Get token symbols - assume first is base, second is quote
+                        base_token = pool_configuration["tokens_list"][0]
+                        quote_token = pool_configuration["tokens_list"][1]
+
+                        # Update token prices if available
+                        if "price" in pool_information:
+                            price = Decimal(str(pool_information.get("price", 0)))
+
+                            # Update base token price in terms of quote token
+                            if base_token in pool_configuration["tokens"]:
+                                pool_configuration["tokens"][base_token].setdefault("prices", {})
+                                pool_configuration["tokens"][base_token]["prices"][quote_token] = price
+
+                            # Update quote token price in terms of base token
+                            if quote_token in pool_configuration["tokens"]:
+                                pool_configuration["tokens"][quote_token].setdefault("prices", {})
+                                pool_configuration["tokens"][quote_token]["prices"][base_token] = (
+                                    Decimal("1") / price if price != DECIMAL_ZERO else None
+                                )
+
+                        # Update token balances in pool
+                        if "baseTokenAmount" in pool_information and base_token in pool_configuration["tokens"]:
+                            pool_configuration["tokens"][base_token]["balance"] = Decimal(
+                                str(pool_information.get("baseTokenAmount", "0"))
                             )
-                            pool_configuration["total_value_locked"] = pool_information.get("total_value_locked")
-                            pool_configuration["volume"]["24h"] = pool_information.get("volume", {}).get("24h")
 
-                            # Update token balances and prices in pool
-                            if len(pool_configuration["tokens_list"]) == 2:
-                                base_token = pool_configuration["tokens_list"][0]
-                                quote_token = pool_configuration["tokens_list"][1]
-
-                                # Update token prices if available
-                                if "price" in pool_information:
-                                    price = Decimal(str(pool_information.get("price", 0)))
-
-                                    if base_token in pool_configuration["tokens"]:
-                                        if "prices" not in pool_configuration["tokens"][base_token]:
-                                            pool_configuration["tokens"][base_token]["prices"] = {}
-
-                                        pool_configuration["tokens"][base_token]["prices"][quote_token] = price
-
-                                    if quote_token in pool_configuration["tokens"]:
-                                        if "prices" not in pool_configuration["tokens"][quote_token]:
-                                            pool_configuration["tokens"][quote_token]["prices"] = {}
-
-                                        pool_configuration["tokens"][quote_token]["prices"][base_token] = (
-                                            Decimal("1") / price if price != DECIMAL_ZERO else None
-                                        )
-
-                                # Update token balances in pool
-                                if "baseTokenAmount" in pool_information and base_token in pool_configuration["tokens"]:
-                                    pool_configuration["tokens"][base_token]["balance"] = Decimal(
-                                        str(pool_information.get("baseTokenAmount", "0"))
-                                    )
-
-                                if (
-                                    "quoteTokenAmount" in pool_information
-                                    and quote_token in pool_configuration["tokens"]
-                                ):
-                                    pool_configuration["tokens"][quote_token]["balance"] = Decimal(
-                                        str(pool_information.get("quoteTokenAmount", "0"))
-                                    )
+                        if "quoteTokenAmount" in pool_information and quote_token in pool_configuration["tokens"]:
+                            pool_configuration["tokens"][quote_token]["balance"] = Decimal(
+                                str(pool_information.get("quoteTokenAmount", "0"))
+                            )
 
     async def _update_wallet_balances(self):
         """
@@ -1027,6 +1006,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         # Returns the 5 most promising pairs
         return promising_pairs[:5]
 
+    # noinspection PyMethodMayBeStatic
     def _find_pools_with_token_pair(self, token1: str, token2: str) -> List[Dict[str, Any]]:
         """
         Searches the database for pools containing both tokens.
@@ -1070,6 +1050,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         return result
 
+    # noinspection PyMethodMayBeStatic
     def _get_cached_token_price_in_pool(
         self, base_token: str, quote_token: str, pool: Dict[str, Any]
     ) -> Optional[Decimal]:
@@ -1470,6 +1451,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             self.logger().error(f"Error during arbitrage execution: {str(e)}")
             return False
 
+    # noinspection PyMethodMayBeStatic
     async def _get_total_token_balance_from_all_wallets(self, token: str) -> Decimal:
         """
         Sums the free balance of a token in all wallets in the database.
@@ -1486,12 +1468,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
             for network_data in chain_data.values():
                 for connector_data in network_data.values():
                     for wallet in connector_data.get("wallets", {}).values():
-                        try:
-                            bal = wallet.get("tokens", {}).get(token, {}).get("balances", {}).get("free", 0)
-                            if bal:
-                                total += Decimal(str(bal))
-                        except Exception:
-                            continue
+                        balance = wallet.get("tokens", {}).get(token, {}).get("balances", {}).get("free", 0)
+                        if balance:
+                            total += Decimal(str(balance))
 
         return total
 
@@ -1709,9 +1688,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
         return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
-    async def _gateway_get_pools(self, connector: str, network: str):
-        """Retrieves all available pools from the gateway."""
-        return await self._gateway_http_client.amm_pools(connector, network)
+    async def _gateway_find_pools_by_tokens(
+        self, connector: str, network: str, tokens: Optional[List[str]] = None, types: Optional[List[str]] = None
+    ):
+        """List pools filtering the results"""
+        return await self._gateway_http_client.amm_list_pools(connector, network, tokens, types)
 
 
 # ==============================================================================
