@@ -542,55 +542,18 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             },
                         )
 
-                        connection = database["connections"][chain_name][network_name][connector_name]
-
-                        # Adds wallets
-                        for wallet_address in connector_configuration.get("wallets", []):
-                            if wallet_address not in connection["wallets"]:
-                                connection["wallets"][wallet_address] = {
-                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{wallet_address}",
-                                    "chain": chain_name,
-                                    "network": network_name,
-                                    "connector": connector_name,
-                                    "tokens": {},
-                                    "pools": {},
-                                }
-
-                        # Adds pools
-                        for pool_address in connector_configuration.get("pools", []):
-                            if pool_address not in connection["pools"]:
-                                connection["pools"][pool_address] = {
-                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{pool_address}",
-                                    "address": pool_address,
-                                    "chain": chain_name,
-                                    "network": network_name,
-                                    "connector": connector_name,
-                                    "type": None,
-                                    "tokens_list": [],
-                                    "tokens": {},
-                                    "annual_percentage_rate": None,
-                                    "total_value_locked": None,
-                                    "impermanent_loss": None,
-                                    "volume": {"24h": None},
-                                }
-
-                        # Adds tokens
-                        for token_symbol in self._configuration.get("tokens", []):
-                            if token_symbol not in connection["tokens"]:
-                                connection["tokens"][token_symbol] = {
-                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{token_symbol}",
-                                    "address": None,
-                                    "chain": chain_name,
-                                    "network": network_name,
-                                    "connector": connector_name,
-                                    "symbol": token_symbol,
-                                    "name": None,
-                                    "decimals": None,
-                                    "price": None,
-                                }
+            # Initialize tokens, pools, and wallets in order
+            await self._initialize_token_information()
+            await self._initialize_pool_information()
+            await self._initialize_wallet_information()
 
             # Initializes database maps
             await self._update_database_maps()
+
+            # Update initial dynamic data
+            await self._update_token_information()
+            await self._update_pool_information()
+            await self._update_wallet_balances()
 
             # Marks the database as initialized
             self._database_initialized = True
@@ -600,6 +563,188 @@ class AMMPortfolioManager(ScriptStrategyBase):
             self.logger().error(f"Error initializing database: {str(e)}")
             self._database_initialized = False
             raise
+
+    async def _initialize_token_information(self):
+        """
+        Initializes static token information (address, name, decimals)
+        for all tokens defined in the configuration.
+        """
+
+        for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
+            for network_name, network_configuration in chain_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
+                    connection = database["connections"][chain_name][network_name][connector_name]
+
+                    # Retrieves token information from the gateway
+                    token_response = await self._gateway_get_tokens(
+                        chain_name, network_name, self._configuration.get("tokens", [])
+                    )
+
+                    if token_response and "tokens" in token_response:
+                        tokens = token_response["tokens"]
+
+                        # Initialize each found token
+                        for token in tokens:
+                            token_symbol = token.get("symbol")
+                            if token_symbol in self._configuration.get("tokens", []):
+                                # Create or update token info with static data
+                                connection["tokens"][token_symbol] = {
+                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{token_symbol}",
+                                    "address": token.get("address"),
+                                    "chain": chain_name,
+                                    "network": network_name,
+                                    "connector": connector_name,
+                                    "symbol": token_symbol,
+                                    "name": token.get("name", token_symbol),
+                                    "decimals": token.get("decimals"),
+                                    "price": None,  # Price is dynamic and will be updated separately
+                                }
+
+    async def _initialize_pool_information(self):
+        """
+        Initializes pool information by querying all pools containing
+        the configured tokens, and storing static data about each pool.
+        """
+
+        for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
+            for network_name, network_configuration in chain_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
+                    connection = database["connections"][chain_name][network_name][connector_name]
+
+                    # First, add pools from configuration
+                    for pool_address in connector_configuration.get("pools", []):
+                        if pool_address not in connection["pools"]:
+                            connection["pools"][pool_address] = {
+                                "internal_id": f"{chain_name}/{network_name}/{connector_name}/{pool_address}",
+                                "address": pool_address,
+                                "chain": chain_name,
+                                "network": network_name,
+                                "connector": connector_name,
+                                "type": None,
+                                "tokens_list": [],
+                                "tokens": {},
+                                "annual_percentage_rate": None,
+                                "total_value_locked": None,
+                                "impermanent_loss": None,
+                                "volume": {"24h": None},
+                            }
+
+                    # Get all pools from network that contain our tokens
+                    pools_info = await self._gateway_get_pools(connector_name, network_name)
+
+                    if not pools_info or "pools" not in pools_info:
+                        continue
+
+                    pools = pools_info.get("pools", [])
+
+                    # Process each pool
+                    for pool in pools:
+                        if not isinstance(pool, dict):
+                            continue
+
+                        pool_address = pool.get("address")
+                        if not pool_address:
+                            continue
+
+                        # Check if pool contains any configured tokens
+                        pool_tokens = pool.get("tokens", [])
+                        has_configured_token = False
+                        for token in pool_tokens:
+                            if token in self._configuration.get("tokens", []):
+                                has_configured_token = True
+                                break
+
+                        if not has_configured_token and pool_address not in connector_configuration.get("pools", []):
+                            continue
+
+                        # Get detailed pool information
+                        detailed_pool_info = await self._gateway_get_pool_info(
+                            connector_name, network_name, pool_address
+                        )
+
+                        if not detailed_pool_info:
+                            continue
+
+                        # Initialize pool with static data
+                        connection["pools"][pool_address] = {
+                            "internal_id": f"{chain_name}/{network_name}/{connector_name}/{pool_address}",
+                            "address": pool_address,
+                            "chain": chain_name,
+                            "network": network_name,
+                            "connector": connector_name,
+                            "type": detailed_pool_info.get("poolType"),
+                            "tokens_list": pool_tokens,
+                            "tokens": {},
+                            "annual_percentage_rate": None,  # Dynamic data, updated separately
+                            "total_value_locked": None,  # Dynamic data, updated separately
+                            "impermanent_loss": None,  # Dynamic data, updated separately
+                            "volume": {"24h": None},  # Dynamic data, updated separately
+                        }
+
+                        # Initialize tokens structure in pool
+                        for token_symbol in pool_tokens:
+                            connection["pools"][pool_address]["tokens"][token_symbol] = {
+                                "balance": None,  # Will be updated dynamically
+                                "prices": {},  # Will be populated with token pairs
+                            }
+
+    async def _initialize_wallet_information(self):
+        """
+        Initializes wallet information for all configured wallets,
+        setting up the basic structure for tokens and pools.
+        """
+
+        for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
+            for network_name, network_configuration in chain_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
+                    connection = database["connections"][chain_name][network_name][connector_name]
+
+                    # Add wallets from configuration
+                    for wallet_address in connector_configuration.get("wallets", []):
+                        if wallet_address not in connection["wallets"]:
+                            connection["wallets"][wallet_address] = {
+                                "internal_id": f"{chain_name}/{network_name}/{connector_name}/{wallet_address}",
+                                "chain": chain_name,
+                                "network": network_name,
+                                "connector": connector_name,
+                                "tokens": {},
+                                "pools": {},
+                            }
+
+                            # Pre-initialize token structures for all configured tokens
+                            for token_symbol in self._configuration.get("tokens", []):
+                                connection["wallets"][wallet_address]["tokens"][token_symbol] = {
+                                    "balances": {
+                                        "free": None,  # Dynamic data
+                                        "locked": {
+                                            "total": None,  # Dynamic data
+                                            "liquidity": {
+                                                "total": None,  # Dynamic data
+                                                "pools": {},  # Dynamic data
+                                            },
+                                        },
+                                        "total": None,  # Dynamic data
+                                    }
+                                }
+
+                            # Link wallet to pools it's eligible for
+                            for pool_address in connection["pools"]:
+                                connection["wallets"][wallet_address]["pools"][pool_address] = {
+                                    "shares": None,  # Dynamic data
+                                    "tokens": {},  # Dynamic data
+                                    "impermanent_loss": None,  # Dynamic data
+                                }
+
+                                # Link pool to wallet in maps
+                                pool_internal_id = connection["pools"][pool_address]["internal_id"]
+                                wallet_internal_id = connection["wallets"][wallet_address]["internal_id"]
+
+                                database["maps"].setdefault("wallets_by_pool", {}).setdefault(
+                                    pool_internal_id, []
+                                ).append(wallet_internal_id)
+                                database["maps"].setdefault("pools_by_wallet", {}).setdefault(
+                                    wallet_internal_id, []
+                                ).append(pool_internal_id)
 
     async def _update_database_maps(self):
         """
@@ -712,29 +857,57 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Updates dynamic pool statistics (APR, TVL, volume, token prices)
         by querying the gateway.
         """
-        self.logger().info("Updating pool information...")
 
-        for _chain_name, chain_configuration in database["connections"].items():
+        for chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     for pool_address, pool_configuration in connector_configuration["pools"].items():
                         pool_information = await self._gateway_get_pool_info(connector_name, network_name, pool_address)
 
                         if pool_information:
-                            # TODO: Move this to a pool initialization method!!!
-                            pool_configuration["type"] = pool_information.get("poolType")
-
-                            # TODO: Move this to a pool initialization method and correct fill the token data and tokens_list using the pool information and the already stored tokens!!!
-                            # pool_configuration["tokens"] = pool_information["tokens"]
-                            # pool_configuration["tokens_list"] = pool_information["tokens_list"]
-
+                            # Update only dynamic values
                             pool_configuration["annual_percentage_rate"] = pool_information.get(
                                 "annual_percentage_rate"
                             )
                             pool_configuration["total_value_locked"] = pool_information.get("total_value_locked")
                             pool_configuration["volume"]["24h"] = pool_information.get("volume", {}).get("24h")
 
-            self.logger().info("Pool information update completed")
+                            # Update token balances and prices in pool
+                            if len(pool_configuration["tokens_list"]) == 2:
+                                base_token = pool_configuration["tokens_list"][0]
+                                quote_token = pool_configuration["tokens_list"][1]
+
+                                # Update token prices if available
+                                if "price" in pool_information:
+                                    price = Decimal(str(pool_information.get("price", 0)))
+
+                                    if base_token in pool_configuration["tokens"]:
+                                        if "prices" not in pool_configuration["tokens"][base_token]:
+                                            pool_configuration["tokens"][base_token]["prices"] = {}
+
+                                        pool_configuration["tokens"][base_token]["prices"][quote_token] = price
+
+                                    if quote_token in pool_configuration["tokens"]:
+                                        if "prices" not in pool_configuration["tokens"][quote_token]:
+                                            pool_configuration["tokens"][quote_token]["prices"] = {}
+
+                                        pool_configuration["tokens"][quote_token]["prices"][base_token] = (
+                                            Decimal("1") / price if price != DECIMAL_ZERO else None
+                                        )
+
+                                # Update token balances in pool
+                                if "baseTokenAmount" in pool_information and base_token in pool_configuration["tokens"]:
+                                    pool_configuration["tokens"][base_token]["balance"] = Decimal(
+                                        str(pool_information.get("baseTokenAmount", "0"))
+                                    )
+
+                                if (
+                                    "quoteTokenAmount" in pool_information
+                                    and quote_token in pool_configuration["tokens"]
+                                ):
+                                    pool_configuration["tokens"][quote_token]["balance"] = Decimal(
+                                        str(pool_information.get("quoteTokenAmount", "0"))
+                                    )
 
     async def _update_wallet_balances(self):
         """
@@ -744,35 +917,41 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         for chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
-                for _connector_name, connector_configuration in network_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
                     for wallet_address, wallet_configuration in connector_configuration["wallets"].items():
                         wallet_balances = await self._gateway_get_balances(chain_name, network_name, wallet_address)
 
                         if wallet_balances and "balances" in wallet_balances:
                             for token_symbol, balance in wallet_balances["balances"].items():
-                                wallet_configuration["tokens"][token_symbol] = {
-                                    "balances": {
-                                        "free": balance,
-                                        "locked": {
-                                            "total": None,
-                                            "liquidity": {
+                                # Create token structure if it doesn't exist
+                                if token_symbol not in wallet_configuration["tokens"]:
+                                    wallet_configuration["tokens"][token_symbol] = {
+                                        "balances": {
+                                            "free": None,
+                                            "locked": {
                                                 "total": None,
-                                                "pools": {},
+                                                "liquidity": {
+                                                    "total": None,
+                                                    "pools": {},
+                                                },
                                             },
-                                        },
-                                        "total": balance,
+                                            "total": None,
+                                        }
                                     }
-                                }
+
+                                # Update balances with the new values
+                                wallet_configuration["tokens"][token_symbol]["balances"]["free"] = balance
+                                wallet_configuration["tokens"][token_symbol]["balances"]["total"] = balance
 
     async def _update_token_information(self):
         """
-        Updates static token information (price, decimals, name)
+        Updates dynamic token information (price)
         by querying the gateway.
         """
 
         for chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
-                for _connector_name, connector_configuration in network_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
                     # Retrieves token information from the gateway
                     token_response = await self._gateway_get_tokens(
                         chain_name, network_name, self._configuration.get("tokens", [])
@@ -781,18 +960,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     if token_response and "tokens" in token_response:
                         tokens = token_response["tokens"]
 
-                        # Updates each found token
+                        # Updates each found token's price
                         for token in tokens:
-                            if token.get("symbol") in connector_configuration["tokens"]:
-                                connector_configuration["tokens"][token.get("symbol")].update(
-                                    {
-                                        # TODO: Move this to a token initialization method!!!
-                                        "address": token.get("address"),
-                                        "name": token.get("name"),
-                                        "decimals": token.get("decimals"),
-                                        "price": token.get("price"),
-                                    }
-                                )
+                            token_symbol = token.get("symbol")
+                            if token_symbol in connector_configuration["tokens"]:
+                                connector_configuration["tokens"][token_symbol]["price"] = token.get("price")
+
+        self.logger().info("Token information update completed")
 
     # --------------------------------------------------------------------------
     # Arbitrage Opportunity Discovery and Trade Execution Methods
@@ -1533,6 +1707,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
     async def _gateway_poll_transaction(self, chain: str, network: str, tx_hash: str):
         """Polls the transaction status from the gateway."""
         return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
+
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
+    async def _gateway_get_pools(self, connector: str, network: str):
+        """Retrieves all available pools from the gateway."""
+        return await self._gateway_http_client.amm_pools(connector, network)
 
 
 # ==============================================================================
