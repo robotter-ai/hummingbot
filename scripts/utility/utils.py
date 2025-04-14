@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import logging
+import time
 import traceback
 from functools import wraps
 from pathlib import Path
@@ -224,4 +225,68 @@ def logged_class(
         return decorator(cls)
 
     # If called with @logged_class(logger=...)
+    return decorator
+
+
+class CacheManager:
+    _cache = {}
+
+    @classmethod
+    def get_cache_key(cls, function, args, kwargs):
+        args_key = str(args)
+        kwargs_key = str(sorted(kwargs.items()))
+        return f"{function.__qualname__}:{args_key}:{kwargs_key}"
+
+    @classmethod
+    def get_cached_value(cls, key):
+        if key in cls._cache:
+            cached_data = cls._cache[key]
+            if cached_data["expiration_time"] > time.time():
+                return cached_data["value"]
+            del cls._cache[key]
+        return None
+
+    @classmethod
+    def set_cached_value(cls, key, value, ttl):
+        cls._cache[key] = {"value": value, "expiration_time": time.time() + ttl}
+
+    @classmethod
+    def clear_cache(cls):
+        cls._cache.clear()
+
+
+def cached(ttl: int = 60):
+    def decorator(function):
+        @wraps(function)
+        async def async_wrapper(*args, **kwargs):
+            force_refresh = kwargs.pop("force_refresh", False)
+            cache_key = CacheManager.get_cache_key(function, args, kwargs)
+
+            if not force_refresh:
+                cached_value = CacheManager.get_cached_value(cache_key)
+                if cached_value is not None:
+                    return cached_value
+
+            result = await function(*args, **kwargs)
+            CacheManager.set_cached_value(cache_key, result, ttl)
+            return result
+
+        @wraps(function)
+        def sync_wrapper(*args, **kwargs):
+            force_refresh = kwargs.pop("force_refresh", False)
+            cache_key = CacheManager.get_cache_key(function, args, kwargs)
+
+            if not force_refresh:
+                cached_value = CacheManager.get_cached_value(cache_key)
+                if cached_value is not None:
+                    return cached_value
+
+            result = function(*args, **kwargs)
+            CacheManager.set_cached_value(cache_key, result, ttl)
+            return result
+
+        if asyncio.iscoroutinefunction(function):
+            return async_wrapper
+        return sync_wrapper
+
     return decorator
