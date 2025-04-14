@@ -1,5 +1,5 @@
 """
-AMM Robust Position Manager Strategy
+AMM Portfolio Manager Strategy
 
 This module implements an arbitrage strategy that monitors liquidity pools
 across multiple chains, identifies arbitrage opportunities, and executes trades
