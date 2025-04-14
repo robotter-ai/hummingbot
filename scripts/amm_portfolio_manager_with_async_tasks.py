@@ -58,6 +58,60 @@ LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 
 
 # ==============================================================================
+# Global Configuration and Database Schema
+# ==============================================================================
+
+configuration: Dict[str, Any] = {
+    "globals": {
+        "maximum_slippage_percentage": "0.5",  # 0.5% allowed slippage
+        "minimum_profitability_percentage": "-1",  # Profit threshold (e.g., "1" for 1%)
+        "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
+        "minimum_trade_amount": "0.1",  # Minimum trade amount
+        "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
+        "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
+        "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
+        "data_update_intervals": {
+            "wallet": "60",  # Update wallet data every x seconds
+            "token": "60",  # Update token data every x seconds
+            "pool": "60",  # Update pool data every x seconds
+        },
+        "use_async_data_updates": True,
+    },
+    "connections": {
+        "polkadot": {
+            "mainnet": {
+                "hydration": {
+                    "wallets": ["5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt"],
+                    "pools": ["7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of"],
+                }
+            },
+        },
+        "solana": {
+            "mainnet-beta": {
+                "raydium": {
+                    "wallets": ["7pWpBM8xtVHJq7C4BBivumfBZAC2J8XndTWvmg9GGXDb"],
+                    "pools": ["2EXiumdi14E9b8Fy62QcA5Uh6WdHS2b38wtSxp72Mibj"],
+                }
+            }
+        },
+    },
+    "tokens": ["USDC", "USDT"],
+}
+
+# The database schema per specification.
+database: Dict[str, Any] = {
+    "connections": {},
+    "arbitrage_opportunities": [],
+    "execution_history": [],
+    "maps": {
+        "pools_by_tokens": {},  # "token1/token2" -> list of pool internal IDs
+        "wallets_by_pool": {},  # pool internal ID -> list of wallet internal IDs
+        "pools_by_wallet": {},  # wallet internal ID -> list of pool internal IDs
+    },
+}
+
+
+# ==============================================================================
 # Database Lock Context Manager
 # ==============================================================================
 class DatabaseLock:
@@ -100,60 +154,6 @@ class DatabaseLock:
     def is_acquired(self) -> bool:
         """Checks if the lock is currently acquired."""
         return self._acquired
-
-
-# ==============================================================================
-# Global Configuration and Database Schema
-# ==============================================================================
-
-configuration: Dict[str, Any] = {
-    "globals": {
-        "maximum_slippage_percentage": "0.5",  # 0.5% allowed slippage
-        "minimum_profitability_percentage": "-1",  # Profit threshold (e.g., "1" for 1%)
-        "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
-        "minimum_trade_amount": "0.1",  # Minimum trade amount
-        "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
-        "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
-        "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
-        "data_update_intervals": {
-            "wallet": "60",  # Update wallet data every x seconds
-            "token": "60",  # Update token data every x seconds
-            "pool": "60",  # Update pool data every x seconds
-        },
-        "use_async_data_updates": True,
-    },
-    "connections": {
-        "polkadot": {
-            "mainnet": {
-                "hydration": {
-                    "wallets": ["5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt"],
-                    "pools": [],
-                }
-            },
-        },
-        "solana": {
-            "mainnet-beta": {
-                "raydium": {
-                    "wallets": ["7pWpBM8xtVHJq7C4BBivumfBZAC2J8XndTWvmg9GGXDb"],
-                    "pools": [],
-                }
-            }
-        },
-    },
-    "tokens": ["USDC", "USDT"],
-}
-
-# The database schema per specification.
-database: Dict[str, Any] = {
-    "connections": {},
-    "arbitrage_opportunities": [],
-    "execution_history": [],
-    "maps": {
-        "pools_by_tokens": {},  # "token1/token2" -> list of pool internal IDs
-        "wallets_by_pool": {},  # pool internal ID -> list of wallet internal IDs
-        "pools_by_wallet": {},  # wallet internal ID -> list of pool internal IDs
-    },
-}
 
 
 # ==============================================================================
@@ -565,8 +565,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                     "chain": chain_name,
                                     "network": network_name,
                                     "connector": connector_name,
-                                    "type": "unknown",  # Will be updated later
-                                    "tokens_list": self._configuration.get("tokens", []),
+                                    "type": None,
+                                    "tokens_list": [],
                                     "tokens": {},
                                     "annual_percentage_rate": None,
                                     "total_value_locked": None,
@@ -575,15 +575,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 }
 
                         # Adds tokens
-                        for token_sym in self._configuration.get("tokens", []):
-                            if token_sym not in connection["tokens"]:
-                                connection["tokens"][token_sym] = {
-                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{token_sym}",
-                                    "address": None,  # Will be updated from gateway
+                        for token_symbol in self._configuration.get("tokens", []):
+                            if token_symbol not in connection["tokens"]:
+                                connection["tokens"][token_symbol] = {
+                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{token_symbol}",
+                                    "address": None,
                                     "chain": chain_name,
                                     "network": network_name,
                                     "connector": connector_name,
-                                    "symbol": token_sym,
+                                    "symbol": token_symbol,
                                     "name": None,
                                     "decimals": None,
                                     "price": None,
