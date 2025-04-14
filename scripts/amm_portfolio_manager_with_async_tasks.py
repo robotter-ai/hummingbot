@@ -216,7 +216,7 @@ class GlobalConfig(BaseClientModel):
     use_async_data_updates: bool = Field(default=True)
 
 
-class AMMRobustPositionManagerConfiguration(BaseClientModel):
+class AMMPortfolioManagerConfiguration(BaseClientModel):
     """
     Configuration model for the AMM Robust Position Manager strategy.
 
@@ -239,10 +239,10 @@ logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
 
 
 # ==============================================================================
-# AMMRobustPositionManager Strategy Class
+# AMMPortfolioManager Strategy Class
 # ==============================================================================
 @logged_class(logger=logger, disallowed_methods=["on_tick"])
-class AMMRobustPositionManager(ScriptStrategyBase):
+class AMMPortfolioManager(ScriptStrategyBase):
     """
     AMM Robust Position Manager Strategy - Refactored version
 
