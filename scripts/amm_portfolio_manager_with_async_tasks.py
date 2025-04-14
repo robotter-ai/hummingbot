@@ -116,9 +116,9 @@ configuration: Dict[str, Any] = {
         "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
         "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
         "data_update_intervals": {
-            "wallet": "60",  # Update wallet data every 60 seconds
-            "token": "300",  # Update token data every 300 seconds
-            "pool": "30",  # Update pool data every 120 seconds
+            "wallet": "60",  # Update wallet data every x seconds
+            "token": "60",  # Update token data every x seconds
+            "pool": "60",  # Update pool data every x seconds
         },
         "use_async_data_updates": True,
     },
@@ -194,8 +194,8 @@ class DataUpdateIntervals(BaseClientModel):
     """Update intervals for dynamic data."""
 
     wallet: int = Field(default=60)
-    token: int = Field(default=300)
-    pool: int = Field(default=120)
+    token: int = Field(default=60)
+    pool: int = Field(default=60)
 
     # noinspection PyMethodParameters
     @validator("wallet", "token", "pool", allow_reuse=True)
@@ -213,8 +213,8 @@ class GlobalConfig(BaseClientModel):
     arbitrage_check_interval_seconds: int = Field(default=60)
     minimum_trade_amount: Decimal = Field(default=Decimal("0.1"))
     time_delay_between_arbitrages: int = Field(default=1)
-    transaction_confirmation_delay: int = Field(default=2)
-    transaction_polling_interval: int = Field(default=2)
+    transaction_confirmation_delay: int = Field(default=1)
+    transaction_polling_interval: int = Field(default=1)
     data_update_intervals: DataUpdateIntervals = Field(default_factory=DataUpdateIntervals)
     use_async_data_updates: bool = Field(default=True)
 
@@ -247,15 +247,16 @@ logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
 @logged_class(logger=logger, disallowed_methods=["on_tick"])
 class AMMPortfolioManager(ScriptStrategyBase):
     """
-    AMM Portfolio Manager Strategy - Refactored version
+    AMM Portfolio Manager Strategy
 
     This strategy monitors AMM pools, discovers arbitrage opportunities
     and executes paired trades between pools with differing prices.
     Uses asynchronous tasks for dynamic data updates.
     """
 
+    markets: Dict[str, Any] = {}  # Not used, but mandatory because of inheritance
+
     # Configuration attributes
-    markets: Dict[str, Any] = {}
     _configuration: Optional[Dict[str, Any]] = None
     _gateway_is_ready: bool = False
     _gateway_http_client: Optional[GatewayHttpClient] = None
@@ -268,13 +269,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _arbitrage_check_interval_seconds: int = 60
     _minimum_trade_amount: Decimal = DECIMAL_ZERO
     _time_delay_between_arbitrages: int = 1
-    _transaction_confirmation_delay: int = 2
-    _transaction_polling_interval: int = 2
+    _transaction_confirmation_delay: int = 1
+    _transaction_polling_interval: int = 1
     _maximum_transaction_confirmation_timeout: int = 60
 
     # Data update control
     _data_update_task: Optional[asyncio.Task] = None
-    _data_update_intervals: Dict[str, int] = {"wallet": 60, "token": 300, "pool": 120}
+    _data_update_intervals: Dict[str, int] = {"wallet": 60, "token": 60, "pool": 60}
     _last_wallet_update_time: float = 0
     _last_token_update_time: float = 0
     _last_pool_update_time: float = 0
@@ -293,40 +294,41 @@ class AMMPortfolioManager(ScriptStrategyBase):
             connectors: Dictionary of available connectors.
         """
         super().__init__(connectors)
-        self._db_lock = asyncio.Lock()
         safe_ensure_future(self._initialize())
 
     async def _initialize(self):
         """
         Configures gateway client, database structure and asynchronous updates.
         """
-        self.logger().info("Initializing AMM arbitrage strategy")
+        self.logger().info("Initializing AMM Portfolio Manager strategy")
+
+        self._db_lock = asyncio.Lock()
 
         # Gateway client initialization
-        self._gateway_http_client = GatewayHttpClient.get_instance()
         self._all_gateway_connections = GatewayConnectionSetting.load()
+        self._gateway_http_client = GatewayHttpClient.get_instance()
 
         # Load configuration
         self._configuration = configuration
-        globals_conf = self._configuration.get("globals", {})
+        global_configurations = self._configuration.get("globals", {})
 
         # Strategy parameters
-        self._maximum_slippage_percentage = Decimal(globals_conf.get("maximum_slippage_percentage", "0.5"))
-        self._minimum_profitability_percentage = Decimal(globals_conf.get("minimum_profitability_percentage", "-1"))
-        self._arbitrage_check_interval_seconds = int(globals_conf.get("arbitrage_check_interval_seconds", "60"))
-        self._minimum_trade_amount = Decimal(globals_conf.get("minimum_trade_amount", "0.1"))
-        self._time_delay_between_arbitrages = int(globals_conf.get("time_delay_between_arbitrages", "1"))
-        self._transaction_confirmation_delay = int(globals_conf.get("transaction_confirmation_delay", "2"))
-        self._transaction_polling_interval = int(globals_conf.get("transaction_polling_interval", "2"))
-        self._use_async_data_updates = bool(globals_conf.get("use_async_data_updates", True))
+        self._maximum_slippage_percentage = Decimal(global_configurations["maximum_slippage_percentage"])
+        self._minimum_profitability_percentage = Decimal(global_configurations["minimum_profitability_percentage"])
+        self._arbitrage_check_interval_seconds = int(global_configurations["arbitrage_check_interval_seconds"])
+        self._minimum_trade_amount = Decimal(global_configurations["minimum_trade_amount"])
+        self._time_delay_between_arbitrages = int(global_configurations["time_delay_between_arbitrages"])
+        self._transaction_confirmation_delay = int(global_configurations["transaction_confirmation_delay"])
+        self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
+        self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
 
         # Configure update intervals
-        data_update_intervals = globals_conf.get("data_update_intervals", {})
+        data_update_intervals = global_configurations["data_update_intervals"]
         if data_update_intervals:
             self._data_update_intervals = {
-                "wallet": int(data_update_intervals.get("wallet", 60)),
-                "token": int(data_update_intervals.get("token", 300)),
-                "pool": int(data_update_intervals.get("pool", 120)),
+                "wallet": int(data_update_intervals["wallet"]),
+                "token": int(data_update_intervals["token"]),
+                "pool": int(data_update_intervals["pool"]),
             }
 
         # Configure transaction confirmation timeout
@@ -419,6 +421,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             # Execute strategy only if gateway is ready
             if not self._gateway_is_ready:
                 self.logger().warning("Gateway not ready. Skipping arbitrage check.")
+
                 return
 
             # Execute arbitrage strategy at configured interval
@@ -510,27 +513,28 @@ class AMMPortfolioManager(ScriptStrategyBase):
     # --------------------------------------------------------------------------
     async def _initialize_database_structure(self):
         """
-        Builds the database structure according to the provided schema.
+        Builds the database structure.
         For each chain, network and connector, stores static information about wallets, tokens and pools.
         """
         if self._db_initialized:
             self.logger().info("Database already initialized")
+
             return
 
         self.logger().info("Starting database initialization...")
 
         try:
             # Initializes basic structure of the database
-            for chain, chain_conf in self._configuration.get("connections", {}).items():
-                database["connections"].setdefault(chain, {})
+            for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
+                database["connections"].setdefault(chain_name, {})
 
-                for network, net_conf in chain_conf.items():
-                    database["connections"][chain].setdefault(network, {})
+                for network_name, network_configuration in chain_configuration.items():
+                    database["connections"][chain_name].setdefault(network_name, {})
 
-                    for connector, conn_conf in net_conf.items():
+                    for connector_name, connector_configuration in network_configuration.items():
                         # Initializes structure for the connector
-                        database["connections"][chain][network].setdefault(
-                            connector,
+                        database["connections"][chain_name][network_name].setdefault(
+                            connector_name,
                             {
                                 "wallets": {},
                                 "tokens": {},
@@ -538,29 +542,29 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             },
                         )
 
-                        hydration = database["connections"][chain][network][connector]
+                        connection = database["connections"][chain_name][network_name][connector_name]
 
                         # Adds wallets
-                        for wallet_addr in conn_conf.get("wallets", []):
-                            if wallet_addr not in hydration["wallets"]:
-                                hydration["wallets"][wallet_addr] = {
-                                    "internal_id": f"{chain}/{network}/{connector}/{wallet_addr}",
-                                    "chain": chain,
-                                    "network": network,
-                                    "connector": connector,
+                        for wallet_address in connector_configuration.get("wallets", []):
+                            if wallet_address not in connection["wallets"]:
+                                connection["wallets"][wallet_address] = {
+                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{wallet_address}",
+                                    "chain": chain_name,
+                                    "network": network_name,
+                                    "connector": connector_name,
                                     "tokens": {},
                                     "pools": {},
                                 }
 
                         # Adds pools
-                        for pool_addr in conn_conf.get("pools", []):
-                            if pool_addr not in hydration["pools"]:
-                                hydration["pools"][pool_addr] = {
-                                    "internal_id": f"{chain}/{network}/{connector}/{pool_addr}",
-                                    "address": pool_addr,
-                                    "chain": chain,
-                                    "network": network,
-                                    "connector": connector,
+                        for pool_address in connector_configuration.get("pools", []):
+                            if pool_address not in connection["pools"]:
+                                connection["pools"][pool_address] = {
+                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{pool_address}",
+                                    "address": pool_address,
+                                    "chain": chain_name,
+                                    "network": network_name,
+                                    "connector": connector_name,
                                     "type": "unknown",  # Will be updated later
                                     "tokens_list": self._configuration.get("tokens", []),
                                     "tokens": {},
@@ -572,13 +576,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                         # Adds tokens
                         for token_sym in self._configuration.get("tokens", []):
-                            if token_sym not in hydration["tokens"]:
-                                hydration["tokens"][token_sym] = {
-                                    "internal_id": f"{chain}/{network}/{connector}/{token_sym}",
+                            if token_sym not in connection["tokens"]:
+                                connection["tokens"][token_sym] = {
+                                    "internal_id": f"{chain_name}/{network_name}/{connector_name}/{token_sym}",
                                     "address": None,  # Will be updated from gateway
-                                    "chain": chain,
-                                    "network": network,
-                                    "connector": connector,
+                                    "chain": chain_name,
+                                    "network": network_name,
+                                    "connector": connector_name,
                                     "symbol": token_sym,
                                     "name": None,
                                     "decimals": None,
