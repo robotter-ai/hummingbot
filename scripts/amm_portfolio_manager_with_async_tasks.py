@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic.v1 import Field, validator
 
-# Hummingbot and utility imports (assumed available in your environment)
 from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.client.settings import GatewayConnectionSetting
 from hummingbot.connector.connector_base import ConnectorBase
@@ -36,7 +35,7 @@ from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 from scripts.utility.utils import Logger, logged_class, run_with_retry_and_timeout
 
 # ==============================================================================
-# Constants for Decimal Calculations and Gateway HTTP Settings
+# Constants
 # ==============================================================================
 DECIMAL_ZERO = Decimal("0")
 DECIMAL_ONE_PERCENT = Decimal("0.01")
@@ -51,9 +50,10 @@ DECIMAL_NOT_A_NUMBER = Decimal("NaN")
 DECIMAL_POSITIVE_INFINITY = Decimal("Infinity")
 DECIMAL_NEGATIVE_INFINITY = Decimal("-Infinity")
 
-GATEWAY_REQUEST_RETRIES = 3
-GATEWAY_REQUEST_DELAY = 1  # seconds
-GATEWAY_REQUEST_TIMEOUT = 30  # seconds
+REQUEST_RETRIES = 3
+REQUEST_DELAY = 1  # seconds
+REQUEST_TIMEOUT = 30  # seconds
+
 LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 
 
@@ -75,12 +75,15 @@ class DatabaseLock:
         """Acquires the lock with timeout."""
         try:
             self._acquired = await asyncio.wait_for(self.lock.acquire(), timeout=LOCK_ACQUISITION_TIMEOUT)
+
             return self._acquired
         except asyncio.TimeoutError:
             self.logger.warning(f"Timeout while trying to acquire lock for {self.caller}")
+
             return False
         except Exception as e:
             self.logger.error(f"Error acquiring lock for {self.caller}: {str(e)}")
+
             return False
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -196,17 +199,17 @@ class DataUpdateIntervals(BaseClientModel):
 
     # noinspection PyMethodParameters
     @validator("wallet", "token", "pool", allow_reuse=True)
-    def validate_positive_interval(cls, v):
-        if v <= 0:
+    def validate_positive_interval(cls, value):
+        if value <= 0:
             raise ValueError("Update interval must be positive")
-        return v
+        return value
 
 
 class GlobalConfig(BaseClientModel):
     """Global parameters for the strategy."""
 
     maximum_slippage_percentage: Decimal = Field(default=Decimal("0.5"))
-    minimum_profitability_percentage: Decimal = Field(default=Decimal("-1"))
+    minimum_profitability_percentage: Decimal = Field(default=Decimal("1"))
     arbitrage_check_interval_seconds: int = Field(default=60)
     minimum_trade_amount: Decimal = Field(default=Decimal("0.1"))
     time_delay_between_arbitrages: int = Field(default=1)
@@ -218,7 +221,7 @@ class GlobalConfig(BaseClientModel):
 
 class AMMPortfolioManagerConfiguration(BaseClientModel):
     """
-    Configuration model for the AMM Robust Position Manager strategy.
+    Configuration model for the AMM Portfolio Manager strategy.
 
     Mirrors the global configuration, connections and token list.
     """
@@ -244,7 +247,7 @@ logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
 @logged_class(logger=logger, disallowed_methods=["on_tick"])
 class AMMPortfolioManager(ScriptStrategyBase):
     """
-    AMM Robust Position Manager Strategy - Refactored version
+    AMM Portfolio Manager Strategy - Refactored version
 
     This strategy monitors AMM pools, discovers arbitrage opportunities
     and executes paired trades between pools with differing prices.
@@ -1558,41 +1561,31 @@ class AMMPortfolioManager(ScriptStrategyBase):
     # --------------------------------------------------------------------------
     # Gateway Helper Methods (using retry/timeout)
     # --------------------------------------------------------------------------
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_ping_gateway(self):
         """Pings the gateway server to verify connectivity."""
         return await self._gateway_http_client.ping_gateway()
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_pool_info(self, connector: str, network: str, pool_address: str):
         """Retrieves pool details from the gateway."""
         return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_tokens(
         self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None
     ):
         """Retrieves token information from the gateway."""
         return await self._gateway_http_client.get_tokens(chain, network, token_symbols)
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_balances(
         self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
     ):
         """Retrieves token balances for a wallet address from the gateway."""
         return await self._gateway_http_client.get_balances(chain, network, address, token_symbols)
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_quote_swap(
         self,
         network: str,
@@ -1616,9 +1609,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             pool_address=pool_address,
         )
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_execute_swap(
         self,
         network: str,
@@ -1644,9 +1635,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             pool_address=pool_address,
         )
 
-    @run_with_retry_and_timeout(
-        retries=GATEWAY_REQUEST_RETRIES, delay=GATEWAY_REQUEST_DELAY, timeout=GATEWAY_REQUEST_TIMEOUT
-    )
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_poll_transaction(self, chain: str, network: str, tx_hash: str):
         """Polls the transaction status from the gateway."""
         return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
