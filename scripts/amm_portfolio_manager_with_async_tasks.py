@@ -317,14 +317,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
             connectors: Dictionary of available connectors.
         """
         super().__init__(connectors)
+        # TODO: Verify if we need to use another method that waits for the initialization instead of using safe_ensure_future!!!
         safe_ensure_future(self._initialize())
 
     async def _initialize(self):
         """
         Configures gateway client, database structure and asynchronous updates.
         """
-        self.logger().info("Initializing AMM Portfolio Manager strategy")
-
         self._database_lock = asyncio.Lock()
 
         # Gateway client initialization
@@ -363,9 +362,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
             if not self._gateway_is_ready:
                 await self._check_gateway_status()
                 if not self._gateway_is_ready:
-                    self.logger().warning("Gateway not ready. Trying again in 5 seconds...")
+                    logger.warning("Gateway not ready. Trying again in 5 seconds...")
                     await asyncio.sleep(5)
                     continue
+            else:
+                break
 
         # Initialize database
         await self._initialize_database_structure()
@@ -374,17 +375,12 @@ class AMMPortfolioManager(ScriptStrategyBase):
         if self._use_async_data_updates:
             self._start_data_update_task()
 
-        # Check gateway status
-        await self._check_gateway_status()
-
-        self.logger().info("Strategy initialization completed")
-
     def _start_data_update_task(self):
         """Starts the asynchronous data update task."""
         if self._data_update_task is not None:
             self._data_update_task.cancel()
         self._data_update_task = safe_ensure_future(self._run_data_update_loop())
-        self.logger().info("Data update task started")
+        logger.info("Data update task started")
 
     async def _run_data_update_loop(self):
         """
@@ -408,25 +404,26 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             await self._update_database()
                             last_update_time = current_time
                         except Exception as exception:
-                            self.logger().error(f"Error during database update: {str(exception)}")
+                            logger.ignore_exception(exception, "Error during database update")
                         finally:
                             self._is_updating = False
                     else:
-                        self.logger().warning("Database not initialized. Skipping update...")
+                        logger.warning("Database not initialized. Skipping update...")
 
                 # Wait appropriate interval before checking again
                 # Use at least 1 seconds or half the smallest configured interval
                 sleep_time = max(1.0, mininum_update_interval / 2.0)
                 await asyncio.sleep(sleep_time)
-        except asyncio.CancelledError:
-            self.logger().info("Data update task cancelled")
-        except Exception as e:
-            self.logger().error(f"Critical error in update loop: {str(e)}")
+        except asyncio.CancelledError as exception:
+            logger.ignore_exception(exception, "Data update task cancelled")
+        except Exception as exception:
+            logger.ignore_exception(exception, "Critical error in update loop")
+
             raise
 
     def on_tick(self):
         """Called on each tick to execute the strategy."""
-        if not self._is_updating and self._database_initialized:
+        if self._database_initialized and not self._is_updating:
             safe_ensure_future(self._async_on_tick())
 
     async def _async_on_tick(self):
@@ -443,7 +440,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             # Execute strategy only if gateway is ready
             if not self._gateway_is_ready:
-                self.logger().warning("Gateway not ready. Skipping arbitrage check.")
+                logger.warning("Gateway not ready. Skipping arbitrage check.")
 
                 return
 
@@ -453,7 +450,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 self._last_arbitrage_check_time = current_time
                 await self._run_arbitrage_strategy()
         except Exception as e:
-            self.logger().error(f"Error during strategy execution: {str(e)}")
+            logger.error(f"Error during strategy execution: {str(e)}")
         finally:
             self._is_updating = False
 
@@ -469,13 +466,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
             ping_result = await self._gateway_ping_gateway()
             if ping_result:
                 self._gateway_is_ready = True
-                self.logger().info("Gateway is online.")
+                logger.info("Gateway is online.")
             else:
                 self._gateway_is_ready = False
-                self.logger().warning("Ping of gateway did not return response.")
+                logger.warning("Ping of gateway did not return response.")
         except Exception as exception:
             self._gateway_is_ready = False
-            self.logger().error(f"Gateway status check failed: {str(exception)}")
+            logger.error(f"Gateway status check failed: {str(exception)}")
 
     async def _run_arbitrage_strategy(self):
         """
@@ -484,21 +481,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
          - Validates each opportunity
          - Executes arbitrage trades for opportunities that pass validation
         """
-        self.logger().info("Executing arbitrage strategy: searching for opportunities...")
+        logger.info("Executing arbitrage strategy: searching for opportunities...")
 
         # Finds promising token pairs
         promising_pairs = self._find_most_promising_token_pairs()
         if not promising_pairs:
-            self.logger().info("No promising token pair found.")
+            logger.info("No promising token pair found.")
             return
 
         # Searches for arbitrage opportunities in promising pairs
         opportunities = await self._find_arbitrage_opportunities(promising_pairs)
         if not opportunities:
-            self.logger().info("No arbitrage opportunity found.")
+            logger.info("No arbitrage opportunity found.")
             return
 
-        self.logger().info(f"Found {len(opportunities)} arbitrage opportunities.")
+        logger.info(f"Found {len(opportunities)} arbitrage opportunities.")
 
         # Validates and executes each opportunity
         for opp in opportunities:
@@ -508,28 +505,28 @@ class AMMPortfolioManager(ScriptStrategyBase):
             database["arbitrage_opportunities"].append(opp)
 
             # Validates the opportunity
-            self.logger().info(
+            logger.info(
                 f"Validating opportunity: {opp['base_token']}/{opp['quote_token']} with difference of {opp['price_difference_percentage']:.2f}%"
             )
             valid = await self._validate_opportunity(opp)
 
             if valid:
                 # Executes arbitrage if valid
-                self.logger().info(f"Executing arbitrage: {opp['base_token']}/{opp['quote_token']}")
+                logger.info(f"Executing arbitrage: {opp['base_token']}/{opp['quote_token']}")
                 success = await self._execute_arbitrage(opp)
 
                 if success:
-                    self.logger().info("Arbitrage executed successfully.")
+                    logger.info("Arbitrage executed successfully.")
                 else:
-                    self.logger().warning("Arbitrage execution failed.")
+                    logger.warning("Arbitrage execution failed.")
 
                 # Waits the configured delay between arbitrages
                 if self._time_delay_between_arbitrages > 0:
                     await asyncio.sleep(self._time_delay_between_arbitrages)
             else:
-                self.logger().info("Opportunity invalidated after detailed validation.")
+                logger.info("Opportunity invalidated after detailed validation.")
 
-        self.logger().info("Arbitrage strategy cycle completed.")
+        logger.info("Arbitrage strategy cycle completed.")
 
     # --------------------------------------------------------------------------
     # Permanent Database Initialization and Mapping Methods
@@ -540,7 +537,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         For each chain, network and connector, stores static information about wallets, tokens and pools.
         """
         if self._database_initialized:
-            self.logger().info("Database already initialized, skipping...")
+            logger.info("Database already initialized, skipping...")
 
             return
 
@@ -787,11 +784,10 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Updates dynamic parts of the database:
          - Pool statistics (APR, TVL, volume, token prices)
          - Wallet balances and positions in pools
-         - Token information (price, decimals, name)
+         - Token information (price, decimals)
 
         Updates database maps only if any update has been performed.
         """
-        self.logger().info("Starting database update...")
         current_time = time.time()
 
         # Update intervals configured
@@ -802,9 +798,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
         # Flag to indicate if any update has been performed
         updates_performed = False
 
-        async with DatabaseLock(self._database_lock, self.logger(), "_update_database") as lock_acquired:
+        async with DatabaseLock(self._database_lock, logger, "_update_database") as lock_acquired:
             if not lock_acquired:
-                self.logger().warning("Unable to acquire lock for update, skipping this cycle")
+                logger.warning("Unable to acquire lock for update, skipping this cycle...")
 
                 return
 
@@ -812,7 +808,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
             if (not hasattr(self, "_last_token_update_time")) or (
                 current_time - self._last_token_update_time >= token_interval
             ):
-                self.logger().info(f"Updating token information (interval: {token_interval}s)...")
                 self._last_token_update_time = current_time
                 await self._update_token_information()
                 updates_performed = True
@@ -821,7 +816,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
             if (not hasattr(self, "_last_pool_update_time")) or (
                 current_time - self._last_pool_update_time >= pool_interval
             ):
-                self.logger().info(f"Updating pool information (interval: {pool_interval}s)...")
                 self._last_pool_update_time = current_time
                 await self._update_pool_information()
                 updates_performed = True
@@ -830,24 +824,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
             if (not hasattr(self, "_last_wallet_update_time")) or (
                 current_time - self._last_wallet_update_time >= wallet_interval
             ):
-                self.logger().info(f"Updating wallet balances (interval: {wallet_interval}s)...")
                 self._last_wallet_update_time = current_time
                 await self._update_wallet_balances()
                 updates_performed = True
 
             # Updates maps only if any update has been performed
             if updates_performed:
-                self.logger().info("Updating database maps after changes...")
                 await self._update_database_maps()
-            else:
-                self.logger().info("No updates performed in this cycle. Skipping map update.")
-
-            # First time the method is executed, marks the database as initialized
-            if not self._database_initialized:
-                self._database_initialized = True
-                self.logger().info("Database marked as initialized after first update")
-
-            self.logger().info("Database update completed successfully")
 
     async def _update_pool_information(self):
         """
@@ -1162,7 +1145,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         }
 
                         opportunities.append(opportunity)
-                        self.logger().info(
+                        logger.info(
                             f"Arbitrage opportunity found: {base_token}/{quote_token} "
                             f"difference {abs(diff):.2f}% between {buy_pool.get('address')} and {sell_pool.get('address')}"
                         )
@@ -1188,13 +1171,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
         # Checks if there is available balance
         available_balance = await self._get_total_token_balance_from_all_wallets(base_token)
         if available_balance < self._minimum_trade_amount:
-            self.logger().info(f"Insufficient balance of {base_token}: {available_balance}")
+            logger.info(f"Insufficient balance of {base_token}: {available_balance}")
             return False
 
         # Calculates ideal trade amount
         trade_amount = await self._calculate_optimal_trade_amount(opportunity, available_balance)
         if not trade_amount or trade_amount <= DECIMAL_ZERO:
-            self.logger().info("Invalid optimal trade amount")
+            logger.info("Invalid optimal trade amount")
             return False
 
         max_slippage = self._maximum_slippage_percentage
@@ -1205,7 +1188,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, max_slippage
             )
             if not buy_quote or "estimatedAmountOut" not in buy_quote:
-                self.logger().info(f"Buy quote unavailable for pool {buy_pool.get('address')}")
+                logger.info(f"Buy quote unavailable for pool {buy_pool.get('address')}")
                 return False
 
             expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
@@ -1215,7 +1198,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 sell_pool, quote_token, base_token, expected_quote, TradeType.SELL, max_slippage
             )
             if not sell_quote or "estimatedAmountOut" not in sell_quote:
-                self.logger().info(f"Sell quote unavailable for pool {sell_pool.get('address')}")
+                logger.info(f"Sell quote unavailable for pool {sell_pool.get('address')}")
                 return False
 
             # Calculates expected profit
@@ -1236,19 +1219,17 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             # Checks if opportunity meets minimum profitability
             if profit_percentage < self._minimum_profitability_percentage:
-                self.logger().info(
+                logger.info(
                     f"Opportunity not profitable after slippage: "
                     f"{profit_percentage:.2f}% < {self._minimum_profitability_percentage}%"
                 )
                 return False
 
-            self.logger().info(
-                f"Opportunity validated: {base_token}/{quote_token} expected profit {profit_percentage:.2f}%"
-            )
+            logger.info(f"Opportunity validated: {base_token}/{quote_token} expected profit {profit_percentage:.2f}%")
             return True
 
         except Exception as e:
-            self.logger().error(f"Error during opportunity validation: {str(e)}")
+            logger.error(f"Error during opportunity validation: {str(e)}")
             return False
 
     async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: Decimal) -> Decimal:
@@ -1312,7 +1293,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             profit = expected_return - amount
             return (profit / amount) * DECIMAL_ONE_HUNDRED if amount > DECIMAL_ZERO else DECIMAL_ZERO
         except Exception as e:
-            self.logger().error(f"Error simulating arbitrage profit: {str(e)}")
+            logger.error(f"Error simulating arbitrage profit: {str(e)}")
             return DECIMAL_NEGATIVE_INFINITY
 
     async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
@@ -1331,35 +1312,35 @@ class AMMPortfolioManager(ScriptStrategyBase):
         trade_amount = opportunity["trade_amount"]
         expected_quote = opportunity["expected_quote_token"]
 
-        self.logger().info(f"Executing arbitrage for {base_token}/{quote_token}")
+        logger.info(f"Executing arbitrage for {base_token}/{quote_token}")
 
         # Gets wallet addresses for each pool.
         buy_wallets = await self._get_wallet_addresses_for_pool(buy_pool)
         sell_wallets = await self._get_wallet_addresses_for_pool(sell_pool)
         if not buy_wallets:
-            self.logger().error(f"No wallet found for buy pool {buy_pool.get('address')}")
+            logger.error(f"No wallet found for buy pool {buy_pool.get('address')}")
             return False
         if not sell_wallets:
-            self.logger().error(f"No wallet found for sell pool {sell_pool.get('address')}")
+            logger.error(f"No wallet found for sell pool {sell_pool.get('address')}")
             return False
         buy_wallet = buy_wallets[0]
         sell_wallet = sell_wallets[0]
 
         try:
             # First swap (buy pool): base_token -> quote_token.
-            self.logger().info(
+            logger.info(
                 f"Step 1: Swapping {trade_amount} {base_token} for {quote_token} in pool {buy_pool.get('address')}"
             )
             initial_buy = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet, [base_token, quote_token]
             )
             if not initial_buy or "balances" not in initial_buy:
-                self.logger().error(f"Failed to get initial balances for wallet {buy_wallet}")
+                logger.error(f"Failed to get initial balances for wallet {buy_wallet}")
                 return False
             init_base = Decimal(str(initial_buy["balances"].get(base_token, 0)))
             init_quote = Decimal(str(initial_buy["balances"].get(quote_token, 0)))
             if init_base < trade_amount:
-                self.logger().info(f"Insufficient balance in {buy_wallet}: {init_base} {base_token}")
+                logger.info(f"Insufficient balance in {buy_wallet}: {init_base} {base_token}")
                 return False
 
             first_swap = await self._post_execute_swap(
@@ -1372,39 +1353,37 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 slippage_percentage=self._maximum_slippage_percentage,
             )
             if not first_swap or "signature" not in first_swap:
-                self.logger().error(f"First swap failed in wallet {buy_wallet}")
+                logger.error(f"First swap failed in wallet {buy_wallet}")
                 return False
-            self.logger().info(f"First swap signature: {first_swap['signature']}")
+            logger.info(f"First swap signature: {first_swap['signature']}")
             confirmed1 = await self._wait_for_transaction_confirmation(
                 buy_pool.get("chain"), buy_pool.get("network"), first_swap["signature"]
             )
             if not confirmed1:
-                self.logger().error("First swap transaction not confirmed")
+                logger.error("First swap transaction not confirmed")
                 return False
 
             updated_buy = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet, [quote_token]
             )
             if not updated_buy or "balances" not in updated_buy:
-                self.logger().error("Failed to get updated buy wallet balances")
+                logger.error("Failed to get updated buy wallet balances")
                 return False
             updated_quote = Decimal(str(updated_buy["balances"].get(quote_token, 0)))
             quote_received = updated_quote - init_quote
             second_swap_amount = quote_received if quote_received > DECIMAL_ZERO else expected_quote
             if quote_received <= 0:
-                self.logger().warning(
-                    f"Actual quote received undetermined; using expected: {expected_quote} {quote_token}"
-                )
+                logger.warning(f"Actual quote received undetermined; using expected: {expected_quote} {quote_token}")
 
             # Second swap (sell pool): quote_token -> base_token.
-            self.logger().info(
+            logger.info(
                 f"Step 2: Swapping {second_swap_amount} {quote_token} to {base_token} in pool {sell_pool.get('address')}"
             )
             initial_sell = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet, [base_token]
             )
             if not initial_sell or "balances" not in initial_sell:
-                self.logger().error(f"Failed to get initial sell wallet balances for {sell_wallet}")
+                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet}")
                 return False
             init_sell_base = Decimal(str(initial_sell["balances"].get(base_token, 0)))
             second_swap = await self._post_execute_swap(
@@ -1417,21 +1396,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 slippage_percentage=self._maximum_slippage_percentage,
             )
             if not second_swap or "signature" not in second_swap:
-                self.logger().error(f"Second swap failed in wallet {sell_wallet}")
+                logger.error(f"Second swap failed in wallet {sell_wallet}")
                 return False
-            self.logger().info(f"Second swap signature: {second_swap['signature']}")
+            logger.info(f"Second swap signature: {second_swap['signature']}")
             confirmed2 = await self._wait_for_transaction_confirmation(
                 sell_pool.get("chain"), sell_pool.get("network"), second_swap["signature"]
             )
             if not confirmed2:
-                self.logger().error("Second swap transaction not confirmed")
+                logger.error("Second swap transaction not confirmed")
                 return False
 
             updated_sell = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet, [base_token]
             )
             if not updated_sell or "balances" not in updated_sell:
-                self.logger().error("Failed to get updated sell wallet balance")
+                logger.error("Failed to get updated sell wallet balance")
                 return False
             final_sell_base = Decimal(str(updated_sell["balances"].get(base_token, 0)))
             profit = final_sell_base - init_sell_base
@@ -1453,15 +1432,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
             }
             database["execution_history"].append(trade_record)
             if profit > 0:
-                self.logger().info(f"Arbitrage trade successful! Profit: {profit} {base_token} ({profit_pct:.2f}%)")
+                logger.info(f"Arbitrage trade successful! Profit: {profit} {base_token} ({profit_pct:.2f}%)")
                 return True
             else:
-                self.logger().warning(
+                logger.warning(
                     f"Arbitrage trade executed with no profit/loss: {profit} {base_token} ({profit_pct:.2f}%)"
                 )
                 return False
         except Exception as e:
-            self.logger().error(f"Error during arbitrage execution: {str(e)}")
+            logger.error(f"Error during arbitrage execution: {str(e)}")
             return False
 
     # noinspection PyMethodMayBeStatic
@@ -1539,7 +1518,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 network, connector, base_token, quote_token, amount, side, slippage_percentage, pool_address
             )
         except Exception as e:
-            self.logger().error(f"Error getting swap quote: {str(e)}")
+            logger.error(f"Error getting swap quote: {str(e)}")
             return None
 
     async def _post_execute_swap(
@@ -1582,7 +1561,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 pool_address,
             )
         except Exception as e:
-            self.logger().error(f"Error executing swap: {str(e)}")
+            logger.error(f"Error executing swap: {str(e)}")
             return None
 
     async def _wait_for_transaction_confirmation(
@@ -1606,16 +1585,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
             try:
                 tx_status = await self._gateway_poll_transaction(chain, network, tx_hash)
                 if tx_status and tx_status.get("txStatus") == 1:
-                    self.logger().info(f"Transaction {tx_hash} confirmed!")
+                    logger.info(f"Transaction {tx_hash} confirmed!")
                     return True
                 if tx_status and tx_status.get("txStatus") == -1:
-                    self.logger().error(f"Transaction {tx_hash} failed: {tx_status}")
+                    logger.error(f"Transaction {tx_hash} failed: {tx_status}")
                     return False
                 await asyncio.sleep(self._transaction_polling_interval)
             except Exception as e:
-                self.logger().error(f"Error polling transaction {tx_hash}: {str(e)}")
+                logger.error(f"Error polling transaction {tx_hash}: {str(e)}")
                 await asyncio.sleep(self._transaction_polling_interval)
-        self.logger().warning(f"Transaction {tx_hash} confirmation timed out after {max_timeout} seconds")
+        logger.warning(f"Transaction {tx_hash} confirmation timed out after {max_timeout} seconds")
         return False
 
     # --------------------------------------------------------------------------
