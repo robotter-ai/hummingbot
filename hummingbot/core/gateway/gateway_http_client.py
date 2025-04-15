@@ -890,18 +890,37 @@ class GatewayHttpClient:
         """
         query_params = {
             "network": network,
-            "types": types,
-            "tokens_symbols": token_symbols,
-            "tokens_addresses": token_addresses,
-            "maxNumberOfPages": max_number_of_pages,
-            "useOfficialTokens": use_official_tokens,
+            # "types": types,
+            # "tokens_symbols": token_symbols,
+            # "tokens_addresses": token_addresses,
+            # "maxNumberOfPages": max_number_of_pages,
+            # "useOfficialTokens": use_official_tokens,
         }
-        return await self.api_request(
+        result = await self.api_request(
             "get",
             f"{connector}/amm/list-pools",
             params=query_params,
             fail_silently=fail_silently,
         )
+
+        if connector == "raydium":
+            result = {
+                "pools": [
+                    pool
+                    for pool in result.get("pools", [])
+                    if pool.get("address") == "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
+                ]
+            }
+        elif connector == "hydration":
+            result = {
+                "pools": [
+                    pool
+                    for pool in result.get("pools", [])
+                    if pool.get("address") == "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG"
+                ]
+            }
+
+        return result
 
     # def __getattr__(self, name: str) -> Any:
     #     """
