@@ -357,16 +357,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         if self._transaction_confirmation_delay > 0:
             self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
 
-        while True:
-            # Check gateway status when needed
-            if not self._gateway_is_ready:
-                await self._check_gateway_status()
-                if not self._gateway_is_ready:
-                    logger.warning("Gateway not ready. Trying again in 5 seconds...")
-                    await asyncio.sleep(5)
-                    continue
-            else:
-                break
+        await self._check_gateway_status()
 
         # Initialize database
         await self._initialize_database_structure()
@@ -434,45 +425,45 @@ class AMMPortfolioManager(ScriptStrategyBase):
         try:
             self._is_updating = True
 
+            await self._check_gateway_status()
+
             # Update database only if not using asynchronous updates
             if not self._use_async_data_updates:
                 await self._update_database()
-
-            # Execute strategy only if gateway is ready
-            if not self._gateway_is_ready:
-                logger.warning("Gateway not ready. Skipping arbitrage check.")
-
-                return
 
             # Execute arbitrage strategy at configured interval
             current_time = time.time()
             if current_time - self._last_arbitrage_check_time >= self._arbitrage_check_interval_seconds:
                 self._last_arbitrage_check_time = current_time
                 await self._run_arbitrage_strategy()
-        except Exception as e:
-            logger.error(f"Error during strategy execution: {str(e)}")
         finally:
             self._is_updating = False
 
-    # --------------------------------------------------------------------------
-    # Missing Methods Implementation
-    # --------------------------------------------------------------------------
     async def _check_gateway_status(self):
         """
         Verifies the availability of the gateway by sending a ping.
         Sets _gateway_is_ready to True if the gateway responds, otherwise False.
         """
         try:
-            ping_result = await self._gateway_ping_gateway()
-            if ping_result:
-                self._gateway_is_ready = True
-                logger.info("Gateway is online.")
-            else:
-                self._gateway_is_ready = False
-                logger.warning("Ping of gateway did not return response.")
+            while True:
+                if not self._gateway_is_ready:
+                    ping_result = await self._gateway_ping_gateway()
+                    if ping_result:
+                        self._gateway_is_ready = True
+                    else:
+                        self._gateway_is_ready = False
+                        logger.warning("Ping of gateway did not return response.")
+
+                    if not self._gateway_is_ready:
+                        logger.warning("Gateway not ready. Trying again in 5 seconds...")
+                        await asyncio.sleep(5)
+
+                        continue
+                else:
+                    break
         except Exception as exception:
             self._gateway_is_ready = False
-            logger.error(f"Gateway status check failed: {str(exception)}")
+            logger.ignore_exception(exception, "Error during gateway status check")
 
     async def _run_arbitrage_strategy(self):
         """
@@ -481,39 +472,41 @@ class AMMPortfolioManager(ScriptStrategyBase):
          - Validates each opportunity
          - Executes arbitrage trades for opportunities that pass validation
         """
-        logger.info("Executing arbitrage strategy: searching for opportunities...")
+        logger.info("Executing arbitrage strategy")
 
         # Finds promising token pairs
         promising_pairs = self._find_most_promising_token_pairs()
         if not promising_pairs:
             logger.info("No promising token pair found.")
+
             return
 
         # Searches for arbitrage opportunities in promising pairs
         opportunities = await self._find_arbitrage_opportunities(promising_pairs)
         if not opportunities:
             logger.info("No arbitrage opportunity found.")
+
             return
 
         logger.info(f"Found {len(opportunities)} arbitrage opportunities.")
 
         # Validates and executes each opportunity
-        for opp in opportunities:
+        for opportunity in opportunities:
             # Registers the opportunity in the database
             if "arbitrage_opportunities" not in database:
                 database["arbitrage_opportunities"] = []
-            database["arbitrage_opportunities"].append(opp)
+            database["arbitrage_opportunities"].append(opportunity)
 
             # Validates the opportunity
             logger.info(
-                f"Validating opportunity: {opp['base_token']}/{opp['quote_token']} with difference of {opp['price_difference_percentage']:.2f}%"
+                f"Validating opportunity: {opportunity['base_token']}/{opportunity['quote_token']} with difference of {opportunity['price_difference_percentage']:.2f}%"
             )
-            valid = await self._validate_opportunity(opp)
+            valid = await self._validate_opportunity(opportunity)
 
             if valid:
                 # Executes arbitrage if valid
-                logger.info(f"Executing arbitrage: {opp['base_token']}/{opp['quote_token']}")
-                success = await self._execute_arbitrage(opp)
+                logger.info(f"Executing arbitrage: {opportunity['base_token']}/{opportunity['quote_token']}")
+                success = await self._execute_arbitrage(opportunity)
 
                 if success:
                     logger.info("Arbitrage executed successfully.")
@@ -959,23 +952,23 @@ class AMMPortfolioManager(ScriptStrategyBase):
         promising_pairs = []
 
         # Generates all token pair combinations
-        for i in range(len(tokens)):
-            for j in range(i + 1, len(tokens)):
-                token1, token2 = tokens[i], tokens[j]
+        for base_token_index in range(len(tokens)):
+            for quote_token_index in range(base_token_index + 1, len(tokens)):
+                base_token, quote_token = tokens[base_token_index], tokens[quote_token_index]
 
                 # Finds pools containing both tokens
-                pools = self._find_pools_with_token_pair(token1, token2)
+                pools = self._find_pools_with_token_pair(base_token, quote_token)
 
                 # Only considers pairs with at least 2 pools (necessary for arbitrage)
                 if len(pools) >= 2:
                     # Calculates metrics for the pair
-                    total_volume = sum(Decimal(str(p.get("volume", {}).get("24h", 0) or 0)) for p in pools)
-                    total_liquidity = sum(Decimal(str(p.get("total_value_locked", 0) or 0)) for p in pools)
+                    total_volume = sum(Decimal(str(pool.get("volume", {}).get("24h", 0) or 0)) for pool in pools)
+                    total_liquidity = sum(Decimal(str(pool.get("total_value_locked", 0) or 0)) for pool in pools)
 
                     # Collects prices from all pools
                     prices = []
                     for pool in pools:
-                        price = self._get_cached_token_price_in_pool(token1, token2, pool)
+                        price = self._get_token_pair_relative_price_in_pool(pool, base_token, quote_token)
                         if price is not None:
                             prices.append(price)
 
@@ -987,8 +980,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     # Adds the pair to the promising list
                     promising_pairs.append(
                         {
-                            "token1": token1,
-                            "token2": token2,
+                            "base_token": base_token,
+                            "quote_token": quote_token,
                             "pools_count": len(pools),
                             "total_volume": total_volume,
                             "total_liquidity": total_liquidity,
@@ -997,27 +990,33 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     )
 
         # Orders pairs by price variance (descending), pool count and volume
-        promising_pairs.sort(key=lambda x: (x["price_variance"], x["pools_count"], x["total_volume"]), reverse=True)
+        promising_pairs.sort(
+            key=lambda promising_pair: (
+                promising_pair["price_variance"],
+                promising_pair["pools_count"],
+                promising_pair["total_volume"],
+            ),
+            reverse=True,
+        )
 
-        # Returns the 5 most promising pairs
-        return promising_pairs[:5]
+        return promising_pairs
 
     # noinspection PyMethodMayBeStatic
-    def _find_pools_with_token_pair(self, token1: str, token2: str) -> List[Dict[str, Any]]:
+    def _find_pools_with_token_pair(self, base_token: str, quote_token: str) -> List[Dict[str, Any]]:
         """
         Searches the database for pools containing both tokens.
 
         Args:
-            token1: Symbol of the first token.
-            token2: Symbol of the second token.
+            base_token: Symbol of the base token.
+            quote_token: Symbol of the quote token.
         Returns:
             List of dictionaries of pools.
         """
-        result = []
+        result = set()
 
         # First tries to use map for quick search
-        key1 = f"{token1}/{token2}"
-        key2 = f"{token2}/{token1}"
+        key1 = f"{base_token}/{quote_token}"
+        key2 = f"{quote_token}/{base_token}"
 
         pool_ids = []
         if key1 in database["maps"]["pools_by_tokens"]:
@@ -1027,31 +1026,31 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         # If IDs found in map, searches corresponding pools
         if pool_ids:
-            for chain_data in database["connections"].values():
-                for network_data in chain_data.values():
-                    for connector_data in network_data.values():
-                        for pool in connector_data.get("pools", {}).values():
-                            if pool.get("internal_id") in pool_ids:
-                                result.append(pool)
-            return result
+            for chain_information in database["connections"].values():
+                for network_information in chain_information.values():
+                    for connector_information in network_information.values():
+                        for pool_information in connector_information.get("pools", {}).values():
+                            if pool_information.get("internal_id") in pool_ids:
+                                result.add(pool_information)
+            return list(result)
 
         # Fallback: searches directly in all pools (less efficient)
-        for chain_data in database["connections"].values():
-            for network_data in chain_data.values():
-                for connector_data in network_data.values():
-                    for pool in connector_data.get("pools", {}).values():
-                        tokens_list = pool.get("tokens_list", [])
-                        if token1 in tokens_list and token2 in tokens_list:
-                            result.append(pool)
+        for chain_information in database["connections"].values():
+            for network_information in chain_information.values():
+                for connector_information in network_information.values():
+                    for pool_information in connector_information.get("pools", {}).values():
+                        tokens_list = pool_information.get("tokens_list", [])
+                        if base_token in tokens_list and quote_token in tokens_list:
+                            result.add(pool_information)
 
-        return result
+        return list(result)
 
     # noinspection PyMethodMayBeStatic
-    def _get_cached_token_price_in_pool(
-        self, base_token: str, quote_token: str, pool: Dict[str, Any]
+    def _get_token_pair_relative_price_in_pool(
+        self, pool: Dict[str, Any], base_token: str, quote_token: str
     ) -> Optional[Decimal]:
         """
-        Retrieves cached price for a token pair from pool data.
+        Retrieves relative price for a token pair from pool data.
 
         Args:
             base_token: Symbol of the base token.
@@ -1060,17 +1059,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Returns:
             Price as Decimal if available; otherwise, None.
         """
-        try:
-            if "tokens" in pool and base_token in pool["tokens"]:
-                token_info = pool["tokens"][base_token]
-                if "prices" in token_info and quote_token in token_info["prices"]:
-                    return Decimal(str(token_info["prices"][quote_token]))
-        except (KeyError, TypeError):
-            return None
+        if "tokens" in pool and base_token in pool["tokens"]:
+            token_information = pool["tokens"][base_token]
+            if "prices" in token_information and quote_token in token_information["prices"]:
+                return Decimal(str(token_information["prices"][quote_token]))
+
         return None
 
     async def _calculate_price_difference_percentage(
-        self, base_token: str, quote_token: str, pool1: Dict[str, Any], pool2: Dict[str, Any]
+        self, base_token: str, quote_token: str, pool_1: Dict[str, Any], pool_2: Dict[str, Any]
     ) -> Optional[Decimal]:
         """
         Calculates price difference percentage between two pools.
@@ -1078,18 +1075,18 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Args:
             base_token: Symbol of the base token.
             quote_token: Symbol of the quote token.
-            pool1: First pool.
-            pool2: Second pool.
+            pool_1: First pool.
+            pool_2: Second pool.
         Returns:
             Price difference percentage as Decimal, or None.
         """
-        price1 = self._get_cached_token_price_in_pool(base_token, quote_token, pool1)
-        price2 = self._get_cached_token_price_in_pool(base_token, quote_token, pool2)
+        price_1 = self._get_token_pair_relative_price_in_pool(pool_1, base_token, quote_token)
+        price_2 = self._get_token_pair_relative_price_in_pool(pool_2, base_token, quote_token)
 
-        if price1 is None or price2 is None or price1 == DECIMAL_ZERO:
+        if price_1 is None or price_2 is None or price_1 == DECIMAL_ZERO:
             return None
 
-        return ((price2 - price1) / price1) * DECIMAL_ONE_HUNDRED
+        return ((price_2 - price_1) / price_1) * DECIMAL_ONE_HUNDRED
 
     async def _find_arbitrage_opportunities(self, promising_pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -1101,10 +1098,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
             List of dictionaries of arbitrage opportunities.
         """
         opportunities = []
-        min_profitability = self._minimum_profitability_percentage
 
         # Extracts token pairs from dictionaries
-        token_pairs = [(pair["token1"], pair["token2"]) for pair in promising_pairs]
+        token_pairs = [(pair["base_token"], pair["quote_token"]) for pair in promising_pairs]
 
         for base_token, quote_token in token_pairs:
             # Finds all pools containing both tokens
@@ -1115,24 +1111,26 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 continue
 
             # Compares each pair of pools for price differences
-            for i in range(len(pools)):
-                for j in range(i + 1, len(pools)):
+            for pool_1_index in range(len(pools)):
+                for pool_2_index in range(pool_1_index + 1, len(pools)):
+                    pool_1, pool_2 = pools[pool_1_index], pools[pool_2_index]
+
                     # Calculates price difference percentage between pools
-                    diff = await self._calculate_price_difference_percentage(
-                        base_token, quote_token, pools[i], pools[j]
+                    price_difference_percentage = await self._calculate_price_difference_percentage(
+                        base_token, quote_token, pool_1, pool_2
                     )
 
                     # Skips if unable to calculate difference
-                    if diff is None:
+                    if price_difference_percentage is None:
                         continue
 
                     # Checks if difference is greater than minimum profitability
-                    if abs(diff) > min_profitability:
+                    if abs(price_difference_percentage) > self._minimum_profitability_percentage:
                         # Determines which pool is buy and which is sell
-                        if diff > 0:
-                            buy_pool, sell_pool = pools[i], pools[j]
+                        if price_difference_percentage > 0:
+                            buy_pool, sell_pool = pool_1, pool_2
                         else:
-                            buy_pool, sell_pool = pools[j], pools[i]
+                            buy_pool, sell_pool = pool_2, pool_1
 
                         # Creates opportunity record
                         opportunity = {
@@ -1140,14 +1138,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             "quote_token": quote_token,
                             "buy_pool": buy_pool,
                             "sell_pool": sell_pool,
-                            "price_difference_percentage": abs(diff),
+                            "price_difference_percentage": abs(price_difference_percentage),
                             "timestamp": time.time(),
                         }
 
                         opportunities.append(opportunity)
                         logger.info(
                             f"Arbitrage opportunity found: {base_token}/{quote_token} "
-                            f"difference {abs(diff):.2f}% between {buy_pool.get('address')} and {sell_pool.get('address')}"
+                            f"difference {abs(price_difference_percentage):.2f}% between {buy_pool.get('internal_id')} and {sell_pool.get('internal_id')}"
                         )
 
         return opportunities
@@ -1172,33 +1170,35 @@ class AMMPortfolioManager(ScriptStrategyBase):
         available_balance = await self._get_total_token_balance_from_all_wallets(base_token)
         if available_balance < self._minimum_trade_amount:
             logger.info(f"Insufficient balance of {base_token}: {available_balance}")
+
             return False
 
         # Calculates ideal trade amount
         trade_amount = await self._calculate_optimal_trade_amount(opportunity, available_balance)
         if not trade_amount or trade_amount <= DECIMAL_ZERO:
-            logger.info("Invalid optimal trade amount")
-            return False
+            logger.info(f"Invalid optimal trade amount: {trade_amount}")
 
-        max_slippage = self._maximum_slippage_percentage
+            return False
 
         try:
             # Simulates buy: base_token -> quote_token
             buy_quote = await self._get_quote_swap(
-                buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, max_slippage
+                buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, self._maximum_slippage_percentage
             )
             if not buy_quote or "estimatedAmountOut" not in buy_quote:
-                logger.info(f"Buy quote unavailable for pool {buy_pool.get('address')}")
+                logger.info(f"Buy quote unavailable for pool {buy_pool.get('internal_id')}")
+
                 return False
 
             expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
 
             # Simulates sell: quote_token -> base_token
             sell_quote = await self._get_quote_swap(
-                sell_pool, quote_token, base_token, expected_quote, TradeType.SELL, max_slippage
+                sell_pool, quote_token, base_token, expected_quote, TradeType.SELL, self._maximum_slippage_percentage
             )
             if not sell_quote or "estimatedAmountOut" not in sell_quote:
-                logger.info(f"Sell quote unavailable for pool {sell_pool.get('address')}")
+                logger.info(f"Sell quote unavailable for pool {sell_pool.get('internal_id')}")
+
                 return False
 
             # Calculates expected profit
@@ -1223,13 +1223,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     f"Opportunity not profitable after slippage: "
                     f"{profit_percentage:.2f}% < {self._minimum_profitability_percentage}%"
                 )
+
                 return False
 
             logger.info(f"Opportunity validated: {base_token}/{quote_token} expected profit {profit_percentage:.2f}%")
-            return True
 
-        except Exception as e:
-            logger.error(f"Error during opportunity validation: {str(e)}")
+            return True
+        except Exception as exception:
+            logger.ignore_exception(exception, "Error during opportunity validation")
+
             return False
 
     async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: Decimal) -> Decimal:
@@ -1455,12 +1457,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         total = DECIMAL_ZERO
 
-        # We don't need lock here, just reading data
-        for chain_data in database["connections"].values():
-            for network_data in chain_data.values():
-                for connector_data in network_data.values():
-                    for wallet in connector_data.get("wallets", {}).values():
-                        balance = wallet.get("tokens", {}).get(token, {}).get("balances", {}).get("free", 0)
+        for chain_information in database["connections"].values():
+            for network_information in chain_information.values():
+                for connector_information in network_information.values():
+                    for wallet_information in connector_information.get("wallets", {}).values():
+                        balance = wallet_information.get("tokens", {}).get(token, {}).get("balances", {}).get("free", 0)
                         if balance:
                             total += Decimal(str(balance))
 
