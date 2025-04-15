@@ -1703,7 +1703,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_list_pools(
-        self, connector: str, network: str, tokens: Optional[List[str]] = None, types: Optional[List[str]] = None
+        self,
+        connector: str,
+        network: str,
+        types: Optional[List[str]] = [],
+        token_symbols: Optional[List[str]] = [],
+        token_addresses: Optional[List[str]] = [],
+        max_number_of_pages: int = 3,
+        use_official_tokens: bool = True,
     ):
         """List pools filtering the results"""
-        return await self._gateway_http_client.amm_list_pools(connector, network, tokens, types)
+        return await self._gateway_http_client.amm_list_pools(
+            connector, network, types, token_symbols, token_addresses, max_number_of_pages, use_official_tokens
+        )
