@@ -91,7 +91,7 @@ configuration: Dict[str, Any] = {
             "mainnet-beta": {
                 "raydium": {
                     "wallets": ["7pWpBM8xtVHJq7C4BBivumfBZAC2J8XndTWvmg9GGXDb"],
-                    "pools": ["2EXiumdi14E9b8Fy62QcA5Uh6WdHS2b38wtSxp72Mibj"],
+                    "pools": ["7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"],
                 }
             }
         },
