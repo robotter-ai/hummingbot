@@ -871,14 +871,18 @@ class GatewayHttpClient:
         network: str,
         tokens: Optional[List[str]] = None,
         types: Optional[List[str]] = None,
-        fail_silently: bool = False,
         max_number_of_pages: int = 3,
         use_official_tokens: bool = True,
+        fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
         Fetches all available AMM pools for a given connector and network
         :param connector: The connector/protocol (e.g., "raydium")
         :param network: The network to use (e.g., "mainnet")
+        :param tokens: List of tokens to filter pools by
+        :param types: List of pool types to filter by
+        :param max_number_of_pages: Maximum number of pages to fetch
+        :param use_official_tokens: Whether to use official tokens only
         :param fail_silently: Whether to fail silently on error
         :return: List of available pools with their information
         """
