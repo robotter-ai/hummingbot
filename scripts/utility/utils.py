@@ -74,11 +74,13 @@ class Logger(object):
     def critical(self, message: str = "", object: Any = None, prefix: str = "", frame: Any = None):
         self.log(logging.CRITICAL, message, object, prefix, frame)
 
-    def ignore_exception(self, exception: Exception, prefix: str = "", frame=inspect.currentframe().f_back):
+    def ignore_exception(
+        self, exception: Exception, message: str = "", prefix: str = "", frame=inspect.currentframe().f_back
+    ):
         formatted_exception = traceback.format_exception(type(exception), exception, exception.__traceback__)
         formatted_exception = "\n".join(formatted_exception)
 
-        message = f"""Ignored exception: {type(exception).__name__} {str(exception)}:\n{formatted_exception}"""
+        message = f"""{message.join("\n") if message else ""}Ignored exception: {type(exception).__name__} {str(exception)}:\n{formatted_exception}"""
 
         self.log(logging.ERROR, prefix=prefix, message=message, frame=frame)
 
