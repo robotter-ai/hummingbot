@@ -381,14 +381,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
         try:
             # Variables for time control between updates
             last_update_time = 0
-            mininum_update_interval = min(self._data_update_intervals.values())
+            minimum_update_interval = min(self._data_update_intervals.values())
 
             while True:
                 current_time = time.time()
                 time_since_last_update = current_time - last_update_time
 
                 # Update database only if minimum interval has passed
-                if time_since_last_update >= mininum_update_interval:
+                if time_since_last_update >= minimum_update_interval:
                     if self._database_initialized:
                         try:
                             self._is_updating = True
@@ -403,7 +403,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 # Wait appropriate interval before checking again
                 # Use at least 1 seconds or half the smallest configured interval
-                sleep_time = max(1.0, mininum_update_interval / 2.0)
+                sleep_time = max(1.0, minimum_update_interval / 2.0)
                 await asyncio.sleep(sleep_time)
         except asyncio.CancelledError as exception:
             logger.ignore_exception(exception, "Data update task cancelled")
@@ -737,6 +737,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                     wallet_internal_id, []
                                 ).append(pool_internal_id)
 
+    # noinspection PyMethodMayBeStatic
     async def _update_database_maps(self):
         """
         Rebuilds the mapping dictionaries:
@@ -1129,7 +1130,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                     # Checks if difference is greater than minimum profitability
                     if abs(price_difference_percentage) > self._minimum_profitability_percentage:
-                        # Determines which pool is buy and which is sell
+                        # Determines which is the buy pool and which is the sell one
                         if price_difference_percentage > 0:
                             buy_pool, sell_pool = pool_1, pool_2
                         else:
@@ -1399,8 +1400,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 buy_wallet.get("address"),
                 base_token,
                 quote_token,
-                trade_amount,
                 TradeType.SELL,
+                trade_amount,
                 self._maximum_slippage_percentage,
                 buy_pool.get("address"),
             )
@@ -1452,8 +1453,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 sell_wallet.get("address"),
                 quote_token,
                 base_token,
-                second_swap_amount,
                 TradeType.SELL,
+                second_swap_amount,
                 self._maximum_slippage_percentage,
                 sell_pool.get("address"),
             )
