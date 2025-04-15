@@ -655,8 +655,10 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         # Create or update pool with detailed information
                         pool_tokens = detailed_pool_info.get("tokens", [])
 
-                        connection["pools"][pool_address] = {
-                            "internal_id": f"{chain_name}/{network_name}/{connector_name}/{pool_address}",
+                        internal_id = f"{chain_name}/{network_name}/{connector_name}/{pool_address}"
+
+                        connection["pools"][internal_id] = {
+                            "internal_id": internal_id,
                             "address": pool_address,
                             "chain": chain_name,
                             "network": network_name,
@@ -672,7 +674,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                         # Initialize tokens structure in pool
                         for token_symbol in pool_tokens:
-                            connection["pools"][pool_address]["tokens"][token_symbol] = {
+                            connection["pools"][internal_id]["tokens"][token_symbol] = {
                                 "balance": None,
                                 "prices": {},
                             }
@@ -691,8 +693,10 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     # Add wallets from configuration
                     for wallet_address in connector_configuration.get("wallets", []):
                         if wallet_address not in connection["wallets"]:
-                            connection["wallets"][wallet_address] = {
-                                "internal_id": f"{chain_name}/{network_name}/{connector_name}/{wallet_address}",
+                            internal_id = f"{chain_name}/{network_name}/{connector_name}/{wallet_address}"
+
+                            connection["wallets"][internal_id] = {
+                                "internal_id": internal_id,
                                 "chain": chain_name,
                                 "network": network_name,
                                 "connector": connector_name,
@@ -702,7 +706,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                             # Pre-initialize token structures for all configured tokens
                             for token_symbol in self._configuration.get("tokens", []):
-                                connection["wallets"][wallet_address]["tokens"][token_symbol] = {
+                                connection["wallets"][internal_id]["tokens"][token_symbol] = {
                                     "balances": {
                                         "free": None,  # Dynamic data
                                         "locked": {
@@ -718,7 +722,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                             # Link wallet to pools it's eligible for
                             for pool_address in connection["pools"]:
-                                connection["wallets"][wallet_address]["pools"][pool_address] = {
+                                connection["wallets"][internal_id]["pools"][pool_address] = {
                                     "shares": None,  # Dynamic data
                                     "tokens": {},  # Dynamic data
                                     "impermanent_loss": None,  # Dynamic data
@@ -726,7 +730,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                                 # Link pool to wallet in maps
                                 pool_internal_id = connection["pools"][pool_address]["internal_id"]
-                                wallet_internal_id = connection["wallets"][wallet_address]["internal_id"]
+                                wallet_internal_id = connection["wallets"][internal_id]["internal_id"]
 
                                 database["maps"].setdefault("wallets_by_pool", {}).setdefault(
                                     pool_internal_id, []
@@ -834,12 +838,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
         for _chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    for pool_address, pool_configuration in connector_configuration["pools"].items():
+                    for _pool_address, pool_configuration in connector_configuration["pools"].items():
+                        pool_internal_id = pool_configuration["internal_id"]
                         # Get updated pool information from gateway
-                        pool_information = await self._gateway_get_pool_info(connector_name, network_name, pool_address)
+                        pool_information = await self._gateway_get_pool_info(
+                            connector_name, network_name, pool_internal_id
+                        )
 
                         if not pool_information:
-                            raise Exception(f"Failed to retrieve pool information for {pool_address}")
+                            raise Exception(f"Failed to retrieve pool information for {pool_internal_id}")
 
                         # Update dynamic values
                         pool_configuration["annual_percentage_rate"] = pool_information.get("feePct")
@@ -886,7 +893,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
         for chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    for wallet_address, wallet_configuration in connector_configuration["wallets"].items():
+                    for _wallet_address_internal_id, wallet_configuration in connector_configuration["wallets"].items():
+                        wallet_address = wallet_configuration.get("address")
+
                         wallet_balances = await self._gateway_get_balances(
                             chain_name, network_name, wallet_address, self._configuration.get("tokens", [])
                         )
@@ -1352,14 +1361,19 @@ class AMMPortfolioManager(ScriptStrategyBase):
         logger.info(f"Executing arbitrage for {base_token}/{quote_token}")
 
         # Gets wallet addresses for each pool.
-        buy_wallets = await self._get_wallet_addresses_for_pool(buy_pool)
-        sell_wallets = await self._get_wallet_addresses_for_pool(sell_pool)
+        buy_wallets = await self._get_wallets_for_pool(buy_pool)
+        sell_wallets = await self._get_wallets_for_pool(sell_pool)
         if not buy_wallets:
             logger.error(f"No wallet found for buy pool {buy_pool.get('address')}")
+
             return False
         if not sell_wallets:
             logger.error(f"No wallet found for sell pool {sell_pool.get('address')}")
+
             return False
+
+        # TODO: Support multiple wallets per pool.
+        # For now, we only support one wallet per pool.
         buy_wallet = buy_wallets[0]
         sell_wallet = sell_wallets[0]
 
@@ -1369,21 +1383,26 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 f"Step 1: Swapping {trade_amount} {base_token} for {quote_token} in pool {buy_pool.get('address')}"
             )
             initial_buy = await self._gateway_get_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet, [base_token, quote_token]
+                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
             if not initial_buy or "balances" not in initial_buy:
                 logger.error(f"Failed to get initial balances for wallet {buy_wallet}")
+
                 return False
-            init_base = Decimal(str(initial_buy["balances"].get(base_token, 0)))
-            init_quote = Decimal(str(initial_buy["balances"].get(quote_token, 0)))
-            if init_base < trade_amount:
-                logger.info(f"Insufficient balance in {buy_wallet}: {init_base} {base_token}")
+
+            initial_base_token_amount = Decimal(str(initial_buy["balances"].get(base_token, 0)))
+            initial_quote_token_amount = Decimal(str(initial_buy["balances"].get(quote_token, 0)))
+            if initial_base_token_amount < trade_amount:
+                logger.info(
+                    f"Insufficient balance in {buy_wallet.get('internal_id')}: {initial_base_token_amount} {base_token}"
+                )
+
                 return False
 
             first_swap = await self._gateway_execute_swap(
                 buy_pool.get("network"),
                 buy_pool.get("connector"),
-                buy_wallet,
+                buy_wallet.get("address"),
                 base_token,
                 quote_token,
                 trade_amount,
@@ -1392,24 +1411,30 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 buy_pool.get("address"),
             )
             if not first_swap or "signature" not in first_swap:
-                logger.error(f"First swap failed in wallet {buy_wallet}")
+                logger.error(f"First swap failed in wallet {buy_wallet.get('internal_id')}")
+
                 return False
+
             logger.info(f"First swap signature: {first_swap['signature']}")
-            confirmed1 = await self._wait_for_transaction_confirmation(
+
+            first_swap_confirmation = await self._wait_for_transaction_confirmation(
                 buy_pool.get("chain"), buy_pool.get("network"), first_swap["signature"]
             )
-            if not confirmed1:
+            if not first_swap_confirmation:
                 logger.error("First swap transaction not confirmed")
+
                 return False
 
             updated_buy = await self._gateway_get_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet, [quote_token]
+                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [quote_token]
             )
             if not updated_buy or "balances" not in updated_buy:
-                logger.error("Failed to get updated buy wallet balances")
+                logger.error(f"Failed to get updated balances for wallet {buy_wallet.get('internal_id')}")
+
                 return False
+
             updated_quote = Decimal(str(updated_buy["balances"].get(quote_token, 0)))
-            quote_received = updated_quote - init_quote
+            quote_received = updated_quote - initial_quote_token_amount
             second_swap_amount = quote_received if quote_received > DECIMAL_ZERO else expected_quote
             if quote_received <= 0:
                 logger.warning(f"Actual quote received undetermined; using expected: {expected_quote} {quote_token}")
@@ -1419,16 +1444,18 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 f"Step 2: Swapping {second_swap_amount} {quote_token} to {base_token} in pool {sell_pool.get('address')}"
             )
             initial_sell = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet, [base_token]
+                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
             )
             if not initial_sell or "balances" not in initial_sell:
                 logger.error(f"Failed to get initial sell wallet balances for {sell_wallet}")
+
                 return False
-            init_sell_base = Decimal(str(initial_sell["balances"].get(base_token, 0)))
+
+            initial_sell_base_token_amount = Decimal(str(initial_sell["balances"].get(base_token, 0)))
             second_swap = await self._gateway_execute_swap(
                 sell_pool.get("network"),
                 sell_pool.get("connector"),
-                sell_wallet,
+                sell_wallet.get("address"),
                 quote_token,
                 base_token,
                 TradeType.SELL,
@@ -1437,51 +1464,61 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 sell_pool.get("address"),
             )
             if not second_swap or "signature" not in second_swap:
-                logger.error(f"Second swap failed in wallet {sell_wallet}")
+                logger.error(f"Second swap failed in wallet {sell_wallet.get('internal_id')}")
+
                 return False
+
             logger.info(f"Second swap signature: {second_swap['signature']}")
-            confirmed2 = await self._wait_for_transaction_confirmation(
+            second_swap_confirmation = await self._wait_for_transaction_confirmation(
                 sell_pool.get("chain"), sell_pool.get("network"), second_swap["signature"]
             )
-            if not confirmed2:
+            if not second_swap_confirmation:
                 logger.error("Second swap transaction not confirmed")
+
                 return False
 
             updated_sell = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet, [base_token]
+                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
             )
             if not updated_sell or "balances" not in updated_sell:
-                logger.error("Failed to get updated sell wallet balance")
+                logger.error(f"Failed to get updated sell wallet balance for {sell_wallet.get('internal_id')}")
+
                 return False
-            final_sell_base = Decimal(str(updated_sell["balances"].get(base_token, 0)))
-            profit = final_sell_base - init_sell_base
-            profit_pct = (profit / trade_amount) * DECIMAL_ONE_HUNDRED if trade_amount > DECIMAL_ZERO else Decimal("0")
+
+            final_sell_base_token_amount = Decimal(str(updated_sell["balances"].get(base_token, 0)))
+            profit = final_sell_base_token_amount - initial_sell_base_token_amount
+            profit_percentage = (
+                (profit / trade_amount) * DECIMAL_ONE_HUNDRED if trade_amount > DECIMAL_ZERO else Decimal("0")
+            )
             trade_record = {
                 "timestamp": time.time(),
-                "buy_wallet": buy_wallet,
-                "sell_wallet": sell_wallet,
+                "buy_wallet": buy_wallet.get("internal_id"),
+                "sell_wallet": sell_wallet.get("internal_id"),
                 "base_token": base_token,
                 "quote_token": quote_token,
-                "buy_pool": buy_pool.get("address"),
-                "sell_pool": sell_pool.get("address"),
+                "buy_pool": buy_pool.get("internal_id"),
+                "sell_pool": sell_pool.get("internal_id"),
                 "trade_amount": trade_amount,
                 "quote_received": quote_received,
                 "profit": profit,
-                "profit_percentage": profit_pct,
-                "first_swap_tx": first_swap["signature"],
-                "second_swap_tx": second_swap["signature"],
+                "profit_percentage": profit_percentage,
+                "first_swap_transaction_hash": first_swap["signature"],
+                "second_swap_transaction_hash": second_swap["signature"],
             }
             database["execution_history"].append(trade_record)
             if profit > 0:
-                logger.info(f"Arbitrage trade successful! Profit: {profit} {base_token} ({profit_pct:.2f}%)")
+                logger.info(f"Arbitrage trade successful! Profit: {profit} {base_token} ({profit_percentage:.2f}%)")
+
                 return True
             else:
                 logger.warning(
-                    f"Arbitrage trade executed with no profit/loss: {profit} {base_token} ({profit_pct:.2f}%)"
+                    f"Arbitrage trade executed with no profit/loss: {profit} {base_token} ({profit_percentage:.2f}%)"
                 )
+
                 return False
-        except Exception as e:
-            logger.error(f"Error during arbitrage execution: {str(e)}")
+        except Exception as exception:
+            logger.ignore_exception(exception, "Error during arbitrage execution")
+
             return False
 
     # noinspection PyMethodMayBeStatic
@@ -1506,7 +1543,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         return total
 
-    async def _get_wallet_addresses_for_pool(self, pool: Dict[str, Any]) -> List[str]:
+    async def _get_wallets_for_pool(self, pool: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Retrieves wallet addresses associated with a given pool.
 
@@ -1515,21 +1552,33 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Returns:
             List of wallet addresses.
         """
-        pool_id = pool.get("address")
-        async with self._database_lock:
-            mapping = database["maps"].get("wallets_by_pool", {})
-            if pool_id in mapping:
-                return mapping[pool_id]
-            # Fallback: search configuration
-            for chain_conf in self._configuration.get("connections", {}).values():
-                for net_conf in chain_conf.values():
-                    for connector, conf in net_conf.items():
-                        if pool.get("address") in conf.get("pools", []):
-                            return conf.get("wallets", [])
-            return []
+        pool_id = pool.get("internal_id")
+        mapping = database["maps"].get("wallets_by_pool", {})
+        if pool_id in mapping:
+            wallets_internal_ids = mapping[pool_id]
+            chain_name, network_name, connector_name, _wallet_address = pool_id.split("/")
+
+            wallets = []
+
+            for wallet_internal_id in wallets_internal_ids:
+                wallet = database["connections"][chain_name][network_name][connector_name]["wallets"][
+                    wallet_internal_id
+                ]
+                wallets.append(wallet)
+
+            return wallets
+
+        # Fallback: search configuration
+        for chain_configuration in self._configuration.get("connections", {}).values():
+            for network_configuration in chain_configuration.values():
+                for connector_configuration in network_configuration.values():
+                    if pool_id in connector_configuration.get("pools", {}).keys():
+                        return connector_configuration.get("wallets", {})
+
+        return []
 
     async def _wait_for_transaction_confirmation(
-        self, chain: str, network: str, tx_hash: str, max_timeout: int = None
+        self, chain: str, network: str, transaction_hash: str, maximum_timeout: int = None
     ) -> bool:
         """
         Waits for a transaction to be confirmed via polling the gateway.
@@ -1537,32 +1586,37 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Args:
             chain: Chain identifier.
             network: Network identifier.
-            tx_hash: Transaction hash.
-            max_timeout: Maximum time to wait (seconds), default is class setting.
+            transaction_hash: Transaction hash.
+            maximum_timeout: Maximum time to wait (seconds), default is class setting.
         Returns:
             True if confirmed; otherwise, False.
         """
-        if max_timeout is None:
-            max_timeout = self._maximum_transaction_confirmation_timeout
+        if maximum_timeout is None:
+            maximum_timeout = self._maximum_transaction_confirmation_timeout
         start_time = time.time()
-        while time.time() - start_time < max_timeout:
+        while time.time() - start_time < maximum_timeout:
             try:
-                tx_status = await self._gateway_poll_transaction(chain, network, tx_hash)
-                if tx_status and tx_status.get("txStatus") == 1:
-                    logger.info(f"Transaction {tx_hash} confirmed!")
+                transaction_status = await self._gateway_poll_transaction(chain, network, transaction_hash)
+                if transaction_status and transaction_status.get("txStatus") == 1:
+                    logger.info(f"Transaction {transaction_hash} confirmed!")
+
                     return True
-                if tx_status and tx_status.get("txStatus") == -1:
-                    logger.error(f"Transaction {tx_hash} failed: {tx_status}")
+                if transaction_status and transaction_status.get("txStatus") == -1:
+                    logger.error(f"Transaction {transaction_hash} failed: {transaction_status}")
+
                     return False
+
                 await asyncio.sleep(self._transaction_polling_interval)
-            except Exception as e:
-                logger.error(f"Error polling transaction {tx_hash}: {str(e)}")
+            except Exception as exception:
+                logger.ignore_exception(exception, f"Error polling transaction {transaction_hash}")
                 await asyncio.sleep(self._transaction_polling_interval)
-        logger.warning(f"Transaction {tx_hash} confirmation timed out after {max_timeout} seconds")
+
+        logger.warning(f"Transaction {transaction_hash} confirmation timed out after {maximum_timeout} seconds")
+
         return False
 
     # --------------------------------------------------------------------------
-    # Gateway Helper Methods (using retry/timeout)
+    # Gateway Methods (using retry/timeout)
     # --------------------------------------------------------------------------
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_ping_gateway(self):
@@ -1649,7 +1703,3 @@ class AMMPortfolioManager(ScriptStrategyBase):
     ):
         """List pools filtering the results"""
         return await self._gateway_http_client.amm_list_pools(connector, network, tokens, types)
-
-
-# ==============================================================================
-# End of Module
