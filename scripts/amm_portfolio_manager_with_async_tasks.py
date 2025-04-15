@@ -631,16 +631,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             base_token, quote_token = tokens[base_token_index], tokens[quote_token_index]
 
                             # Find pools containing this token pair
-                            pools_for_pair = await self._gateway_list_pools(
+                            list_pools_response = await self._gateway_list_pools(
                                 connector_name,
                                 network_name,
-                                [base_token, quote_token],
                                 [PoolType.XYK.value, PoolType.STABLE.value, PoolType.AMM.value],
+                                [base_token, quote_token],
                             )
 
                             # Add found pools to our collection
-                            for pool_address in pools_for_pair:
-                                pool_addresses.add(pool_address)
+                            for pool_information in list_pools_response.get("pools", []):
+                                pool_addresses.add(pool_information.get("address"))
 
                     # 3. Update detailed information for all pools
                     for pool_address in pool_addresses:

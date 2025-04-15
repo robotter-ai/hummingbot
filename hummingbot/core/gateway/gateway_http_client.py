@@ -916,7 +916,7 @@ class GatewayHttpClient:
                 "pools": [
                     pool
                     for pool in result.get("pools", [])
-                    if pool.get("address") == "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG"
+                    if pool.get("address") == "7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of"
                 ]
             }
 
