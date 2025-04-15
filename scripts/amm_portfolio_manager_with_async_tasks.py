@@ -692,11 +692,12 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                     # Add wallets from configuration
                     for wallet_address in connector_configuration.get("wallets", []):
-                        if wallet_address not in connection["wallets"]:
-                            internal_id = f"{chain_name}/{network_name}/{connector_name}/{wallet_address}"
+                        wallet_internal_id = f"{chain_name}/{network_name}/{connector_name}/{wallet_address}"
 
-                            connection["wallets"][internal_id] = {
-                                "internal_id": internal_id,
+                        if wallet_internal_id not in connection["wallets"]:
+                            connection["wallets"][wallet_internal_id] = {
+                                "internal_id": wallet_internal_id,
+                                "address": wallet_address,
                                 "chain": chain_name,
                                 "network": network_name,
                                 "connector": connector_name,
@@ -706,7 +707,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                             # Pre-initialize token structures for all configured tokens
                             for token_symbol in self._configuration.get("tokens", []):
-                                connection["wallets"][internal_id]["tokens"][token_symbol] = {
+                                connection["wallets"][wallet_internal_id]["tokens"][token_symbol] = {
                                     "balances": {
                                         "free": None,  # Dynamic data
                                         "locked": {
@@ -721,17 +722,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 }
 
                             # Link wallet to pools it's eligible for
-                            for pool_address in connection["pools"]:
-                                connection["wallets"][internal_id]["pools"][pool_address] = {
+                            for pool_internal_id in connection["pools"]:
+                                connection["wallets"][wallet_internal_id]["pools"][pool_internal_id] = {
                                     "shares": None,  # Dynamic data
                                     "tokens": {},  # Dynamic data
                                     "impermanent_loss": None,  # Dynamic data
                                 }
 
                                 # Link pool to wallet in maps
-                                pool_internal_id = connection["pools"][pool_address]["internal_id"]
-                                wallet_internal_id = connection["wallets"][internal_id]["internal_id"]
-
                                 database["maps"].setdefault("wallets_by_pool", {}).setdefault(
                                     pool_internal_id, []
                                 ).append(wallet_internal_id)
@@ -753,25 +751,23 @@ class AMMPortfolioManager(ScriptStrategyBase):
         maps["pools_by_wallet"].clear()
 
         # Rebuilds maps
-        for _chain_name, chain_configuration in database["connections"].items():
-            for _network_name, network_configuration in chain_configuration.items():
-                for _connector_name, connector_configuration in network_configuration.items():
+        for chain_name, chain_configuration in database["connections"].items():
+            for network_name, network_configuration in chain_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
                     # Maps pools by tokens
-                    for pool_address, pool_configuration in connector_configuration["pools"].items():
+                    for pool_internal_id, pool_configuration in connector_configuration["pools"].items():
                         tokens_list = pool_configuration.get("tokens_list", [])
                         for base_token_index in range(len(tokens_list)):
                             for quote_token_index in range(base_token_index + 1, len(tokens_list)):
                                 base_token, quote_token = tokens_list[base_token_index], tokens_list[quote_token_index]
                                 key = f"{base_token}/{quote_token}"
-                                maps["pools_by_tokens"].setdefault(key, []).append(pool_configuration["internal_id"])
+                                maps["pools_by_tokens"].setdefault(key, []).append(pool_internal_id)
 
                     # Maps wallets to pools and vice versa
-                    for _wallet_address, wallet_configuration in connector_configuration["wallets"].items():
-                        wallet_id = wallet_configuration["internal_id"]
-                        for pool_address, pool_configuration in wallet_configuration.get("pools", {}).items():
-                            pool_id = pool_configuration["internal_id"]
-                            maps["pools_by_wallet"].setdefault(wallet_id, []).append(pool_id)
-                            maps["wallets_by_pool"].setdefault(pool_id, []).append(wallet_id)
+                    for wallet_internal_id, wallet_configuration in connector_configuration["wallets"].items():
+                        for pool_internal_id in wallet_configuration.get("pools", {}):
+                            maps["pools_by_wallet"].setdefault(wallet_internal_id, []).append(pool_internal_id)
+                            maps["wallets_by_pool"].setdefault(pool_internal_id, []).append(wallet_internal_id)
 
     # --------------------------------------------------------------------------
     # Dynamic Database Update Methods
@@ -835,15 +831,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
         by querying the gateway. All pools are assumed to have exactly 2 tokens,
         with the first being the base token and the second being the quote token.
         """
-        for _chain_name, chain_configuration in database["connections"].items():
+        for chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    for _pool_address, pool_configuration in connector_configuration["pools"].items():
-                        pool_internal_id = pool_configuration["internal_id"]
+                    for pool_internal_id, pool_configuration in connector_configuration["pools"].items():
                         # Get updated pool information from gateway
-                        pool_information = await self._gateway_get_pool_info(
-                            connector_name, network_name, pool_internal_id
-                        )
+                        pool_address = pool_configuration["address"]
+                        pool_information = await self._gateway_get_pool_info(connector_name, network_name, pool_address)
 
                         if not pool_information:
                             raise Exception(f"Failed to retrieve pool information for {pool_internal_id}")
@@ -893,8 +887,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
         for chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    for _wallet_address_internal_id, wallet_configuration in connector_configuration["wallets"].items():
-                        wallet_address = wallet_configuration.get("address")
+                    for wallet_internal_id, wallet_configuration in connector_configuration["wallets"].items():
+                        wallet_address = wallet_configuration["address"]
 
                         wallet_balances = await self._gateway_get_balances(
                             chain_name, network_name, wallet_address, self._configuration.get("tokens", [])
@@ -1386,7 +1380,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
             if not initial_buy or "balances" not in initial_buy:
-                logger.error(f"Failed to get initial balances for wallet {buy_wallet}")
+                logger.error(f"Failed to get initial balances for wallet {buy_wallet.get('internal_id')}")
 
                 return False
 
@@ -1447,7 +1441,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
             )
             if not initial_sell or "balances" not in initial_sell:
-                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet}")
+                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet.get('internal_id')}")
 
                 return False
 
@@ -1458,13 +1452,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 sell_wallet.get("address"),
                 quote_token,
                 base_token,
-                TradeType.SELL,
                 second_swap_amount,
+                TradeType.SELL,
                 self._maximum_slippage_percentage,
                 sell_pool.get("address"),
             )
             if not second_swap or "signature" not in second_swap:
-                logger.error(f"Second swap failed in wallet {sell_wallet.get('internal_id')}")
+                logger.error(f"Second swap failed in wallet {sell_wallet.get('address')}")
 
                 return False
 
@@ -1481,7 +1475,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
             )
             if not updated_sell or "balances" not in updated_sell:
-                logger.error(f"Failed to get updated sell wallet balance for {sell_wallet.get('internal_id')}")
+                logger.error(f"Failed to get updated sell wallet balance for {sell_wallet.get('address')}")
 
                 return False
 
@@ -1556,7 +1550,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         mapping = database["maps"].get("wallets_by_pool", {})
         if pool_id in mapping:
             wallets_internal_ids = mapping[pool_id]
-            chain_name, network_name, connector_name, _wallet_address = pool_id.split("/")
+            chain_name, network_name, connector_name, _ = pool_id.split("/")
 
             wallets = []
 
@@ -1625,7 +1619,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_pool_info(self, connector: str, network: str, pool_address: str):
-        """Retrieves pool details from the gateway."""
+        """
+        Retrieves pool details from the gateway.
+
+        Args:
+            connector: Connector name
+            network: Network name
+            pool_address: Pool address
+        Returns:
+            Pool information details
+        """
         return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
