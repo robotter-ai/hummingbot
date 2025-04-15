@@ -1182,8 +1182,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         try:
             # Simulates buy: base_token -> quote_token
-            buy_quote = await self._get_quote_swap(
-                buy_pool, base_token, quote_token, trade_amount, TradeType.SELL, self._maximum_slippage_percentage
+            buy_quote = await self._gateway_quote_swap(
+                buy_pool.get("network"),
+                buy_pool.get("connector"),
+                base_token,
+                quote_token,
+                trade_amount,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                buy_pool.get("address"),
             )
             if not buy_quote or "estimatedAmountOut" not in buy_quote:
                 logger.info(f"Buy quote unavailable for pool {buy_pool.get('internal_id')}")
@@ -1193,8 +1200,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
             expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
 
             # Simulates sell: quote_token -> base_token
-            sell_quote = await self._get_quote_swap(
-                sell_pool, quote_token, base_token, expected_quote, TradeType.SELL, self._maximum_slippage_percentage
+            sell_quote = await self._gateway_quote_swap(
+                sell_pool.get("network"),
+                sell_pool.get("connector"),
+                quote_token,
+                base_token,
+                expected_quote,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                sell_pool.get("address"),
             )
             if not sell_quote or "estimatedAmountOut" not in sell_quote:
                 logger.info(f"Sell quote unavailable for pool {sell_pool.get('internal_id')}")
@@ -1244,9 +1258,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Returns:
             Optimal trade amount as Decimal.
         """
-        min_amount = self._minimum_trade_amount
         test_amounts = [
-            min_amount,
+            self._minimum_trade_amount,
             max_available * DECIMAL_TEN_PERCENT,
             max_available * DECIMAL_TWENTY_FIVE_PERCENT,
             max_available * DECIMAL_FIFTY_PERCENT,
@@ -1254,15 +1267,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
             max_available,
         ]
         best_amount = DECIMAL_ZERO
-        best_profit_pct = DECIMAL_NEGATIVE_INFINITY
+        best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
         for amount in sorted(test_amounts):
             if amount > max_available:
                 continue
-            profit_pct = await self._simulate_arbitrage_profit(opportunity, amount)
-            if profit_pct > best_profit_pct:
-                best_profit_pct = profit_pct
+            profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
+            if profit_percentage > best_profit_percentage:
+                best_profit_percentage = profit_percentage
                 best_amount = amount
-        return best_amount if best_amount > DECIMAL_ZERO else min_amount
+
+        return best_amount if best_amount > DECIMAL_ZERO else self._minimum_trade_amount
 
     async def _simulate_arbitrage_profit(self, opportunity: Dict[str, Any], amount: Decimal) -> Decimal:
         """
@@ -1278,24 +1292,45 @@ class AMMPortfolioManager(ScriptStrategyBase):
         quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
-        max_slippage = self._maximum_slippage_percentage
         try:
-            buy_quote = await self._get_quote_swap(
-                buy_pool, base_token, quote_token, amount, TradeType.SELL, max_slippage
+            buy_quote = await self._gateway_quote_swap(
+                buy_pool.get("network"),
+                buy_pool.get("connector"),
+                base_token,
+                quote_token,
+                amount,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                buy_pool.get("address"),
             )
+
             if not buy_quote or "estimatedAmountOut" not in buy_quote:
                 return DECIMAL_NEGATIVE_INFINITY
+
             expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
-            sell_quote = await self._get_quote_swap(
-                sell_pool, quote_token, base_token, expected_quote, TradeType.SELL, max_slippage
+
+            sell_quote = await self._gateway_quote_swap(
+                sell_pool.get("network"),
+                sell_pool.get("connector"),
+                quote_token,
+                base_token,
+                expected_quote,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                sell_pool.get("address"),
             )
+
             if not sell_quote or "estimatedAmountOut" not in sell_quote:
                 return DECIMAL_NEGATIVE_INFINITY
+
             expected_return = Decimal(str(sell_quote["estimatedAmountOut"]))
+
             profit = expected_return - amount
+
             return (profit / amount) * DECIMAL_ONE_HUNDRED if amount > DECIMAL_ZERO else DECIMAL_ZERO
-        except Exception as e:
-            logger.error(f"Error simulating arbitrage profit: {str(e)}")
+        except Exception as exception:
+            logger.ignore_exception(exception, "Error simulating arbitrage profit")
+
             return DECIMAL_NEGATIVE_INFINITY
 
     async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
@@ -1345,14 +1380,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 logger.info(f"Insufficient balance in {buy_wallet}: {init_base} {base_token}")
                 return False
 
-            first_swap = await self._post_execute_swap(
-                pool=buy_pool,
-                wallet_address=buy_wallet,
-                base_token=base_token,
-                quote_token=quote_token,
-                amount=trade_amount,
-                side=TradeType.SELL,
-                slippage_percentage=self._maximum_slippage_percentage,
+            first_swap = await self._gateway_execute_swap(
+                buy_pool.get("network"),
+                buy_pool.get("connector"),
+                buy_wallet,
+                base_token,
+                quote_token,
+                trade_amount,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                buy_pool.get("address"),
             )
             if not first_swap or "signature" not in first_swap:
                 logger.error(f"First swap failed in wallet {buy_wallet}")
@@ -1388,14 +1425,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 logger.error(f"Failed to get initial sell wallet balances for {sell_wallet}")
                 return False
             init_sell_base = Decimal(str(initial_sell["balances"].get(base_token, 0)))
-            second_swap = await self._post_execute_swap(
-                pool=sell_pool,
-                wallet_address=sell_wallet,
-                base_token=quote_token,
-                quote_token=base_token,
-                amount=second_swap_amount,
-                side=TradeType.SELL,
-                slippage_percentage=self._maximum_slippage_percentage,
+            second_swap = await self._gateway_execute_swap(
+                sell_pool.get("network"),
+                sell_pool.get("connector"),
+                sell_wallet,
+                quote_token,
+                base_token,
+                TradeType.SELL,
+                second_swap_amount,
+                self._maximum_slippage_percentage,
+                sell_pool.get("address"),
             )
             if not second_swap or "signature" not in second_swap:
                 logger.error(f"Second swap failed in wallet {sell_wallet}")
@@ -1488,82 +1527,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         if pool.get("address") in conf.get("pools", []):
                             return conf.get("wallets", [])
             return []
-
-    async def _get_quote_swap(
-        self,
-        pool: Dict[str, Any],
-        base_token: str,
-        quote_token: str,
-        amount: Decimal,
-        side: TradeType,
-        slippage_percentage: Decimal,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Gets a swap quote for a given pool and token pair using the gateway.
-
-        Args:
-            pool: Pool dictionary containing network, connector, and address.
-            base_token: Token to swap from.
-            quote_token: Token to swap to.
-            amount: Amount to swap.
-            side: Trade side.
-            slippage_percentage: Allowed slippage.
-        Returns:
-            Quote dictionary with 'estimatedAmountOut', or None if unavailable.
-        """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("address")
-        try:
-            return await self._gateway_quote_swap(
-                network, connector, base_token, quote_token, amount, side, slippage_percentage, pool_address
-            )
-        except Exception as e:
-            logger.error(f"Error getting swap quote: {str(e)}")
-            return None
-
-    async def _post_execute_swap(
-        self,
-        pool: Dict[str, Any],
-        wallet_address: str,
-        base_token: str,
-        quote_token: str,
-        amount: Decimal,
-        side: TradeType,
-        slippage_percentage: Decimal,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Executes a swap transaction via the gateway.
-
-        Args:
-            pool: Pool dictionary.
-            wallet_address: Wallet address to use.
-            base_token: Token to swap from.
-            quote_token: Token to swap to.
-            amount: Amount to swap.
-            side: Trade side.
-            slippage_percentage: Allowed slippage.
-        Returns:
-            Dictionary with transaction details (e.g., 'signature') or None.
-        """
-        network = pool.get("network")
-        connector = pool.get("connector")
-        pool_address = pool.get("address")
-        try:
-            return await self._gateway_execute_swap(
-                network,
-                connector,
-                wallet_address,
-                base_token,
-                quote_token,
-                side,
-                amount,
-                slippage_percentage,
-                pool_address,
-            )
-        except Exception as e:
-            logger.error(f"Error executing swap: {str(e)}")
-            return None
 
     async def _wait_for_transaction_confirmation(
         self, chain: str, network: str, tx_hash: str, max_timeout: int = None
