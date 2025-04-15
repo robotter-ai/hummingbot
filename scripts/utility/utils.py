@@ -75,7 +75,7 @@ class Logger(object):
         self.log(logging.CRITICAL, message, object, prefix, frame)
 
     def ignore_exception(
-        self, exception: Exception, message: str = "", prefix: str = "", frame=inspect.currentframe().f_back
+        self, exception: BaseException, message: str = "", prefix: str = "", frame=inspect.currentframe().f_back
     ):
         formatted_exception = traceback.format_exception(type(exception), exception, exception.__traceback__)
         formatted_exception = "\n".join(formatted_exception)
