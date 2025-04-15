@@ -21,6 +21,7 @@ import logging
 import os
 import time
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic.v1 import Field, validator
@@ -109,6 +110,33 @@ database: Dict[str, Any] = {
         "pools_by_wallet": {},  # wallet internal ID -> list of pool internal IDs
     },
 }
+
+# ==============================================================================
+# Logger Initialization
+# ==============================================================================
+logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
+
+
+# ==============================================================================
+# Enumerators
+# ==============================================================================
+
+
+class PoolType(Enum):
+    """Enum for different types of liquidity pools"""
+
+    # Hydration
+    XYK = "Xyk"
+    STABLE = "Stableswap"
+    OMNIPOOL = "Omnipool"
+    LBP = "Lbp"
+
+    # Raydium
+    AMM = "amm"
+    CPMM = "cpmm"
+    CLMM = "clmm"
+
+    UNKNOWN = "unknown"
 
 
 # ==============================================================================
@@ -237,12 +265,6 @@ class AMMPortfolioManagerConfiguration(BaseClientModel):
 
 
 # ==============================================================================
-# Logger Initialization
-# ==============================================================================
-logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
-
-
-# ==============================================================================
 # AMMPortfolioManager Strategy Class
 # ==============================================================================
 @logged_class(logger=logger, disallowed_methods=["on_tick"])
@@ -336,6 +358,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
         if self._transaction_confirmation_delay > 0:
             self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
 
+        while True:
+            # Check gateway status when needed
+            if not self._gateway_is_ready:
+                await self._check_gateway_status()
+                if not self._gateway_is_ready:
+                    self.logger().warning("Gateway not ready. Trying again in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
+
         # Initialize database
         await self._initialize_database_structure()
 
@@ -363,39 +394,30 @@ class AMMPortfolioManager(ScriptStrategyBase):
         try:
             # Variables for time control between updates
             last_update_time = 0
-            min_update_interval = min(self._data_update_intervals.values())
+            mininum_update_interval = min(self._data_update_intervals.values())
 
             while True:
-                # Check gateway status when needed
-                if not self._gateway_is_ready:
-                    await self._check_gateway_status()
-                    if not self._gateway_is_ready:
-                        self.logger().warning("Gateway not ready. Trying again in 5 seconds...")
-                        await asyncio.sleep(5)
-                        continue
-
                 current_time = time.time()
                 time_since_last_update = current_time - last_update_time
 
                 # Update database only if minimum interval has passed
-                if time_since_last_update >= min_update_interval:
+                if time_since_last_update >= mininum_update_interval:
                     if self._database_initialized:
                         try:
                             self._is_updating = True
                             await self._update_database()
                             last_update_time = current_time
-                        except Exception as e:
-                            self.logger().error(f"Error during database update: {str(e)}")
+                        except Exception as exception:
+                            self.logger().error(f"Error during database update: {str(exception)}")
                         finally:
                             self._is_updating = False
                     else:
-                        self.logger().warning("Database not initialized. Skipping update.")
+                        self.logger().warning("Database not initialized. Skipping update...")
 
                 # Wait appropriate interval before checking again
-                # Use at least 5 seconds or half the smallest configured interval
-                sleep_time = max(5.0, min_update_interval / 2.0)
+                # Use at least 1 seconds or half the smallest configured interval
+                sleep_time = max(1.0, mininum_update_interval / 2.0)
                 await asyncio.sleep(sleep_time)
-
         except asyncio.CancelledError:
             self.logger().info("Data update task cancelled")
         except Exception as e:
@@ -451,9 +473,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
             else:
                 self._gateway_is_ready = False
                 self.logger().warning("Ping of gateway did not return response.")
-        except Exception as e:
+        except Exception as exception:
             self._gateway_is_ready = False
-            self.logger().error(f"Gateway status check failed: {str(e)}")
+            self.logger().error(f"Gateway status check failed: {str(exception)}")
 
     async def _run_arbitrage_strategy(self):
         """
@@ -518,52 +540,42 @@ class AMMPortfolioManager(ScriptStrategyBase):
         For each chain, network and connector, stores static information about wallets, tokens and pools.
         """
         if self._database_initialized:
-            self.logger().info("Database already initialized")
+            self.logger().info("Database already initialized, skipping...")
 
             return
 
-        self.logger().info("Starting database initialization...")
+        # Initializes basic structure of the database
+        for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
+            database["connections"].setdefault(chain_name, {})
 
-        try:
-            # Initializes basic structure of the database
-            for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
-                database["connections"].setdefault(chain_name, {})
+            for network_name, network_configuration in chain_configuration.items():
+                database["connections"][chain_name].setdefault(network_name, {})
 
-                for network_name, network_configuration in chain_configuration.items():
-                    database["connections"][chain_name].setdefault(network_name, {})
+                for connector_name, connector_configuration in network_configuration.items():
+                    database["connections"][chain_name][network_name].setdefault(
+                        connector_name,
+                        {
+                            "wallets": {},
+                            "tokens": {},
+                            "pools": {},
+                        },
+                    )
 
-                    for connector_name, connector_configuration in network_configuration.items():
-                        # Initializes structure for the connector
-                        database["connections"][chain_name][network_name].setdefault(
-                            connector_name,
-                            {
-                                "wallets": {},
-                                "tokens": {},
-                                "pools": {},
-                            },
-                        )
+        # Initialize tokens, pools, and wallets in order
+        await self._initialize_token_information()
+        await self._initialize_pool_information()
+        await self._initialize_wallet_information()
 
-            # Initialize tokens, pools, and wallets in order
-            await self._initialize_token_information()
-            await self._initialize_pool_information()
-            await self._initialize_wallet_information()
+        # Initializes database maps
+        await self._update_database_maps()
 
-            # Initializes database maps
-            await self._update_database_maps()
+        # Update initial dynamic data
+        await self._update_token_information()
+        await self._update_pool_information()
+        await self._update_wallet_balances()
 
-            # Update initial dynamic data
-            await self._update_token_information()
-            await self._update_pool_information()
-            await self._update_wallet_balances()
-
-            # Marks the database as initialized
-            self._database_initialized = True
-            self.logger().info("Database structure initialization completed successfully")
-
-        except Exception as e:
-            self.logger().error(f"Error initializing database: {str(e)}")
-            self._database_initialized = False
-            raise
+        # Marks the database as initialized
+        self._database_initialized = True
 
     async def _initialize_token_information(self):
         """
@@ -624,13 +636,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     tokens = self._configuration.get("tokens", [])
 
                     # Generate all possible token pair combinations
-                    for i in range(len(tokens)):
-                        for j in range(i + 1, len(tokens)):
-                            base_token, quote_token = tokens[i], tokens[j]
+                    for base_token_index in range(len(tokens)):
+                        for quote_token_index in range(base_token_index + 1, len(tokens)):
+                            base_token, quote_token = tokens[base_token_index], tokens[quote_token_index]
 
                             # Find pools containing this token pair
-                            pools_for_pair = await self._gateway_find_pools_by_tokens(
-                                connector_name, network_name, [base_token, quote_token], ["amm", "xky"]
+                            pools_for_pair = await self._gateway_list_pools(
+                                connector_name,
+                                network_name,
+                                [base_token, quote_token],
+                                [PoolType.XYK.value, PoolType.STABLE.value, PoolType.AMM.value],
                             )
 
                             # Add found pools to our collection
@@ -645,7 +660,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         )
 
                         if not detailed_pool_info:
-                            continue
+                            raise Exception(f"Failed to retrieve detailed pool information for {pool_address}")
 
                         # Create or update pool with detailed information
                         pool_tokens = detailed_pool_info.get("tokens", [])
@@ -737,8 +752,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
          - wallets_by_pool: pool internal ID -> list of wallet internal IDs
          - pools_by_wallet: wallet internal ID -> list of pool internal IDs
         """
-        self.logger().info("Updating database maps...")
-
         maps = database["maps"]
         # Clears existing maps
         maps["pools_by_tokens"].clear()
@@ -754,17 +767,17 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         tokens_list = pool_configuration.get("tokens_list", [])
                         for base_token_index in range(len(tokens_list)):
                             for quote_token_index in range(base_token_index + 1, len(tokens_list)):
-                                key = f"{tokens_list[base_token_index]}/{tokens_list[quote_token_index]}"
+                                base_token, quote_token = tokens_list[base_token_index], tokens_list[quote_token_index]
+                                key = f"{base_token}/{quote_token}"
                                 maps["pools_by_tokens"].setdefault(key, []).append(pool_configuration["internal_id"])
 
                     # Maps wallets to pools and vice versa
                     for _wallet_address, wallet_configuration in connector_configuration["wallets"].items():
                         wallet_id = wallet_configuration["internal_id"]
-                        for pool_address in wallet_configuration.get("pools", {}).keys():
-                            maps["pools_by_wallet"].setdefault(wallet_id, []).append(pool_address)
-                            maps["wallets_by_pool"].setdefault(pool_address, []).append(wallet_id)
-
-        self.logger().info("Database maps update completed")
+                        for pool_address, pool_configuration in wallet_configuration.get("pools", {}).items():
+                            pool_id = pool_configuration["internal_id"]
+                            maps["pools_by_wallet"].setdefault(wallet_id, []).append(pool_id)
+                            maps["wallets_by_pool"].setdefault(pool_id, []).append(wallet_id)
 
     # --------------------------------------------------------------------------
     # Dynamic Database Update Methods
@@ -842,7 +855,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         by querying the gateway. All pools are assumed to have exactly 2 tokens,
         with the first being the base token and the second being the quote token.
         """
-        for chain_name, chain_configuration in database["connections"].items():
+        for _chain_name, chain_configuration in database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     for pool_address, pool_configuration in connector_configuration["pools"].items():
@@ -850,10 +863,10 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         pool_information = await self._gateway_get_pool_info(connector_name, network_name, pool_address)
 
                         if not pool_information:
-                            continue
+                            raise Exception(f"Failed to retrieve pool information for {pool_address}")
 
                         # Update dynamic values
-                        pool_configuration["annual_percentage_rate"] = pool_information.get("annual_percentage_rate")
+                        pool_configuration["annual_percentage_rate"] = pool_information.get("feePct")
                         pool_configuration["total_value_locked"] = pool_information.get("total_value_locked")
                         pool_configuration["volume"]["24h"] = pool_information.get("volume", {}).get("24h")
 
@@ -898,7 +911,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     for wallet_address, wallet_configuration in connector_configuration["wallets"].items():
-                        wallet_balances = await self._gateway_get_balances(chain_name, network_name, wallet_address)
+                        wallet_balances = await self._gateway_get_balances(
+                            chain_name, network_name, wallet_address, self._configuration.get("tokens", [])
+                        )
 
                         if wallet_balances and "balances" in wallet_balances:
                             for token_symbol, balance in wallet_balances["balances"].items():
@@ -944,8 +959,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             token_symbol = token.get("symbol")
                             if token_symbol in connector_configuration["tokens"]:
                                 connector_configuration["tokens"][token_symbol]["price"] = token.get("price")
-
-        self.logger().info("Token information update completed")
 
     # --------------------------------------------------------------------------
     # Arbitrage Opportunity Discovery and Trade Execution Methods
@@ -1688,7 +1701,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         return await self._gateway_http_client.get_transaction_status(chain, network, tx_hash)
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
-    async def _gateway_find_pools_by_tokens(
+    async def _gateway_list_pools(
         self, connector: str, network: str, tokens: Optional[List[str]] = None, types: Optional[List[str]] = None
     ):
         """List pools filtering the results"""
