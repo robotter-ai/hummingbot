@@ -1162,7 +1162,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         Retrieves token information by address.
         """
-        return [
+        tokens = [
             token
             for token in self._database["connections"]
             .get(chain_name, {})
@@ -1172,6 +1172,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
             .values()
             if token.get("address") == address
         ]
+
+        return tokens[0] if tokens else None
 
     # noinspection PyMethodMayBeStatic
     def _get_token_pair_relative_price_in_pool(
