@@ -99,18 +99,6 @@ configuration: Dict[str, Any] = {
     "tokens": ["USDC", "USDT"],
 }
 
-# The database schema per specification.
-database: Dict[str, Any] = {
-    "connections": {},
-    "arbitrage_opportunities": [],
-    "execution_history": [],
-    "maps": {
-        "pools_by_tokens": {},  # "token1/token2" -> list of pool internal IDs
-        "wallets_by_pool": {},  # pool internal ID -> list of wallet internal IDs
-        "pools_by_wallet": {},  # wallet internal ID -> list of pool internal IDs
-    },
-}
-
 # ==============================================================================
 # Logger Initialization
 # ==============================================================================
@@ -281,6 +269,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     # Configuration attributes
     _configuration: Optional[Dict[str, Any]] = None
+    _database: Dict[str, Any] = {}
     _gateway_is_ready: bool = False
     _gateway_http_client: Optional[GatewayHttpClient] = None
     _all_gateway_connections: List[Dict[str, Any]] = []
@@ -317,13 +306,23 @@ class AMMPortfolioManager(ScriptStrategyBase):
             connectors: Dictionary of available connectors.
         """
         super().__init__(connectors)
-        # TODO: Verify if we need to use another method that waits for the initialization instead of using safe_ensure_future!!!
-        safe_ensure_future(self._initialize())
+        asyncio.get_running_loop().run_until_complete(self._initialize())
 
     async def _initialize(self):
         """
         Configures gateway client, database structure and asynchronous updates.
         """
+        self._database: Dict[str, Any] = {
+            "connections": {},
+            "arbitrage_opportunities": [],
+            "execution_history": [],
+            "maps": {
+                "pools_by_tokens": {},  # "token1/token2" -> list of pool internal IDs
+                "wallets_by_pool": {},  # pool internal ID -> list of wallet internal IDs
+                "pools_by_wallet": {},  # wallet internal ID -> list of pool internal IDs
+            },
+        }
+
         self._database_lock = asyncio.Lock()
 
         # Gateway client initialization
@@ -493,9 +492,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
         # Validates and executes each opportunity
         for opportunity in opportunities:
             # Registers the opportunity in the database
-            if "arbitrage_opportunities" not in database:
-                database["arbitrage_opportunities"] = []
-            database["arbitrage_opportunities"].append(opportunity)
+            if "arbitrage_opportunities" not in self._database:
+                self._database["arbitrage_opportunities"] = []
+            self._database["arbitrage_opportunities"].append(opportunity)
 
             # Validates the opportunity
             logger.info(
@@ -536,13 +535,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         # Initializes basic structure of the database
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
-            database["connections"].setdefault(chain_name, {})
+            self._database["connections"].setdefault(chain_name, {})
 
             for network_name, network_configuration in chain_configuration.items():
-                database["connections"][chain_name].setdefault(network_name, {})
+                self._database["connections"][chain_name].setdefault(network_name, {})
 
                 for connector_name, connector_configuration in network_configuration.items():
-                    database["connections"][chain_name][network_name].setdefault(
+                    self._database["connections"][chain_name][network_name].setdefault(
                         connector_name,
                         {
                             "wallets": {},
@@ -576,7 +575,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    connection = database["connections"][chain_name][network_name][connector_name]
+                    connection = self._database["connections"][chain_name][network_name][connector_name]
 
                     # Retrieves token information from the gateway
                     token_response = await self._gateway_get_tokens(
@@ -615,7 +614,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    connection = database["connections"][chain_name][network_name][connector_name]
+                    connection = self._database["connections"][chain_name][network_name][connector_name]
                     pool_addresses = set()
 
                     # 1. Collect pools from configuration
@@ -688,7 +687,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    connection = database["connections"][chain_name][network_name][connector_name]
+                    connection = self._database["connections"][chain_name][network_name][connector_name]
 
                     # Add wallets from configuration
                     for wallet_address in connector_configuration.get("wallets", []):
@@ -730,10 +729,10 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 }
 
                                 # Link pool to wallet in maps
-                                database["maps"].setdefault("wallets_by_pool", {}).setdefault(
+                                self._database["maps"].setdefault("wallets_by_pool", {}).setdefault(
                                     pool_internal_id, []
                                 ).append(wallet_internal_id)
-                                database["maps"].setdefault("pools_by_wallet", {}).setdefault(
+                                self._database["maps"].setdefault("pools_by_wallet", {}).setdefault(
                                     wallet_internal_id, []
                                 ).append(pool_internal_id)
 
@@ -745,14 +744,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
          - wallets_by_pool: pool internal ID -> list of wallet internal IDs
          - pools_by_wallet: wallet internal ID -> list of pool internal IDs
         """
-        maps = database["maps"]
+        maps = self._database["maps"]
         # Clears existing maps
         maps["pools_by_tokens"].clear()
         maps["wallets_by_pool"].clear()
         maps["pools_by_wallet"].clear()
 
         # Rebuilds maps
-        for chain_name, chain_configuration in database["connections"].items():
+        for chain_name, chain_configuration in self._database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     # Maps pools by tokens
@@ -832,7 +831,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         by querying the gateway. All pools are assumed to have exactly 2 tokens,
         with the first being the base token and the second being the quote token.
         """
-        for chain_name, chain_configuration in database["connections"].items():
+        for chain_name, chain_configuration in self._database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     for pool_internal_id, pool_configuration in connector_configuration["pools"].items():
@@ -885,7 +884,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         by querying the gateway.
         """
 
-        for chain_name, chain_configuration in database["connections"].items():
+        for chain_name, chain_configuration in self._database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     for wallet_internal_id, wallet_configuration in connector_configuration["wallets"].items():
@@ -923,7 +922,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         by querying the gateway.
         """
 
-        for chain_name, chain_configuration in database["connections"].items():
+        for chain_name, chain_configuration in self._database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     # Retrieves token information from the gateway
@@ -1023,14 +1022,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
         key2 = f"{quote_token}/{base_token}"
 
         pool_ids = []
-        if key1 in database["maps"]["pools_by_tokens"]:
-            pool_ids.extend(database["maps"]["pools_by_tokens"][key1])
-        if key2 in database["maps"]["pools_by_tokens"]:
-            pool_ids.extend(database["maps"]["pools_by_tokens"][key2])
+        if key1 in self._database["maps"]["pools_by_tokens"]:
+            pool_ids.extend(self._database["maps"]["pools_by_tokens"][key1])
+        if key2 in self._database["maps"]["pools_by_tokens"]:
+            pool_ids.extend(self._database["maps"]["pools_by_tokens"][key2])
 
         # If IDs found in map, searches corresponding pools
         if pool_ids:
-            for chain_information in database["connections"].values():
+            for chain_information in self._database["connections"].values():
                 for network_information in chain_information.values():
                     for connector_information in network_information.values():
                         for pool_information in connector_information.get("pools", {}).values():
@@ -1039,7 +1038,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             return list(result)
 
         # Fallback: searches directly in all pools (less efficient)
-        for chain_information in database["connections"].values():
+        for chain_information in self._database["connections"].values():
             for network_information in chain_information.values():
                 for connector_information in network_information.values():
                     for pool_information in connector_information.get("pools", {}).values():
@@ -1500,7 +1499,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 "first_swap_transaction_hash": first_swap["signature"],
                 "second_swap_transaction_hash": second_swap["signature"],
             }
-            database["execution_history"].append(trade_record)
+            self._database["execution_history"].append(trade_record)
             if profit > 0:
                 logger.info(f"Arbitrage trade successful! Profit: {profit} {base_token} ({profit_percentage:.2f}%)")
 
@@ -1528,7 +1527,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         total = DECIMAL_ZERO
 
-        for chain_information in database["connections"].values():
+        for chain_information in self._database["connections"].values():
             for network_information in chain_information.values():
                 for connector_information in network_information.values():
                     for wallet_information in connector_information.get("wallets", {}).values():
@@ -1548,7 +1547,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             List of wallet addresses.
         """
         pool_id = pool.get("internal_id")
-        mapping = database["maps"].get("wallets_by_pool", {})
+        mapping = self._database["maps"].get("wallets_by_pool", {})
         if pool_id in mapping:
             wallets_internal_ids = mapping[pool_id]
             chain_name, network_name, connector_name, _ = pool_id.split("/")
@@ -1556,7 +1555,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             wallets = []
 
             for wallet_internal_id in wallets_internal_ids:
-                wallet = database["connections"][chain_name][network_name][connector_name]["wallets"][
+                wallet = self._database["connections"][chain_name][network_name][connector_name]["wallets"][
                     wallet_internal_id
                 ]
                 wallets.append(wallet)
