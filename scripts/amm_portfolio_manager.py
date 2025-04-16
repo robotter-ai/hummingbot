@@ -395,8 +395,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _use_async_data_updates: bool = True
 
     # State control
-    _database_initialized: bool = False  # Indicates if database was initialized
-    _is_updating: bool = False  # Indicates if an update is in progress
+    _initialized: bool = False  # Indicates if database was initialized
+    _initializing: bool = False  # Indicates if database is being initialized
+    _is_running: bool = False  # Indicates if an update is in progress
     _database_lock: asyncio.Lock = None
 
     def __init__(self, connectors: Dict[str, ConnectorBase]):
@@ -407,7 +408,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
             connectors: Dictionary of available connectors.
         """
         super().__init__(connectors)
-        asyncio.get_running_loop().run_until_complete(self._initialize())
 
     async def _initialize(self):
         """
@@ -489,15 +489,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 # Update database only if minimum interval has passed
                 if time_since_last_update >= minimum_update_interval:
-                    if self._database_initialized:
+                    if self._initialized:
                         try:
-                            self._is_updating = True
+                            self._is_running = True
                             await self._update_database()
                             last_update_time = current_time
                         except Exception as exception:
                             logger.ignore_exception(exception, "Error during database update")
                         finally:
-                            self._is_updating = False
+                            self._is_running = False
                     else:
                         logger.warning("Database not initialized. Skipping update...")
 
@@ -514,31 +514,42 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     def on_tick(self):
         """Called on each tick to execute the strategy."""
-        if self._database_initialized and not self._is_updating:
-            safe_ensure_future(self._async_on_tick())
+        if not self._initialized and not self._initializing:
+            try:
+                self._initializing = True
+
+                asyncio.get_running_loop().run_until_complete(self._initialize())
+
+                self._initializing = False
+            except Exception as exception:
+                logger.ignore_exception(exception, "Error during initialization")
+                self._initializing = False
+
+        if self._initialized and not self._is_running:
+            try:
+                self._is_running = True
+
+                # Execute arbitrage strategy at configured interval
+                current_time = time.time()
+                if current_time - self._last_arbitrage_check_time >= self._arbitrage_check_interval_seconds:
+                    self._last_arbitrage_check_time = current_time
+
+                    asyncio.get_running_loop().run_until_complete(self._async_on_tick())
+            finally:
+                self._is_running = False
 
     async def _async_on_tick(self):
         """
         Main execution method. The strategy executes only if the database
         has been updated and the gateway is available.
         """
-        try:
-            self._is_updating = True
+        await self._check_gateway_status()
 
-            # Execute arbitrage strategy at configured interval
-            current_time = time.time()
-            if current_time - self._last_arbitrage_check_time >= self._arbitrage_check_interval_seconds:
-                self._last_arbitrage_check_time = current_time
+        # Update database only if not using asynchronous updates
+        if not self._use_async_data_updates:
+            await self._update_database()
 
-                await self._check_gateway_status()
-
-                # Update database only if not using asynchronous updates
-                if not self._use_async_data_updates:
-                    await self._update_database()
-
-                await self._run_arbitrage_strategy()
-        finally:
-            self._is_updating = False
+        await self._run_arbitrage_strategy()
 
     async def _check_gateway_status(self):
         """
@@ -630,7 +641,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Builds the database structure.
         For each chain, network and connector, stores static information about wallets, tokens and pools.
         """
-        if self._database_initialized:
+        if self._initialized:
             logger.info("Database already initialized, skipping...")
 
             return
@@ -666,7 +677,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         await self._update_wallet_balances()
 
         # Marks the database as initialized
-        self._database_initialized = True
+        self._initialized = True
 
     async def _initialize_token_information(self):
         """
