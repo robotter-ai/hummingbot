@@ -76,7 +76,7 @@ configuration: Dict[str, Any] = {
             "token": "60",  # Update token data every x seconds
             "pool": "60",  # Update pool data every x seconds
         },
-        "use_async_data_updates": True,
+        "use_async_data_updates": False,
     },
     "connections": {
         "polkadot": {
@@ -1546,6 +1546,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 return False
 
+            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
             updated_buy = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [quote_token]
             )
@@ -1564,6 +1565,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
             logger.info(
                 f"Step 2: Swapping {second_swap_amount} {quote_token} to {base_token} in pool {sell_pool.get('address')}"
             )
+
+            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
             initial_sell = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
             )
@@ -1598,6 +1601,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 return False
 
+            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
             updated_sell = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
             )
@@ -1609,7 +1613,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             final_sell_base_token_amount = Decimal(str(updated_sell["balances"].get(base_token, 0)))
             profit = final_sell_base_token_amount - initial_sell_base_token_amount
             profit_percentage = (
-                (profit / trade_amount) * DECIMAL_ONE_HUNDRED if trade_amount > DECIMAL_ZERO else Decimal("0")
+                (1 - (profit / trade_amount)) * DECIMAL_ONE_HUNDRED if trade_amount > DECIMAL_ZERO else Decimal("0")
             )
             trade_record = {
                 "timestamp": time.time(),
