@@ -90,7 +90,7 @@ configuration: Dict[str, Any] = {
         "solana": {
             "mainnet-beta": {
                 "raydium": {
-                    "wallets": ["7pWpBM8xtVHJq7C4BBivumfBZAC2J8XndTWvmg9GGXDb"],
+                    "wallets": ["7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb"],
                     "pools": ["7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"],
                 }
             }
