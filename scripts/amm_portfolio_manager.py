@@ -1083,9 +1083,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             prices.append(price)
 
                     # Calculates price variance if there are at least 2 valid prices
-                    price_variance = Decimal("0")
+                    price_variance_percentage = Decimal("0")
                     if len(prices) >= 2 and min(prices) > DECIMAL_ZERO:
-                        price_variance = (max(prices) - min(prices)) / min(prices) * DECIMAL_ONE_HUNDRED
+                        price_variance_percentage = (max(prices) - min(prices)) / min(prices) * DECIMAL_ONE_HUNDRED
 
                     # Adds the pair to the promising list
                     promising_pairs.append(
@@ -1095,14 +1095,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             "pools_count": len(pools),
                             "total_volume": total_volume,
                             "total_liquidity": total_liquidity,
-                            "price_variance": price_variance,
+                            "price_variance_percentage": price_variance_percentage,
                         }
                     )
 
         # Orders pairs by price variance (descending), pool count and volume
         promising_pairs.sort(
             key=lambda promising_pair: (
-                promising_pair["price_variance"],
+                promising_pair["price_variance_percentage"],
                 promising_pair["pools_count"],
                 promising_pair["total_volume"],
             ),
@@ -1122,7 +1122,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Returns:
             List of dictionaries of pools.
         """
-        result = set()
+        result: List[Dict[str, Any]] = []
 
         # First tries to use map for quick search
         key1 = f"{base_token}/{quote_token}"
@@ -1141,8 +1141,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     for connector_information in network_information.values():
                         for pool_information in connector_information.get("pools", {}).values():
                             if pool_information.get("internal_id") in pool_ids:
-                                result.add(pool_information)
-            return list(result)
+                                result.append(pool_information)
+            return result
 
         # Fallback: searches directly in all pools (less efficient)
         for chain_information in self._database["connections"].values():
@@ -1151,9 +1151,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     for pool_information in connector_information.get("pools", {}).values():
                         tokens_list = pool_information.get("tokens_list", [])
                         if base_token in tokens_list and quote_token in tokens_list:
-                            result.add(pool_information)
+                            result.append(pool_information)
 
-        return list(result)
+        return result
 
     # noinspection PyMethodMayBeStatic
     def _get_token_by_address(
