@@ -65,7 +65,7 @@ LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 configuration: Dict[str, Any] = {
     "globals": {
         "maximum_slippage_percentage": "0.5",  # 0.5% allowed slippage
-        "minimum_profitability_percentage": "-1",  # Profit threshold (e.g., "1" for 1%)
+        "minimum_profitability_percentage": "0.1",  # Profit threshold (e.g., "1" for 1%)
         "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
         "minimum_trade_amount": "0.1",  # Minimum trade amount
         "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
