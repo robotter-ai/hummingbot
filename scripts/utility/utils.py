@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import json
 import logging
 import time
 import traceback
@@ -13,7 +14,11 @@ def dump(target: Any):
         if isinstance(target, str):
             return target
 
-        if isinstance(target, Dict):
+        # noinspection PyBroadException,PyUnusedLocal
+        try:
+            if isinstance(target, Dict):
+                return json.dumps(target, indent=2, sort_keys=True, check_circular=True)
+        except (Exception,):
             return str(target)
 
         return str(target)
