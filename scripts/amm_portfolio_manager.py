@@ -1477,7 +1477,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
-        trade_amount = opportunity["trade_amount"]
+        first_swap_amount = opportunity["trade_amount"]
         expected_quote = opportunity["expected_quote_token"]
 
         logger.info(f"Executing arbitrage for {base_token}/{quote_token}")
@@ -1502,21 +1502,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
         try:
             # First swap (buy pool): base_token -> quote_token.
             logger.info(
-                f"Step 1: Swapping {trade_amount} {base_token} for {quote_token} in pool {buy_pool.get('address')}"
+                f"Step 1: Swapping {first_swap_amount} {base_token} for {quote_token} in pool {buy_pool.get('address')}"
             )
-            initial_buy = await self._gateway_get_balances(
+            buy_pool_initial_balances = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
-            if not initial_buy or "balances" not in initial_buy:
+            if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
                 logger.error(f"Failed to get initial balances for wallet {buy_wallet.get('internal_id')}")
 
                 return False
 
-            initial_base_token_amount = Decimal(str(initial_buy["balances"].get(base_token, 0)))
-            initial_quote_token_amount = Decimal(str(initial_buy["balances"].get(quote_token, 0)))
-            if initial_base_token_amount < trade_amount:
+            buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
+            buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
+            if buy_pool_initial_base_balance < first_swap_amount:
                 logger.info(
-                    f"Insufficient balance in {buy_wallet.get('internal_id')}: {initial_base_token_amount} {base_token}"
+                    f"Insufficient balance in {buy_wallet.get('internal_id')}: {buy_pool_initial_base_balance} {base_token}"
                 )
 
                 return False
@@ -1528,7 +1528,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 base_token,
                 quote_token,
                 TradeType.SELL,
-                trade_amount,
+                first_swap_amount,
                 self._maximum_slippage_percentage,
                 buy_pool.get("address"),
             )
@@ -1548,18 +1548,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return False
 
             await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
-            updated_buy = await self._gateway_get_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [quote_token]
+            buy_pool_final_balances = await self._gateway_get_balances(
+                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
-            if not updated_buy or "balances" not in updated_buy:
+            if not buy_pool_final_balances or "balances" not in buy_pool_final_balances:
                 logger.error(f"Failed to get updated balances for wallet {buy_wallet.get('internal_id')}")
 
                 return False
 
-            updated_quote = Decimal(str(updated_buy["balances"].get(quote_token, 0)))
-            quote_received = updated_quote - initial_quote_token_amount
-            second_swap_amount = quote_received if quote_received > DECIMAL_ZERO else expected_quote
-            if quote_received <= 0:
+            buy_pool_final_base_balance = Decimal(str(buy_pool_final_balances["balances"].get(base_token, 0)))
+            buy_pool_final_quote_balance = Decimal(str(buy_pool_final_balances["balances"].get(quote_token, 0)))
+            buy_pool_quote_balance_received = buy_pool_final_quote_balance - buy_pool_initial_quote_balance
+            second_swap_amount = (
+                buy_pool_quote_balance_received if buy_pool_quote_balance_received > DECIMAL_ZERO else expected_quote
+            )
+            if buy_pool_quote_balance_received <= 0:
                 logger.warning(f"Actual quote received undetermined; using expected: {expected_quote} {quote_token}")
 
             # Second swap (sell pool): quote_token -> base_token.
@@ -1568,15 +1571,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
             )
 
             await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
-            initial_sell = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
+            sell_pool_initial_balances = await self._gateway_get_balances(
+                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
             )
-            if not initial_sell or "balances" not in initial_sell:
+            if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
                 logger.error(f"Failed to get initial sell wallet balances for {sell_wallet.get('internal_id')}")
 
                 return False
 
-            initial_sell_base_token_amount = Decimal(str(initial_sell["balances"].get(base_token, 0)))
+            sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
+            sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
             second_swap = await self._gateway_execute_swap(
                 sell_pool.get("network"),
                 sell_pool.get("connector"),
@@ -1603,18 +1607,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return False
 
             await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
-            updated_sell = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token]
+            sell_pool_final_balances = await self._gateway_get_balances(
+                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
             )
-            if not updated_sell or "balances" not in updated_sell:
+            if not sell_pool_final_balances or "balances" not in sell_pool_final_balances:
                 logger.error(f"Failed to get updated sell wallet balance for {sell_wallet.get('address')}")
 
                 return False
 
-            final_sell_base_token_amount = Decimal(str(updated_sell["balances"].get(base_token, 0)))
-            profit = final_sell_base_token_amount - initial_sell_base_token_amount
+            sell_pool_final_base_balance = Decimal(str(sell_pool_final_balances["balances"].get(base_token, 0)))
+            sell_pool_final_quote_balance = Decimal(str(sell_pool_final_balances["balances"].get(quote_token, 0)))
+            profit = sell_pool_final_base_balance - sell_pool_initial_base_balance
             profit_percentage = (
-                (1 - (profit / trade_amount)) * DECIMAL_ONE_HUNDRED if trade_amount > DECIMAL_ZERO else Decimal("0")
+                (1 - (profit / first_swap_amount)) * DECIMAL_ONE_HUNDRED
+                if first_swap_amount > DECIMAL_ZERO
+                else Decimal("0")
             )
             trade_record = {
                 "timestamp": time.time(),
@@ -1624,10 +1631,43 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 "quote_token": quote_token,
                 "buy_pool": buy_pool.get("internal_id"),
                 "sell_pool": sell_pool.get("internal_id"),
-                "trade_amount": trade_amount,
-                "quote_received": quote_received,
-                "profit": profit,
-                "profit_percentage": profit_percentage,
+                "first_swap_amount": first_swap_amount,
+                "second_swap_amount": second_swap_amount,
+                "profit": {
+                    "absolute": profit,
+                    "percentage": profit_percentage,
+                },
+                "quote_received": buy_pool_quote_balance_received,
+                "balances": {
+                    "buy": {
+                        "initial": {
+                            "base": buy_pool_initial_base_balance,
+                            "quote": buy_pool_initial_quote_balance,
+                        },
+                        "final": {
+                            "base": buy_pool_final_base_balance,
+                            "quote": buy_pool_final_quote_balance,
+                        },
+                        "difference": {
+                            "base": buy_pool_final_base_balance - buy_pool_initial_base_balance,
+                            "quote": buy_pool_final_quote_balance - buy_pool_initial_quote_balance,
+                        },
+                    },
+                    "sell": {
+                        "initial": {
+                            "base": sell_pool_initial_base_balance,
+                            "quote": sell_pool_initial_quote_balance,
+                        },
+                        "final": {
+                            "base": sell_pool_final_base_balance,
+                            "quote": sell_pool_final_quote_balance,
+                        },
+                        "difference": {
+                            "base": sell_pool_final_base_balance - sell_pool_initial_base_balance,
+                            "quote": sell_pool_final_quote_balance - sell_pool_initial_quote_balance,
+                        },
+                    },
+                },
                 "first_swap_transaction_hash": first_swap["signature"],
                 "second_swap_transaction_hash": second_swap["signature"],
             }
