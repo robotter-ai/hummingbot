@@ -1402,11 +1402,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         test_amounts = [
             self._minimum_trade_amount,
-            max_available * DECIMAL_TEN_PERCENT,
-            max_available * DECIMAL_TWENTY_FIVE_PERCENT,
-            max_available * DECIMAL_FIFTY_PERCENT,
-            max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
-            max_available,
+            # max_available * DECIMAL_TEN_PERCENT,
+            # max_available * DECIMAL_TWENTY_FIVE_PERCENT,
+            # max_available * DECIMAL_FIFTY_PERCENT,
+            # max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
+            # max_available,
         ]
         best_amount = DECIMAL_ZERO
         best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
