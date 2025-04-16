@@ -525,16 +525,17 @@ class AMMPortfolioManager(ScriptStrategyBase):
         try:
             self._is_updating = True
 
-            await self._check_gateway_status()
-
-            # Update database only if not using asynchronous updates
-            if not self._use_async_data_updates:
-                await self._update_database()
-
             # Execute arbitrage strategy at configured interval
             current_time = time.time()
             if current_time - self._last_arbitrage_check_time >= self._arbitrage_check_interval_seconds:
                 self._last_arbitrage_check_time = current_time
+
+                await self._check_gateway_status()
+
+                # Update database only if not using asynchronous updates
+                if not self._use_async_data_updates:
+                    await self._update_database()
+
                 await self._run_arbitrage_strategy()
         finally:
             self._is_updating = False
