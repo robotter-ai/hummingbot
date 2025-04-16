@@ -83,7 +83,7 @@ configuration: Dict[str, Any] = {
             "mainnet": {
                 "hydration": {
                     "wallets": ["5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt"],
-                    "pools": ["7JRrXBpB1K2JUapwojTYLZPoMvLPMQUDyiEyJb5hj7wad1of"],
+                    "pools": ["7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG"],
                 }
             },
         },
@@ -269,6 +269,107 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     # Configuration attributes
     _configuration: Optional[Dict[str, Any]] = None
+    # Example structure)
+    # database: Dict[str, Any] = {
+    #     "connections": {
+    #         "polkadot": {
+    #             "mainnet": {
+    #                 "hydration": {
+    #                     "wallets": {
+    #                         "<wallet_address>": {
+    #                             "internal_id": "<chain>/<network>/<connector>/<wallet_address>",
+    #                             "chain": "<chain>",
+    #                             "network": "<network>",
+    #                             "connector": "<connector>",
+    #                             "tokens": {
+    #                                 "<token_symbol>": {
+    #                                     "balances": {
+    #                                         "free": "<free_token_balance>",
+    #                                         "locked": {
+    #                                             "total": "<locked_token_balance>",
+    #                                             "liquidity": {
+    #                                                 "total": "<liquidity_token_balance>",
+    #                                                 "pools": {
+    #                                                     "<pool_address>": "<pool_token_balance>"
+    #                                                 }
+    #                                             }
+    #                                         },
+    #                                         "total": "<token_balance>"
+    #                                     }
+    #                                 }
+    #                             },
+    #                             "pools": {
+    #                                 "<pool_address>": {
+    #                                     "shares": "<pool_shares>",
+    #                                     "token_list": ["token_1_symbol", "token_2_symbol"],
+    #                                     "tokens": {
+    #                                         "<token_1_symbol>": {
+    #                                             "balance": "<pool_token_1_balance>",
+    #                                             "prices": {
+    #                                                 "<token_2_symbol>": "<token_2_price_relative_to_token_1>",
+    #                                             },
+    #                                         },
+    #                                         "<token_2_symbol>": {
+    #                                             "balance": "<pool_token_2_balance>",
+    #                                             "prices": {
+    #                                                 "<token_1_symbol>": "<token_1_price_relative_to_token_2>",
+    #                                             },
+    #                                         },
+    #                                     },
+    #                                     "impermanent_loss": "<pool_impermanent_loss>",
+    #                                 }
+    #                             }
+    #                         }
+    #                     },
+    #                     "tokens": {
+    #                         "<token_symbol>": {
+    #                             "internal_id": "<chain>/<network>/<connector>/<token_address>",
+    #                             "address": "<token_address>",
+    #                             "chain": "<chain>",
+    #                             "network": "<network>",
+    #                             "connector": "<connector>",
+    #                             "symbol": "<token_symbol>",
+    #                             "name": "<token_name>",
+    #                             "decimals": "<token_decimals>",
+    #                             "price": "<token_price>"
+    #                         }
+    #                     },
+    #                     "pools": {
+    #                         "<pool_address>": {
+    #                             "internal_id": "<chain>/<network>/<connector>/<pool_address>",
+    #                             "address": "<pool_address>",
+    #                             "chain": "<chain>",
+    #                             "network": "<network>",
+    #                             "connector": "<connector>",
+    #                             "type": "<pool_type>",
+    #                             "tokens_list": ["token_1_symbol", "token_2_symbol"],
+    #                             "tokens": {
+    #                                 "<token_1_symbol>": {
+    #                                     "price": "<token_1_price>",
+    #                                 },
+    #                                 "<token_2_symbol>": {
+    #                                     "price": "<token_2_price>",
+    #                                 },
+    #                             },
+    #                             "annual_percentage_rate": "<pool_annual_percentage_rate>",
+    #                             "total_value_locked": "<pool_total_value_locked>",
+    #                             "volume": {
+    #                                 "24h": "<pool_24h_volume>",
+    #                             }
+    #                         }
+    #                     }
+    #                 },
+    #             }
+    #         }
+    #     },
+    #     "arbitrage_opportunities": [],
+    #     "execution_history": [],
+    #     "maps": {
+    #         "pools_by_tokens": {},  # Format: "token1/token2" -> [pool_internal_id1, pool_internal_id2, ...]
+    #         "wallets_by_pool": {},  # Format: pool_internal_id -> [wallet_internal_id1, wallet_internal_id2, ...]
+    #         "pools_by_wallet": {},  # Format: wallet_internal_id -> [pool_internal_id1, pool_internal_id2, ...]
+    #     }
+    # }
     _database: Dict[str, Any] = {}
     _gateway_is_ready: bool = False
     _gateway_http_client: Optional[GatewayHttpClient] = None
@@ -652,7 +753,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             raise Exception(f"Failed to retrieve detailed pool information for {pool_address}")
 
                         # Create or update pool with detailed information
-                        pool_tokens = detailed_pool_info.get("tokens", [])
+                        base_token = self._get_token_by_address(
+                            chain_name, network_name, connector_name, detailed_pool_info["baseTokenAddress"]
+                        )
+                        quote_token = self._get_token_by_address(
+                            chain_name, network_name, connector_name, detailed_pool_info["quoteTokenAddress"]
+                        )
+                        pool_tokens = [base_token.get("symbol"), quote_token.get("symbol")]
 
                         internal_id = f"{chain_name}/{network_name}/{connector_name}/{pool_address}"
 
@@ -1047,6 +1154,24 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             result.add(pool_information)
 
         return list(result)
+
+    # noinspection PyMethodMayBeStatic
+    def _get_token_by_address(
+        self, chain_name: str, network_name: str, connector_name: str, address: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves token information by address.
+        """
+        return [
+            token
+            for token in self._database["connections"]
+            .get(chain_name, {})
+            .get(network_name, {})
+            .get(connector_name, {})
+            .get("tokens", {})
+            .values()
+            if token.get("address") == address
+        ]
 
     # noinspection PyMethodMayBeStatic
     def _get_token_pair_relative_price_in_pool(
