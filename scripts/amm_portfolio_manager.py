@@ -1672,6 +1672,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 "second_swap_transaction_hash": second_swap["signature"],
             }
             self._database["execution_history"].append(trade_record)
+
+            logger.info("Trade record:", trade_record)
+
             if profit > 0:
                 logger.info(f"Arbitrage trade successful! Profit: {profit} {base_token} ({profit_percentage:.2f}%)")
 
