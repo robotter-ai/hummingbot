@@ -2076,7 +2076,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return True
             else:
                 logger.warning(
-                    f"Arbitrage trade executed with no profit/loss: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
+                    f"Arbitrage trade executed with loss or no profit: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
                 )
 
                 return False
