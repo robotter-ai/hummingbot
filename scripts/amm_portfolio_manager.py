@@ -2013,7 +2013,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 "initial": buy_pool_initial_base_balance,
                                 "final": buy_pool_final_base_balance,
                             },
-                            "price": self._database[buy_pool.get("chain")][buy_pool.get("network")][
+                            "price": self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
                                 buy_pool.get("connector")
                             ]["tokens"][base_token]["price"],
                         },
@@ -2022,7 +2022,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 "initial": buy_pool_initial_quote_balance,
                                 "final": buy_pool_final_quote_balance,
                             },
-                            "price": self._database[buy_pool.get("chain")][buy_pool.get("network")][
+                            "price": self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
                                 buy_pool.get("connector")
                             ]["tokens"][quote_token]["price"],
                         },
@@ -2033,7 +2033,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 "initial": sell_pool_initial_base_balance,
                                 "final": sell_pool_final_base_balance,
                             },
-                            "price": self._database[sell_pool.get("chain")][sell_pool.get("network")][
+                            "price": self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
                                 sell_pool.get("connector")
                             ]["tokens"][base_token]["price"],
                         },
@@ -2042,7 +2042,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 "initial": sell_pool_initial_quote_balance,
                                 "final": sell_pool_final_quote_balance,
                             },
-                            "price": self._database[sell_pool.get("chain")][sell_pool.get("network")][
+                            "price": self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
                                 sell_pool.get("connector")
                             ]["tokens"][quote_token]["price"],
                         },
