@@ -2248,6 +2248,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         amount: Decimal,
         side: TradeType,
         slippage_percentage: Decimal,
+        pool_address: Optional[str] = None,
     ):
         """Requests a swap quote from the gateway."""
         return await self._gateway_http_client.amm_quote_swap(
@@ -2258,6 +2259,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             amount=amount,
             side=side,
             slippage_percentage=slippage_percentage,
+            pool_address=pool_address,
         )
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
