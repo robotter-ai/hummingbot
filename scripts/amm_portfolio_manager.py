@@ -229,7 +229,7 @@ class GlobalConfig(BaseClientModel):
     """Global parameters for the strategy."""
 
     maximum_slippage_percentage: Decimal = Field(default=Decimal("0.5"))
-    minimum_profitability_percentage: Decimal = Field(default=Decimal("1"))
+    minimum_profitability_percentage: Decimal = Field(default=DECIMAL_ONE)
     arbitrage_check_interval_seconds: int = Field(default=60)
     minimum_trade_amount: Decimal = Field(default=Decimal("0.1"))
     maximum_trade_amount: Decimal = Field(default=Decimal("10"))
@@ -992,7 +992,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             if quote_token in pool_configuration["tokens"]:
                                 pool_configuration["tokens"][quote_token].setdefault("prices", {})
                                 pool_configuration["tokens"][quote_token]["prices"][base_token] = (
-                                    Decimal("1") / price if price != DECIMAL_ZERO else None
+                                    DECIMAL_ONE / price if price != DECIMAL_ZERO else None
                                 )
 
                         # Update token balances in pool
@@ -1111,7 +1111,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             prices.append(price)
 
                     # Calculates price variance if there are at least 2 valid prices
-                    price_variance_percentage = Decimal("0")
+                    price_variance_percentage = DECIMAL_ZERO
                     if len(prices) >= 2 and min(prices) > DECIMAL_ZERO:
                         price_variance_percentage = (max(prices) - min(prices)) / min(prices) * DECIMAL_ONE_HUNDRED
 
@@ -1220,7 +1220,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         if "tokens" in pool and base_token in pool["tokens"]:
             token_information = pool["tokens"][base_token]
             if "prices" in token_information and quote_token in token_information["prices"]:
-                return Decimal(str(token_information["prices"][quote_token]))
+                return token_information["prices"][quote_token]
 
         return None
 
