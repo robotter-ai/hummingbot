@@ -448,6 +448,10 @@ class GatewayHttpClient:
         if pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
+        # TODO: Fix Raydium implementation on Gateway to accept calls to quote the swap without informing a pool!!!
+        if connector == "raydium" and pool_address is None:
+            request_payload["poolAddress"] = "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
+
         return await self.api_request(
             "get", f"{connector}/amm/quote-swap", request_payload, fail_silently=fail_silently
         )
@@ -903,6 +907,7 @@ class GatewayHttpClient:
             fail_silently=fail_silently,
         )
 
+        # TODO: Remove this hardcode when the listPools routes on the Gateway becomes stable!!!
         if connector == "raydium":
             result = {
                 "pools": [
