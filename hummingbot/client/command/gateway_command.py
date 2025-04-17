@@ -287,10 +287,8 @@ class GatewayCommand(GatewayChainApiManager):
                             balances: Dict[str, Any] = await self._get_gateway_instance().get_balances(
                                 chain, network, w, [native_token]
                             )
-                            balance = (
-                                balances.get(native_token)
-                                or balances.get("balances", {}).get(native_token)
-                                or balances.get("balances", {}).get("total", {}).get(native_token)
+                            balance = balances["balances"].get(native_token) or balances["balances"]["total"].get(
+                                native_token
                             )
                             wallet_table.append({"balance": balance, "address": w})
 
@@ -323,11 +321,8 @@ class GatewayCommand(GatewayChainApiManager):
                         )
                         wallet_table: List[Dict[str, Any]] = [
                             {
-                                "balance": (
-                                    balances.get(native_token)
-                                    or balances.get("balances", {}).get(native_token)
-                                    or balances.get("balances", {}).get("total", {}).get(native_token)
-                                ),
+                                "balance": balances["balances"].get(native_token)
+                                or balances["balances"]["total"].get(native_token),
                                 "address": wallet_address,
                             }
                         ]
