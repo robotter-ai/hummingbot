@@ -62,6 +62,7 @@ LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 # Global Configuration and Database Schema
 # ==============================================================================
 
+# noinspection SpellCheckingInspection
 configuration: Dict[str, Any] = {
     "globals": {
         "maximum_slippage_percentage": "0.5",  # 0.5% allowed slippage
@@ -1241,6 +1242,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     async def _find_arbitrage_opportunities(self, promising_pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Finds arbitrage opportunities based on promising token pairs.
+        Uses portfolio approach to calculate expected profitability.
 
         Args:
             promising_pairs: List of dictionaries of token pairs.
@@ -1260,43 +1262,205 @@ class AMMPortfolioManager(ScriptStrategyBase):
             if len(pools) < 2:
                 continue
 
-            # Compares each pair of pools for price differences
+            # Compares each pair of pools for potential arbitrage
             for pool_1_index in range(len(pools)):
                 for pool_2_index in range(pool_1_index + 1, len(pools)):
                     pool_1, pool_2 = pools[pool_1_index], pools[pool_2_index]
 
-                    # Calculates price difference percentage between pools
+                    # Quick check using price difference as initial filter
                     price_difference_percentage = await self._calculate_price_difference_percentage(
                         base_token, quote_token, pool_1, pool_2
                     )
 
-                    # Skips if unable to calculate difference
-                    if price_difference_percentage is None:
+                    # Skip if price difference is below threshold or can't be calculated
+                    if (
+                        price_difference_percentage is None
+                        or abs(price_difference_percentage) <= self._minimum_profitability_percentage
+                    ):
                         continue
 
-                    # Checks if difference is greater than minimum profitability
-                    if abs(price_difference_percentage) > self._minimum_profitability_percentage:
-                        # Determines which is the buy pool and which is the sell one
-                        if price_difference_percentage > 0:
-                            buy_pool, sell_pool = pool_1, pool_2
-                        else:
-                            buy_pool, sell_pool = pool_2, pool_1
+                    # Determine buy and sell pools based on price difference
+                    if price_difference_percentage > 0:
+                        buy_pool, sell_pool = pool_1, pool_2
+                    else:
+                        buy_pool, sell_pool = pool_2, pool_1
 
-                        # Creates opportunity record
-                        opportunity = {
-                            "base_token": base_token,
-                            "quote_token": quote_token,
-                            "buy_pool": buy_pool,
-                            "sell_pool": sell_pool,
-                            "price_difference_percentage": abs(price_difference_percentage),
-                            "timestamp": time.time(),
-                        }
+                    # Initial opportunity record with basic information
+                    opportunity = {
+                        "base_token": base_token,
+                        "quote_token": quote_token,
+                        "buy_pool": buy_pool,
+                        "sell_pool": sell_pool,
+                        "price_difference_percentage": abs(price_difference_percentage),
+                        "timestamp": time.time(),
+                    }
 
-                        opportunities.append(opportunity)
-                        logger.info(
-                            f"Arbitrage opportunity found: {base_token}/{quote_token} "
-                            f"difference {abs(price_difference_percentage):.2f}% between {buy_pool.get('internal_id')} and {sell_pool.get('internal_id')}"
+                    # Run a simulated validation to get a more accurate profitability assessment
+                    # This is computationally more expensive but gives more accurate results
+                    test_amount = self._minimum_trade_amount
+
+                    # Get wallet addresses for each pool to simulate portfolio value
+                    buy_wallets = await self._get_wallets_for_pool(buy_pool)
+                    sell_wallets = await self._get_wallets_for_pool(sell_pool)
+
+                    if not buy_wallets or not sell_wallets:
+                        logger.info(f"No wallets found for pools - skipping {base_token}/{quote_token}")
+                        continue
+
+                    # For simplicity, use first wallet for each pool
+                    buy_wallet = buy_wallets[0]
+                    sell_wallet = sell_wallets[0]
+
+                    try:
+                        # Get initial balances to simulate portfolio value
+                        buy_pool_initial_balances = await self._gateway_get_balances(
+                            buy_pool.get("chain"),
+                            buy_pool.get("network"),
+                            buy_wallet.get("address"),
+                            [base_token, quote_token],
                         )
+                        if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
+                            continue
+
+                        sell_pool_initial_balances = await self._gateway_get_balances(
+                            sell_pool.get("chain"),
+                            sell_pool.get("network"),
+                            sell_wallet.get("address"),
+                            [base_token, quote_token],
+                        )
+                        if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
+                            continue
+
+                        # Simulates buy: base_token -> quote_token
+                        buy_quote = await self._gateway_quote_swap(
+                            buy_pool.get("network"),
+                            buy_pool.get("connector"),
+                            base_token,
+                            quote_token,
+                            test_amount,
+                            TradeType.SELL,
+                            self._maximum_slippage_percentage,
+                            buy_pool.get("address"),
+                        )
+                        if not buy_quote or "estimatedAmountOut" not in buy_quote:
+                            continue
+
+                        expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
+
+                        # Simulates sell: quote_token -> base_token
+                        sell_quote = await self._gateway_quote_swap(
+                            sell_pool.get("network"),
+                            sell_pool.get("connector"),
+                            quote_token,
+                            base_token,
+                            expected_quote,
+                            TradeType.SELL,
+                            self._maximum_slippage_percentage,
+                            sell_pool.get("address"),
+                        )
+                        if not sell_quote or "estimatedAmountOut" not in sell_quote:
+                            continue
+
+                        # Make sure we have the most recent token prices
+                        await self._update_token_information()
+
+                        # Get token prices
+                        base_token_price_buy = self._database["connections"][buy_pool.get("chain")][
+                            buy_pool.get("network")
+                        ][buy_pool.get("connector")]["tokens"][base_token]["price"]
+
+                        quote_token_price_buy = self._database["connections"][buy_pool.get("chain")][
+                            buy_pool.get("network")
+                        ][buy_pool.get("connector")]["tokens"][quote_token]["price"]
+
+                        base_token_price_sell = self._database["connections"][sell_pool.get("chain")][
+                            sell_pool.get("network")
+                        ][sell_pool.get("connector")]["tokens"][base_token]["price"]
+
+                        quote_token_price_sell = self._database["connections"][sell_pool.get("chain")][
+                            sell_pool.get("network")
+                        ][sell_pool.get("connector")]["tokens"][quote_token]["price"]
+
+                        # Simulate final balances after transactions
+                        buy_pool_initial_base_balance = Decimal(
+                            str(buy_pool_initial_balances["balances"].get(base_token, 0))
+                        )
+                        buy_pool_initial_quote_balance = Decimal(
+                            str(buy_pool_initial_balances["balances"].get(quote_token, 0))
+                        )
+                        sell_pool_initial_base_balance = Decimal(
+                            str(sell_pool_initial_balances["balances"].get(base_token, 0))
+                        )
+                        sell_pool_initial_quote_balance = Decimal(
+                            str(sell_pool_initial_balances["balances"].get(quote_token, 0))
+                        )
+
+                        # Simulate buy transaction effect
+                        buy_pool_final_base_balance = buy_pool_initial_base_balance - test_amount
+                        buy_pool_final_quote_balance = buy_pool_initial_quote_balance + expected_quote
+
+                        # Simulate sell transaction effect
+                        expected_return = Decimal(str(sell_quote["estimatedAmountOut"]))
+                        sell_pool_final_quote_balance = sell_pool_initial_quote_balance - expected_quote
+                        sell_pool_final_base_balance = sell_pool_initial_base_balance + expected_return
+
+                        # Calculate profit using portfolio approach
+                        profit_information = self.calculate_portfolio_profit(
+                            {
+                                "buy": {
+                                    "base": {
+                                        "balance": {
+                                            "initial": buy_pool_initial_base_balance,
+                                            "final": buy_pool_final_base_balance,
+                                        },
+                                        "price": base_token_price_buy,
+                                    },
+                                    "quote": {
+                                        "balance": {
+                                            "initial": buy_pool_initial_quote_balance,
+                                            "final": buy_pool_final_quote_balance,
+                                        },
+                                        "price": quote_token_price_buy,
+                                    },
+                                },
+                                "sell": {
+                                    "base": {
+                                        "balance": {
+                                            "initial": sell_pool_initial_base_balance,
+                                            "final": sell_pool_final_base_balance,
+                                        },
+                                        "price": base_token_price_sell,
+                                    },
+                                    "quote": {
+                                        "balance": {
+                                            "initial": sell_pool_initial_quote_balance,
+                                            "final": sell_pool_final_quote_balance,
+                                        },
+                                        "price": quote_token_price_sell,
+                                    },
+                                },
+                            }
+                        )
+
+                        # Add simulated profitability to opportunity record
+                        opportunity.update(
+                            {
+                                "simulated_profit_percentage": profit_information["profit"]["percentage"],
+                                "simulated_profit_absolute": profit_information["profit"]["absolute"],
+                            }
+                        )
+
+                        # Only add if expected to be profitable
+                        if profit_information["profit"]["percentage"] > self._minimum_profitability_percentage:
+                            opportunities.append(opportunity)
+                            logger.info(
+                                f"Arbitrage opportunity found: {base_token}/{quote_token} "
+                                f"difference {abs(price_difference_percentage):.2f}% between {buy_pool.get('internal_id')} and {sell_pool.get('internal_id')} "
+                                f"with expected profit {profit_information['profit']['percentage']:.2f}%"
+                            )
+                    except Exception as exception:
+                        logger.ignore_exception(exception, f"Error simulating arbitrage for {base_token}/{quote_token}")
+                        continue
 
         return opportunities
 
@@ -1331,6 +1495,32 @@ class AMMPortfolioManager(ScriptStrategyBase):
             return False
 
         try:
+            # Get wallet addresses for each pool to simulate portfolio value
+            buy_wallets = await self._get_wallets_for_pool(buy_pool)
+            sell_wallets = await self._get_wallets_for_pool(sell_pool)
+            if not buy_wallets or not sell_wallets:
+                logger.info("No wallets found for pools")
+                return False
+
+            # For simplicity, use first wallet for each pool
+            buy_wallet = buy_wallets[0]
+            sell_wallet = sell_wallets[0]
+
+            # Get initial balances to calculate initial portfolio value
+            buy_pool_initial_balances = await self._gateway_get_balances(
+                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
+            )
+            if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
+                logger.error(f"Failed to get initial balances for wallet {buy_wallet.get('internal_id')}")
+                return False
+
+            sell_pool_initial_balances = await self._gateway_get_balances(
+                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
+            )
+            if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
+                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet.get('internal_id')}")
+                return False
+
             # Simulates buy: base_token -> quote_token
             buy_quote = await self._gateway_quote_swap(
                 buy_pool.get("network"),
@@ -1344,7 +1534,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
             )
             if not buy_quote or "estimatedAmountOut" not in buy_quote:
                 logger.info(f"Buy quote unavailable for pool {buy_pool.get('internal_id')}")
-
                 return False
 
             expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
@@ -1362,13 +1551,80 @@ class AMMPortfolioManager(ScriptStrategyBase):
             )
             if not sell_quote or "estimatedAmountOut" not in sell_quote:
                 logger.info(f"Sell quote unavailable for pool {sell_pool.get('internal_id')}")
-
                 return False
 
-            # Calculates expected profit
+            # Make sure we have the most recent token prices
+            await self._update_token_information()
+
+            # Get token prices
+            base_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
+                buy_pool.get("connector")
+            ]["tokens"][base_token]["price"]
+
+            quote_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
+                buy_pool.get("connector")
+            ]["tokens"][quote_token]["price"]
+
+            base_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
+                sell_pool.get("connector")
+            ]["tokens"][base_token]["price"]
+
+            quote_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
+                sell_pool.get("connector")
+            ]["tokens"][quote_token]["price"]
+
+            # Simulate final balances after transactions
+            buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
+            buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
+            sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
+            sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
+
+            # Simulate buy transaction effect
+            buy_pool_final_base_balance = buy_pool_initial_base_balance - trade_amount
+            buy_pool_final_quote_balance = buy_pool_initial_quote_balance + expected_quote
+
+            # Simulate sell transaction effect
             expected_return = Decimal(str(sell_quote["estimatedAmountOut"]))
-            expected_profit = expected_return - trade_amount
-            profit_percentage = (expected_profit / trade_amount) * DECIMAL_ONE_HUNDRED
+            sell_pool_final_quote_balance = sell_pool_initial_quote_balance - expected_quote
+            sell_pool_final_base_balance = sell_pool_initial_base_balance + expected_return
+
+            # Calculate profit using portfolio approach
+            profit_information = self.calculate_portfolio_profit(
+                {
+                    "buy": {
+                        "base": {
+                            "balance": {
+                                "initial": buy_pool_initial_base_balance,
+                                "final": buy_pool_final_base_balance,
+                            },
+                            "price": base_token_price_buy,
+                        },
+                        "quote": {
+                            "balance": {
+                                "initial": buy_pool_initial_quote_balance,
+                                "final": buy_pool_final_quote_balance,
+                            },
+                            "price": quote_token_price_buy,
+                        },
+                    },
+                    "sell": {
+                        "base": {
+                            "balance": {
+                                "initial": sell_pool_initial_base_balance,
+                                "final": sell_pool_final_base_balance,
+                            },
+                            "price": base_token_price_sell,
+                        },
+                        "quote": {
+                            "balance": {
+                                "initial": sell_pool_initial_quote_balance,
+                                "final": sell_pool_final_quote_balance,
+                            },
+                            "price": quote_token_price_sell,
+                        },
+                    },
+                }
+            )
 
             # Updates opportunity with calculated values
             opportunity.update(
@@ -1376,26 +1632,25 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     "trade_amount": trade_amount,
                     "expected_quote_token": expected_quote,
                     "expected_base_token_return": expected_return,
-                    "expected_profit": expected_profit,
-                    "expected_profit_percentage": profit_percentage,
+                    "expected_profit": profit_information["profit"]["absolute"],
+                    "expected_profit_percentage": profit_information["profit"]["percentage"],
                 }
             )
 
             # Checks if opportunity meets minimum profitability
-            if profit_percentage < self._minimum_profitability_percentage:
+            if profit_information["profit"]["percentage"] < self._minimum_profitability_percentage:
                 logger.info(
                     f"Opportunity not profitable after slippage: "
-                    f"{profit_percentage:.2f}% < {self._minimum_profitability_percentage}%"
+                    f"{profit_information['profit']['percentage']:.2f}% < {self._minimum_profitability_percentage}%"
                 )
-
                 return False
 
-            logger.info(f"Opportunity validated: {base_token}/{quote_token} expected profit {profit_percentage:.2f}%")
-
+            logger.info(
+                f"Opportunity validated: {base_token}/{quote_token} expected profit {profit_information['profit']['percentage']:.2f}%"
+            )
             return True
         except Exception as exception:
             logger.ignore_exception(exception, "Error during opportunity validation")
-
             return False
 
     async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
@@ -1440,7 +1695,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     async def _simulate_arbitrage_profit(self, opportunity: Dict[str, Any], amount: Decimal) -> Decimal:
         """
-        Simulates expected profit percentage for a given trade amount.
+        Simulates expected profit percentage for a given trade amount using portfolio approach.
 
         Args:
             opportunity: Arbitrage opportunity dictionary.
@@ -1452,7 +1707,33 @@ class AMMPortfolioManager(ScriptStrategyBase):
         quote_token = opportunity["quote_token"]
         buy_pool = opportunity["buy_pool"]
         sell_pool = opportunity["sell_pool"]
+
         try:
+            # Get wallet addresses for each pool
+            buy_wallets = await self._get_wallets_for_pool(buy_pool)
+            sell_wallets = await self._get_wallets_for_pool(sell_pool)
+
+            if not buy_wallets or not sell_wallets:
+                return DECIMAL_NEGATIVE_INFINITY
+
+            # For simplicity, use first wallet for each pool
+            buy_wallet = buy_wallets[0]
+            sell_wallet = sell_wallets[0]
+
+            # Get initial balances
+            buy_pool_initial_balances = await self._gateway_get_balances(
+                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
+            )
+            if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
+                return DECIMAL_NEGATIVE_INFINITY
+
+            sell_pool_initial_balances = await self._gateway_get_balances(
+                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
+            )
+            if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
+                return DECIMAL_NEGATIVE_INFINITY
+
+            # Simulate buy trade
             buy_quote = await self._gateway_quote_swap(
                 buy_pool.get("network"),
                 buy_pool.get("connector"),
@@ -1469,6 +1750,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
 
+            # Simulate sell trade
             sell_quote = await self._gateway_quote_swap(
                 sell_pool.get("network"),
                 sell_pool.get("connector"),
@@ -1483,14 +1765,81 @@ class AMMPortfolioManager(ScriptStrategyBase):
             if not sell_quote or "estimatedAmountOut" not in sell_quote:
                 return DECIMAL_NEGATIVE_INFINITY
 
+            # Update token prices
+            await self._update_token_information()
+
+            # Get token prices
+            base_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
+                buy_pool.get("connector")
+            ]["tokens"][base_token]["price"]
+
+            quote_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
+                buy_pool.get("connector")
+            ]["tokens"][quote_token]["price"]
+
+            base_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
+                sell_pool.get("connector")
+            ]["tokens"][base_token]["price"]
+
+            quote_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
+                sell_pool.get("connector")
+            ]["tokens"][quote_token]["price"]
+
+            # Process balances
+            buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
+            buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
+            sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
+            sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
+
+            # Simulate final balances after trades
+            buy_pool_final_base_balance = buy_pool_initial_base_balance - amount
+            buy_pool_final_quote_balance = buy_pool_initial_quote_balance + expected_quote
+
             expected_return = Decimal(str(sell_quote["estimatedAmountOut"]))
+            sell_pool_final_quote_balance = sell_pool_initial_quote_balance - expected_quote
+            sell_pool_final_base_balance = sell_pool_initial_base_balance + expected_return
 
-            profit = expected_return - amount
+            # Calculate profit using portfolio approach
+            profit_information = self.calculate_portfolio_profit(
+                {
+                    "buy": {
+                        "base": {
+                            "balance": {
+                                "initial": buy_pool_initial_base_balance,
+                                "final": buy_pool_final_base_balance,
+                            },
+                            "price": base_token_price_buy,
+                        },
+                        "quote": {
+                            "balance": {
+                                "initial": buy_pool_initial_quote_balance,
+                                "final": buy_pool_final_quote_balance,
+                            },
+                            "price": quote_token_price_buy,
+                        },
+                    },
+                    "sell": {
+                        "base": {
+                            "balance": {
+                                "initial": sell_pool_initial_base_balance,
+                                "final": sell_pool_final_base_balance,
+                            },
+                            "price": base_token_price_sell,
+                        },
+                        "quote": {
+                            "balance": {
+                                "initial": sell_pool_initial_quote_balance,
+                                "final": sell_pool_final_quote_balance,
+                            },
+                            "price": quote_token_price_sell,
+                        },
+                    },
+                }
+            )
 
-            return (profit / amount) * DECIMAL_ONE_HUNDRED if amount > DECIMAL_ZERO else DECIMAL_ZERO
+            return profit_information["profit"]["percentage"]
         except Exception as exception:
             logger.ignore_exception(exception, "Error simulating arbitrage profit")
-
             return DECIMAL_NEGATIVE_INFINITY
 
     async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
