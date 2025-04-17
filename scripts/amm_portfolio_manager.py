@@ -270,7 +270,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
     markets: Dict[str, Any] = {}  # Not used, but mandatory because of inheritance
 
     # Configuration attributes
-    _configuration: Optional[Dict[str, Any]] = None
     # Example structure)
     # database: Dict[str, Any] = {
     #     "connections": {
@@ -373,6 +372,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     #     }
     # }
     _database: Dict[str, Any] = {}
+    _configuration: Optional[Dict[str, Any]] = None
     _gateway_is_ready: bool = False
     _gateway_http_client: Optional[GatewayHttpClient] = None
     _all_gateway_connections: List[Dict[str, Any]] = []
