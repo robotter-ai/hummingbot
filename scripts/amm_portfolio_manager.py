@@ -78,6 +78,7 @@ configuration: Dict[str, Any] = {
             "pool": "60",  # Update pool data every x seconds
         },
         "use_async_data_updates": False,
+        "main_quote_token": "USDC",
     },
     "connections": {
         "polkadot": {
@@ -236,6 +237,7 @@ class GlobalConfig(BaseClientModel):
     transaction_polling_interval: int = Field(default=1)
     data_update_intervals: DataUpdateIntervals = Field(default_factory=DataUpdateIntervals)
     use_async_data_updates: bool = Field(default=True)
+    main_quote_token: str = Field(default="USDC")
 
 
 class AMMPortfolioManagerConfiguration(BaseClientModel):
@@ -396,6 +398,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _last_token_update_time: float = 0
     _last_pool_update_time: float = 0
     _use_async_data_updates: bool = True
+    _main_quote_token: str = "USDC"
 
     # State control
     _initialized: bool = False  # Indicates if database was initialized
@@ -447,6 +450,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         self._transaction_confirmation_delay = int(global_configurations["transaction_confirmation_delay"])
         self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
         self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
+        self._main_quote_token = global_configurations["main_quote_token"]
 
         # Configure update intervals
         data_update_intervals = global_configurations["data_update_intervals"]
@@ -1048,19 +1052,19 @@ class AMMPortfolioManager(ScriptStrategyBase):
         for chain_name, chain_configuration in self._database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
-                    # Retrieves token information from the gateway
-                    token_response = await self._gateway_get_tokens(
-                        chain_name, network_name, self._configuration.get("tokens", [])
-                    )
+                    for token_symbol in connector_configuration["tokens"]:
+                        quote_swap_response = await self._gateway_quote_swap(
+                            network_name,
+                            connector_name,
+                            token_symbol,
+                            self._main_quote_token,
+                            DECIMAL_ONE,
+                            TradeType.SELL,
+                            self._maximum_slippage_percentage,
+                        )
 
-                    if token_response and "tokens" in token_response:
-                        tokens = token_response["tokens"]
-
-                        # Updates each found token's price
-                        for token in tokens:
-                            token_symbol = token.get("symbol")
-                            if token_symbol in connector_configuration["tokens"]:
-                                connector_configuration["tokens"][token_symbol]["price"] = token.get("price")
+                        if quote_swap_response and "price" in quote_swap_response:
+                            connector_configuration["tokens"][token_symbol]["price"] = quote_swap_response["price"]
 
     # --------------------------------------------------------------------------
     # Arbitrage Opportunity Discovery and Trade Execution Methods
@@ -1642,23 +1646,54 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             sell_pool_final_base_balance = Decimal(str(sell_pool_final_balances["balances"].get(base_token, 0)))
             sell_pool_final_quote_balance = Decimal(str(sell_pool_final_balances["balances"].get(quote_token, 0)))
-            profit = sell_pool_final_base_balance - sell_pool_initial_base_balance
-            profit = (
-                buy_pool_final_base_balance
-                + buy_pool_final_quote_balance
-                + sell_pool_final_base_balance
-                + sell_pool_final_quote_balance
-            ) - (
-                buy_pool_initial_base_balance
-                + buy_pool_initial_quote_balance
-                + sell_pool_initial_base_balance
-                + sell_pool_initial_quote_balance
+
+            await self._update_token_information()
+
+            profit_information = self.calculate_portfolio_profit(
+                {
+                    "buy": {
+                        "base": {
+                            "balance": {
+                                "initial": buy_pool_initial_base_balance,
+                                "final": buy_pool_final_base_balance,
+                            },
+                            "price": self._database[buy_pool.get("chain")][buy_pool.get("network")][
+                                buy_pool.get("connector")
+                            ]["tokens"][base_token]["price"],
+                        },
+                        "quote": {
+                            "balance": {
+                                "initial": buy_pool_initial_quote_balance,
+                                "final": buy_pool_final_quote_balance,
+                            },
+                            "price": self._database[buy_pool.get("chain")][buy_pool.get("network")][
+                                buy_pool.get("connector")
+                            ]["tokens"][quote_token]["price"],
+                        },
+                    },
+                    "sell": {
+                        "base": {
+                            "balance": {
+                                "initial": sell_pool_initial_base_balance,
+                                "final": sell_pool_final_base_balance,
+                            },
+                            "price": self._database[sell_pool.get("chain")][sell_pool.get("network")][
+                                sell_pool.get("connector")
+                            ]["tokens"][base_token]["price"],
+                        },
+                        "quote": {
+                            "balance": {
+                                "initial": sell_pool_initial_quote_balance,
+                                "final": sell_pool_final_quote_balance,
+                            },
+                            "price": self._database[sell_pool.get("chain")][sell_pool.get("network")][
+                                sell_pool.get("connector")
+                            ]["tokens"][quote_token]["price"],
+                        },
+                    },
+                }
             )
-            profit_percentage = (
-                (1 - (profit / buy_pool_swap_amount)) * DECIMAL_ONE_HUNDRED
-                if buy_pool_swap_amount > DECIMAL_ZERO
-                else Decimal("0")
-            )
+
             trade_record = {
                 "timestamp": time.time(),
                 "buy_wallet": buy_wallet.get("internal_id"),
@@ -1669,41 +1704,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 "sell_pool": sell_pool.get("internal_id"),
                 "buy_pool_swap_amount": buy_pool_swap_amount,
                 "sell_pool_swap_amount": sell_pool_swap_amount,
-                "profit": {
-                    "absolute": profit,
-                    "percentage": profit_percentage,
-                },
-                "quote_received": buy_pool_quote_balance_received,
-                "balances": {
-                    "buy": {
-                        "initial": {
-                            "base": buy_pool_initial_base_balance,
-                            "quote": buy_pool_initial_quote_balance,
-                        },
-                        "final": {
-                            "base": buy_pool_final_base_balance,
-                            "quote": buy_pool_final_quote_balance,
-                        },
-                        "difference": {
-                            "base": buy_pool_final_base_balance - buy_pool_initial_base_balance,
-                            "quote": buy_pool_final_quote_balance - buy_pool_initial_quote_balance,
-                        },
-                    },
-                    "sell": {
-                        "initial": {
-                            "base": sell_pool_initial_base_balance,
-                            "quote": sell_pool_initial_quote_balance,
-                        },
-                        "final": {
-                            "base": sell_pool_final_base_balance,
-                            "quote": sell_pool_final_quote_balance,
-                        },
-                        "difference": {
-                            "base": sell_pool_final_base_balance - sell_pool_initial_base_balance,
-                            "quote": sell_pool_final_quote_balance - sell_pool_initial_quote_balance,
-                        },
-                    },
-                },
+                "profit": profit_information,
                 "buy_pool_swap_transaction_hash": buy_pool_swap["signature"],
                 "sell_pool_swap_transaction_hash": sell_pool_swap["signature"],
             }
@@ -1711,13 +1712,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             logger.info("Trade record:", trade_record)
 
-            if profit > 0:
-                logger.info(f"Arbitrage trade successful! Profit: {profit} {base_token} ({profit_percentage:.2f}%)")
+            if profit_information["profit"]["percentage"] > 0:
+                logger.info(
+                    f"Arbitrage trade successful! Profit: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
+                )
 
                 return True
             else:
                 logger.warning(
-                    f"Arbitrage trade executed with no profit/loss: {profit} {base_token} ({profit_percentage:.2f}%)"
+                    f"Arbitrage trade executed with no profit/loss: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
                 )
 
                 return False
@@ -1725,6 +1728,31 @@ class AMMPortfolioManager(ScriptStrategyBase):
             logger.ignore_exception(exception, "Error during arbitrage execution")
 
             return False
+
+    # noinspection PyMethodMayBeStatic
+    def calculate_portfolio_profit(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculates the profit of the portfolio.
+        """
+        final_value = (
+            data["buy"]["base"]["balance"]["final"] * data["buy"]["base"]["price"]
+            + data["buy"]["quote"]["balance"]["final"] * data["buy"]["quote"]["price"]
+            + data["sell"]["base"]["balance"]["final"] * data["sell"]["base"]["price"]
+            + data["sell"]["quote"]["balance"]["final"] * data["sell"]["quote"]["price"]
+        )
+        initial_value = (
+            data["buy"]["base"]["balance"]["initial"] * data["buy"]["base"]["price"]
+            + data["buy"]["quote"]["balance"]["initial"] * data["buy"]["quote"]["price"]
+            + data["sell"]["base"]["balance"]["initial"] * data["sell"]["base"]["price"]
+            + data["sell"]["quote"]["balance"]["initial"] * data["sell"]["quote"]["price"]
+        )
+
+        data["profit"] = {
+            "absolute": final_value - initial_value,
+            "percentage": ((final_value - initial_value) / initial_value) * DECIMAL_ONE_HUNDRED,
+        }
+
+        return data
 
     # noinspection PyMethodMayBeStatic
     async def _get_total_token_balance_from_all_wallets(self, token: str) -> Decimal:
@@ -1866,7 +1894,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
         amount: Decimal,
         side: TradeType,
         slippage_percentage: Decimal,
-        pool_address: str,
     ):
         """Requests a swap quote from the gateway."""
         return await self._gateway_http_client.amm_quote_swap(
@@ -1877,7 +1904,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
             amount=amount,
             side=side,
             slippage_percentage=slippage_percentage,
-            pool_address=pool_address,
         )
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
@@ -1916,9 +1942,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
         self,
         connector: str,
         network: str,
-        types: Optional[List[str]] = [],
-        token_symbols: Optional[List[str]] = [],
-        token_addresses: Optional[List[str]] = [],
+        types: Optional[List[str]] = None,
+        token_symbols: Optional[List[str]] = None,
+        token_addresses: Optional[List[str]] = None,
         max_number_of_pages: int = 3,
         use_official_tokens: bool = True,
     ):
