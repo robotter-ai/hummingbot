@@ -68,6 +68,7 @@ configuration: Dict[str, Any] = {
         "minimum_profitability_percentage": "-1",  # Profit threshold (e.g., "1" for 1%)
         "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
         "minimum_trade_amount": "0.1",  # Minimum trade amount
+        "maximum_trade_amount": "0.1",  # Maximum trade amount
         "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
         "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
         "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
@@ -229,6 +230,7 @@ class GlobalConfig(BaseClientModel):
     minimum_profitability_percentage: Decimal = Field(default=Decimal("1"))
     arbitrage_check_interval_seconds: int = Field(default=60)
     minimum_trade_amount: Decimal = Field(default=Decimal("0.1"))
+    maximum_trade_amount: Decimal = Field(default=Decimal("10"))
     time_delay_between_arbitrages: int = Field(default=1)
     transaction_confirmation_delay: int = Field(default=1)
     transaction_polling_interval: int = Field(default=1)
@@ -381,6 +383,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _minimum_profitability_percentage: Decimal = DECIMAL_ZERO
     _arbitrage_check_interval_seconds: int = 60
     _minimum_trade_amount: Decimal = DECIMAL_ZERO
+    _maximum_trade_amount: Decimal = DECIMAL_ZERO
     _time_delay_between_arbitrages: int = 1
     _transaction_confirmation_delay: int = 1
     _transaction_polling_interval: int = 1
@@ -439,6 +442,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         self._minimum_profitability_percentage = Decimal(global_configurations["minimum_profitability_percentage"])
         self._arbitrage_check_interval_seconds = int(global_configurations["arbitrage_check_interval_seconds"])
         self._minimum_trade_amount = Decimal(global_configurations["minimum_trade_amount"])
+        self._maximum_trade_amount = Decimal(global_configurations["maximum_trade_amount"])
         self._time_delay_between_arbitrages = int(global_configurations["time_delay_between_arbitrages"])
         self._transaction_confirmation_delay = int(global_configurations["transaction_confirmation_delay"])
         self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
@@ -1390,30 +1394,40 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             return False
 
-    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], max_available: Decimal) -> Decimal:
+    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
         """
         Determines the optimal trade amount by simulating profits at different sizes.
 
         Args:
             opportunity: Arbitrage opportunity dictionary.
-            max_available: Maximum available balance of the base token.
+            maximum_available: Maximum available balance of the base token.
         Returns:
             Optimal trade amount as Decimal.
         """
+        # Cap maximum available to configured maximum trade amount
+        maximum_available = min(maximum_available, self._maximum_trade_amount)
+
+        if maximum_available <= self._minimum_trade_amount:
+            return maximum_available if maximum_available > DECIMAL_ZERO else DECIMAL_ZERO
+
         test_amounts = [
             self._minimum_trade_amount,
-            # max_available * DECIMAL_TEN_PERCENT,
-            # max_available * DECIMAL_TWENTY_FIVE_PERCENT,
-            # max_available * DECIMAL_FIFTY_PERCENT,
-            # max_available * DECIMAL_SEVENTY_FIVE_PERCENT,
-            # max_available,
+            maximum_available * DECIMAL_TEN_PERCENT,
+            maximum_available * DECIMAL_TWENTY_FIVE_PERCENT,
+            maximum_available * DECIMAL_FIFTY_PERCENT,
+            maximum_available * DECIMAL_SEVENTY_FIVE_PERCENT,
+            maximum_available,
         ]
+
         best_amount = DECIMAL_ZERO
         best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
+
         for amount in sorted(test_amounts):
-            if amount > max_available:
+            if amount < self._minimum_trade_amount or amount > maximum_available:
                 continue
+
             profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
+
             if profit_percentage > best_profit_percentage:
                 best_profit_percentage = profit_percentage
                 best_amount = amount
