@@ -1054,6 +1054,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
                     for token_symbol in connector_configuration["tokens"]:
+                        if token_symbol == self._main_quote_token:
+                            connector_configuration["tokens"][token_symbol]["price"] = DECIMAL_ONE
+
+                            continue
+
                         quote_swap_response = await self._gateway_quote_swap(
                             network_name,
                             connector_name,
