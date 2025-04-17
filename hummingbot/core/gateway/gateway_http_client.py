@@ -804,6 +804,11 @@ class GatewayHttpClient:
             "network": network,
             "poolAddress": pool_address,
         }
+
+        # TODO: Remove this hardcode when the listPools routes on the Gateway becomes stable!!!
+        if connector == "raydium":
+            query_params["poolAddress"] = "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
+
         return await self.api_request(
             "get",
             f"{connector}/amm/pool-info",
