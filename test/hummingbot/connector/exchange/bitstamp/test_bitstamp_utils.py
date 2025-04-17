@@ -1,7 +1,7 @@
 from decimal import Decimal
 from unittest import TestCase
 
-from pydantic.v1 import SecretStr
+from pydantic import SecretStr
 
 from hummingbot.connector.exchange.bitstamp.bitstamp_utils import DEFAULT_FEES, BitstampConfigMap
 
@@ -24,7 +24,9 @@ class BitstampUtilsTests(TestCase):
         self.assertEqual(DEFAULT_FEES.taker_percent_fee_decimal, Decimal("0.2"))
 
     def test_bitstamp_config_map(self):
-        config_map = BitstampConfigMap(bitstamp_api_key="test_key", bitstamp_api_secret="test_secret")
+        config_map = BitstampConfigMap(
+            bitstamp_api_key=SecretStr("test_key"), bitstamp_api_secret=SecretStr("test_secret")
+        )
         self.assertEqual(config_map.connector, "bitstamp")
         self.assertEqual(config_map.bitstamp_api_key, SecretStr("test_key"))
         self.assertEqual(config_map.bitstamp_api_secret, SecretStr("test_secret"))

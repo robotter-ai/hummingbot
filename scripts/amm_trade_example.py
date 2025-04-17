@@ -3,9 +3,9 @@ import os
 from decimal import Decimal
 from typing import Dict
 
-from pydantic.v1 import Field
+from pydantic import Field
 
-from hummingbot.client.config.config_data_types import BaseClientModel, ClientFieldData
+from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
@@ -14,41 +14,35 @@ from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 class DEXTradeConfig(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
     connector: str = Field(
-        "jupiter",
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Connector name (e.g. jupiter, uniswap)"),
+        "jupiter", json_schema_extra={"prompt": "Connector name (e.g. jupiter, uniswap)", "prompt_on_new": True}
     )
-    chain: str = Field(
-        "solana", client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Chain (e.g. solana, ethereum)")
-    )
+    chain: str = Field("solana", json_schema_extra={"prompt": "Chain (e.g. solana, ethereum)", "prompt_on_new": True})
     network: str = Field(
         "mainnet-beta",
-        client_data=ClientFieldData(
-            prompt_on_new=True, prompt=lambda mi: "Network (e.g. mainnet-beta (solana), base (ethereum))"
-        ),
+        json_schema_extra={"prompt": "Network (e.g. mainnet-beta (solana), base (ethereum))", "prompt_on_new": True},
     )
     trading_pair: str = Field(
-        "SOL-USDC", client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Trading pair (e.g. SOL-USDC)")
+        "SOL-USDC", json_schema_extra={"prompt": "Trading pair (e.g. SOL-USDC)", "prompt_on_new": True}
     )
     target_price: Decimal = Field(
-        Decimal("142"),
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Target price to trigger trade"),
+        Decimal("142"), json_schema_extra={"prompt": "Target price to trigger trade", "prompt_on_new": True}
     )
     trigger_above: bool = Field(
         False,
-        client_data=ClientFieldData(
-            prompt_on_new=True,
-            prompt=lambda mi: "Trigger when price rises above target? (True for above/False for below)",
-        ),
+        json_schema_extra={
+            "prompt": "Trigger when price rises above target? (True for above/False for below)",
+            "prompt_on_new": True,
+        },
     )
     is_buy: bool = Field(
         True,
-        client_data=ClientFieldData(
-            prompt_on_new=True, prompt=lambda mi: "Buying or selling the base asset? (True for buy, False for sell)"
-        ),
+        json_schema_extra={
+            "prompt": "Buying or selling the base asset? (True for buy, False for sell)",
+            "prompt_on_new": True,
+        },
     )
     amount: Decimal = Field(
-        Decimal("0.01"),
-        client_data=ClientFieldData(prompt_on_new=True, prompt=lambda mi: "Order amount (in base token)"),
+        Decimal("0.01"), json_schema_extra={"prompt": "Order amount (in base token)", "prompt_on_new": True}
     )
 
 

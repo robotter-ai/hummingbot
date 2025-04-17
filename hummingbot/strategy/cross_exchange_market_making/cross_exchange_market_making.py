@@ -502,8 +502,6 @@ class CrossExchangeMarketMakingStrategy(StrategyPyBase):
         need_adjust_order = False
         anti_hysteresis_timer = self._anti_hysteresis_timers.get(market_pair, 0)
 
-        global s_decimal_zero
-
         self.take_suggested_price_sample(timestamp, market_pair)
 
         for active_order in active_orders:
@@ -841,8 +839,6 @@ class CrossExchangeMarketMakingStrategy(StrategyPyBase):
 
         buy_fill_quantity = sum([fill_event.amount for _, fill_event in buy_fill_records])
         sell_fill_quantity = sum([fill_event.amount for _, fill_event in sell_fill_records])
-
-        global s_decimal_zero
 
         taker_trading_pair = market_pair.taker.trading_pair
         taker_market = market_pair.taker.market

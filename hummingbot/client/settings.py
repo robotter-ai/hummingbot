@@ -6,7 +6,7 @@ from os import DirEntry, scandir
 from os.path import exists, join, realpath
 from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Set, Union, cast
 
-from pydantic.v1 import SecretStr
+from pydantic import SecretStr
 
 from hummingbot import get_strategy_list, root_path
 from hummingbot.core.data_type.trade_fee import TradeFeeSchema
@@ -103,7 +103,7 @@ class GatewayConnectionSetting:
 
     @staticmethod
     def get_connector_spec_from_market_name(market_name: str) -> Optional[Dict[str, str]]:
-        for chain in ["ethereum", "solana", "polkadot"]:
+        for chain in ["ethereum", "solana"]:
             if f"_{chain}_" in market_name:
                 connector, network = market_name.split(f"_{chain}_")
                 return GatewayConnectionSetting.get_connector_spec(connector, chain, network)
@@ -188,14 +188,35 @@ class ConnectorSetting(NamedTuple):
     def module_name(self) -> str:
         # returns connector module name, e.g. binance_exchange
         if self.uses_gateway_generic_connector():
-            # Gateway DEX connectors may be on different types of chains (ethereum, solana, etc)
             connector_spec: Dict[str, str] = GatewayConnectionSetting.get_connector_spec_from_market_name(self.name)
             if connector_spec is None:
-                # Handle the case where connector_spec is None
                 raise ValueError(
                     f"Cannot find connector specification for {self.name}. Please check your gateway connection settings."
                 )
-            return "gateway.gateway_swap"
+
+            # Simple module selection based on trading_types
+            if "trading_types" not in connector_spec or not connector_spec["trading_types"]:
+                raise ValueError(f"No trading_types specified for {self.name}")
+
+            # Convert to lowercase for consistency
+            trading_types = [t.lower() for t in connector_spec["trading_types"]]
+
+            # If amm or clmm exists, use gateway_lp
+            if "amm" in trading_types or "clmm" in trading_types:
+                return "gateway.gateway_lp"
+
+            # Find module for non-swap types
+            for t_type in trading_types:
+                if t_type != "swap":
+                    return f"gateway.gateway_{t_type}"
+
+            # If only swap exists, use gateway_swap
+            if "swap" in trading_types:
+                return "gateway.gateway_swap"
+
+            # Rule 4: No recognized trading types
+            raise ValueError(f"No recognized trading_types for {self.name}. Found: {trading_types}")
+
         return f"{self.base_name()}_{self._get_module_package()}"
 
     def module_path(self) -> str:
@@ -460,7 +481,7 @@ class AllConnectorSettings:
     def reset_connector_config_keys(cls, connector: str):
         current_settings = cls.get_connector_settings()[connector]
         current_keys = current_settings.config_keys
-        new_keys = current_keys if current_keys is None else current_keys.__class__.construct()
+        new_keys = current_keys if current_keys is None else current_keys.__class__.model_construct()
         cls.update_connector_config_keys(new_keys)
 
     @classmethod
