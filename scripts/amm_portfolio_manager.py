@@ -1070,7 +1070,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         )
 
                         if quote_swap_response and "price" in quote_swap_response:
-                            connector_configuration["tokens"][token_symbol]["price"] = quote_swap_response["price"]
+                            connector_configuration["tokens"][token_symbol]["price"] = Decimal(
+                                str(quote_swap_response["price"])
+                            )
 
     # --------------------------------------------------------------------------
     # Arbitrage Opportunity Discovery and Trade Execution Methods
