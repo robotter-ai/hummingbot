@@ -76,6 +76,7 @@ Currently, the master branch of Hummingbot also includes the following exchange 
 | `dexalot` | Dexalot | DEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/dexalot/) | - |
 | `hashkey` | HashKey | CEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/hashkey/) | - |
 | `hashkey_perpetual` | HashKey | CEX | CLOB Perp | [Docs](https://hummingbot.org/exchanges/hashkey/) | - |
+| `hydration` | Hydration | DEX | AMM | [DOC](https://docs.hydration.net/) | - |
 | `injective_v2` | Injective Helix | DEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/injective/) | - |
 | `injective_v2_perpetual` | Injective Helix | DEX | CLOB Perp | [Docs](https://hummingbot.org/exchanges/injective/) | - |
 | `kraken` | Kraken | CEX | CLOB Spot | [Docs](https://hummingbot.org/exchanges/kraken/) | - |
@@ -86,7 +87,6 @@ Currently, the master branch of Hummingbot also includes the following exchange 
 | `pangolin` | Pangolin | CEX | DEX | [Docs](https://hummingbot.org/exchanges/pangolin/) | - |
 | `quickswap` | QuickSwap | DEX | AMM | [Docs](https://hummingbot.org/exchanges/quickswap/) | - |
 | `sushiswap` | SushiSwap | DEX | AMM | [Docs](https://hummingbot.org/exchanges/sushiswap/) | - |
-| `hydration` | Hydration | DEX | AMM | [DOC](https://docs.hydration.net/) | - |  
 | `tinyman` | Tinyman | DEX | AMM | [Docs](https://hummingbot.org/exchanges/tinyman/) | - |
 | `traderjoe` | Trader Joe | DEX | AMM | [Docs](https://hummingbot.org/exchanges/traderjoe/) | - |
 | `uniswap` | Uniswap | DEX | AMM | [Docs](https://hummingbot.org/exchanges/uniswap/) | - |
