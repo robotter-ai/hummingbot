@@ -33,7 +33,7 @@ class BuildExt(build_ext):
 
 def main():
     cpu_count = os.cpu_count() or 8
-    version = "20250303"
+    version = "20250421"
     all_packages = find_packages(
         include=["hummingbot", "hummingbot.*"],
     )
@@ -81,7 +81,7 @@ def main():
         "ujson>=5.7.0",
         "urllib3>=1.26.15,<2.0",
         "web3",
-        "xrpl-py>=4,<4.1.0",
+        "xrpl-py>=4.1.0",
         "PyYaml>=0.2.5",
     ]
 
