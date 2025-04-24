@@ -89,16 +89,16 @@ configuration: Dict[str, Any] = {
         "polkadot": {
             "mainnet": {
                 "hydration": {
-                    "wallets": ["5HKTQCEWuuA9bJEqFbAEsbwFQfEe5tXrbZXWj7yQpuxVSHKt"],
-                    "pools": ["7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG"],
+                    "wallets": [os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]],
+                    "pools": [],
                 }
             },
         },
         "solana": {
             "mainnet-beta": {
                 "raydium": {
-                    "wallets": ["7pWpBM8xtVHJq7C4BBivumFbzAC2J8XndTWvmg9GGXDb"],
-                    "pools": ["7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"],
+                    "wallets": [os.environ["SOLANA_MAINNET_BETA_RAYDIUM_WALLET_ADDRESS"]],
+                    "pools": [],
                 }
             }
         },
@@ -398,12 +398,6 @@ def cached(ttl: int = 60):
 
 
 # ==============================================================================
-# Logger Initialization
-# ==============================================================================
-logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
-
-
-# ==============================================================================
 # Enumerators
 # ==============================================================================
 
@@ -550,6 +544,12 @@ class AMMPortfolioManagerConfiguration(BaseClientModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+# ==============================================================================
+# Logger Initialization
+# ==============================================================================
+logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
 
 
 # ==============================================================================
