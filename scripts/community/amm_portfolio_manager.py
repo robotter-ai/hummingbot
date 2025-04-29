@@ -27,7 +27,7 @@ from decimal import Decimal
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic.v1 import Field, validator
 
@@ -103,7 +103,7 @@ configuration: Dict[str, Any] = {
             }
         },
     },
-    "tokens": ["USDC", "USDT"],
+    "token_pairs": ["USDC/USDT"],
 }
 
 
@@ -540,7 +540,7 @@ class AMMPortfolioManagerConfiguration(BaseClientModel):
     script_file_name: str = Field(default_factory=lambda: os.path.basename(__file__))
     globals: GlobalConfig = Field(default_factory=GlobalConfig)
     chains: Dict[str, ChainConfig] = Field(default_factory=dict)
-    tokens: List[str] = Field(default_factory=list)
+    token_pairs: List[str] = Field(default_factory=list)
 
     class Config:
         arbitrary_types_allowed = True
@@ -760,6 +760,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
         # Configure transaction confirmation timeout
         if self._transaction_confirmation_delay > 0:
             self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
+
+        self._token_pairs = self._configuration.get("token_pairs", [])
+        self._token_symbols = self._get_all_token_symbols_from_token_pairs()
 
         await self._check_gateway_status()
 
@@ -996,7 +999,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                     # Retrieves token information from the gateway
                     token_response = await self._gateway_get_tokens(
-                        chain_name, network_name, self._configuration.get("tokens", [])
+                        chain_name, network_name, self._token_symbols
                     )
 
                     if token_response and "tokens" in token_response:
@@ -1005,7 +1008,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         # Initialize each found token
                         for token in tokens:
                             token_symbol = token.get("symbol")
-                            if token_symbol in self._configuration.get("tokens", []):
+                            if token_symbol in self._token_symbols:
                                 # Create or update token info with static data
                                 connection["tokens"][token_symbol] = {
                                     "internal_id": f"{chain_name}/{network_name}/{connector_name}/{token_symbol}",
@@ -1023,7 +1026,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         Initializes pool information by following this approach:
         1. First add pools explicitly specified in the configuration
-        2. Then find pools by using combinations of token pairs from the configuration
+        2. Then find pools by using the token pairs from the configuration
         3. Update detailed information for all found pools
 
         All pools are assumed to have exactly 2 tokens.
@@ -1038,25 +1041,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     for pool_address in connector_configuration.get("pools", []):
                         pool_addresses.add(pool_address)
 
-                    # 2. Find pools by token pairs from configuration
-                    tokens = self._configuration.get("tokens", [])
+                    # 2. Process each token pair
+                    for token_pair in self._token_pairs:
+                        base_token, quote_token = self._extract_base_and_quote_token_symbols_from_token_pair(token_pair)
 
-                    # Generate all possible token pair combinations
-                    for base_token_index in range(len(tokens)):
-                        for quote_token_index in range(base_token_index + 1, len(tokens)):
-                            base_token, quote_token = tokens[base_token_index], tokens[quote_token_index]
+                        # Find pools containing this token pair
+                        list_pools_response = await self._gateway_list_pools(
+                            connector_name,
+                            network_name,
+                            [PoolType.XYK.value, PoolType.STABLE.value, PoolType.AMM.value],
+                            [base_token, quote_token],
+                        )
 
-                            # Find pools containing this token pair
-                            list_pools_response = await self._gateway_list_pools(
-                                connector_name,
-                                network_name,
-                                [PoolType.XYK.value, PoolType.STABLE.value, PoolType.AMM.value],
-                                [base_token, quote_token],
-                            )
-
-                            # Add found pools to our collection
-                            for pool_information in list_pools_response.get("pools", []):
-                                pool_addresses.add(pool_information.get("address"))
+                        # Add found pools to our collection
+                        for pool_information in list_pools_response.get("pools", []):
+                            pool_addresses.add(pool_information.get("address"))
 
                     # 3. Update detailed information for all pools
                     for pool_address in pool_addresses:
@@ -1106,7 +1105,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Initializes wallet information for all configured wallets,
         setting up the basic structure for tokens and pools.
         """
-
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
@@ -1128,7 +1126,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             }
 
                             # Pre-initialize token structures for all configured tokens
-                            for token_symbol in self._configuration.get("tokens", []):
+                            for token_symbol in self._token_symbols:
                                 connection["wallets"][wallet_internal_id]["tokens"][token_symbol] = {
                                     "balances": {
                                         "free": None,  # Dynamic data
@@ -1306,7 +1304,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Updates dynamic wallet data: balances and positions in pools
         by querying the gateway.
         """
-
         for chain_name, chain_configuration in self._database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
@@ -1314,37 +1311,34 @@ class AMMPortfolioManager(ScriptStrategyBase):
                         wallet_address = wallet_configuration["address"]
 
                         wallet_balances = await self._gateway_get_balances(
-                            chain_name, network_name, wallet_address, self._configuration.get("tokens", [])
+                            chain_name, network_name, wallet_address, self._token_symbols
                         )
 
-                        if wallet_balances and "balances" in wallet_balances:
-                            for token_symbol, balance in wallet_balances["balances"].items():
-                                # Create token structure if it doesn't exist
-                                if token_symbol not in wallet_configuration["tokens"]:
-                                    wallet_configuration["tokens"][token_symbol] = {
-                                        "balances": {
-                                            "free": None,
-                                            "locked": {
-                                                "total": None,
-                                                "liquidity": {
-                                                    "total": None,
-                                                    "pools": {},
-                                                },
-                                            },
+                        for token_symbol, balance in wallet_balances.get("balances", {}).items():
+                            if token_symbol not in wallet_configuration["tokens"]:
+                                wallet_configuration["tokens"][token_symbol] = {
+                                    "balances": {
+                                        "free": None,
+                                        "locked": {
                                             "total": None,
-                                        }
+                                            "liquidity": {
+                                                "total": None,
+                                                "pools": {},
+                                            },
+                                        },
+                                        "total": None,
                                     }
+                                }
 
-                                # Update balances with the new values
-                                wallet_configuration["tokens"][token_symbol]["balances"]["free"] = balance
-                                wallet_configuration["tokens"][token_symbol]["balances"]["total"] = balance
+                            # Updates free and total balance
+                            wallet_configuration["tokens"][token_symbol]["balances"]["free"] = balance
+                            wallet_configuration["tokens"][token_symbol]["balances"]["total"] = balance
 
     async def _update_token_information(self):
         """
         Updates dynamic token information (price)
         by querying the gateway.
         """
-
         for chain_name, chain_configuration in self._database["connections"].items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
@@ -1381,46 +1375,44 @@ class AMMPortfolioManager(ScriptStrategyBase):
             List of dictionaries of token pairs including metrics
             like price variance.
         """
-        tokens = self._configuration.get("tokens", [])
         promising_pairs = []
 
-        # Generates all token pair combinations
-        for base_token_index in range(len(tokens)):
-            for quote_token_index in range(base_token_index + 1, len(tokens)):
-                base_token, quote_token = tokens[base_token_index], tokens[quote_token_index]
+        # Process each configured token pair
+        for token_pair in self._token_pairs:
+            base_token, quote_token = self._extract_base_and_quote_token_symbols_from_token_pair(token_pair)
 
-                # Finds pools containing both tokens
-                pools = self._find_pools_with_token_pair(base_token, quote_token)
+            # Finds pools containing both tokens
+            pools = self._find_pools_with_token_pair(base_token, quote_token)
 
-                # Only considers pairs with at least 2 pools (necessary for arbitrage)
-                if len(pools) >= 2:
-                    # Calculates metrics for the pair
-                    total_volume = sum(Decimal(str(pool.get("volume", {}).get("24h", 0) or 0)) for pool in pools)
-                    total_liquidity = sum(Decimal(str(pool.get("total_value_locked", 0) or 0)) for pool in pools)
+            # Only considers pairs with at least 2 pools (necessary for arbitrage)
+            if len(pools) >= 2:
+                # Calculates metrics for the pair
+                total_volume = sum(Decimal(str(pool.get("volume", {}).get("24h", 0) or 0)) for pool in pools)
+                total_liquidity = sum(Decimal(str(pool.get("total_value_locked", 0) or 0)) for pool in pools)
 
-                    # Collects prices from all pools
-                    prices = []
-                    for pool in pools:
-                        price = self._get_token_pair_relative_price_in_pool(pool, base_token, quote_token)
-                        if price is not None:
-                            prices.append(price)
+                # Collects prices from all pools
+                prices = []
+                for pool in pools:
+                    price = self._get_token_pair_relative_price_in_pool(pool, base_token, quote_token)
+                    if price is not None:
+                        prices.append(price)
 
-                    # Calculates price variance if there are at least 2 valid prices
-                    price_variance_percentage = DECIMAL_ZERO
-                    if len(prices) >= 2 and min(prices) > DECIMAL_ZERO:
-                        price_variance_percentage = (max(prices) - min(prices)) / min(prices) * DECIMAL_ONE_HUNDRED
+                # Calculates price variance if there are at least 2 valid prices
+                price_variance_percentage = DECIMAL_ZERO
+                if len(prices) >= 2 and min(prices) > DECIMAL_ZERO:
+                    price_variance_percentage = (max(prices) - min(prices)) / min(prices) * DECIMAL_ONE_HUNDRED
 
-                    # Adds the pair to the promising list
-                    promising_pairs.append(
-                        {
-                            "base_token": base_token,
-                            "quote_token": quote_token,
-                            "pools_count": len(pools),
-                            "total_volume": total_volume,
-                            "total_liquidity": total_liquidity,
-                            "price_variance_percentage": price_variance_percentage,
-                        }
-                    )
+                # Adds the pair to the promising list
+                promising_pairs.append(
+                    {
+                        "base_token": base_token,
+                        "quote_token": quote_token,
+                        "pools_count": len(pools),
+                        "total_volume": total_volume,
+                        "total_liquidity": total_liquidity,
+                        "price_variance_percentage": price_variance_percentage,
+                    }
+                )
 
         # Orders pairs by price variance (descending), pool count and volume
         promising_pairs.sort(
@@ -2498,6 +2490,38 @@ class AMMPortfolioManager(ScriptStrategyBase):
         logger.warning(f"Transaction {transaction_hash} confirmation timed out after {maximum_timeout} seconds")
 
         return False
+
+    # noinspection PyMethodMayBeStatic
+    def _extract_base_and_quote_token_symbols_from_token_pair(self, target: str) -> Tuple[str, str]:
+        """
+        Extracts base and quote token symbols from a token pair string.
+        """
+        if "/" not in target:
+            raise ValueError(f"Invalid token pair: {target}")
+
+        base_token, quote_token = target.split("/")
+
+        return base_token, quote_token
+
+    def _get_all_token_symbols_from_token_pairs(self) -> List[str]:
+        """
+        Extracts individual tokens from the token pairs in configuration.
+
+        Returns:
+            List of unique token symbols.
+        """
+        all_tokens = set()
+
+        for pair in self._token_pairs:
+            if "/" not in pair:
+                raise ValueError(f"Invalid token pair: {pair}")
+
+            base_token, quote_token = self._extract_base_and_quote_token_symbols_from_token_pair(pair)
+
+            all_tokens.add(base_token)
+            all_tokens.add(quote_token)
+
+        return list(all_tokens)
 
     # --------------------------------------------------------------------------
     # Gateway Methods (using retry/timeout)
