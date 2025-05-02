@@ -72,8 +72,8 @@ configuration: Dict[str, Any] = {
         "maximum_slippage_percentage": "0.5",  # 0.5% allowed slippage
         "minimum_profitability_percentage": "-1",  # Profit threshold (e.g., "1" for 1%)
         "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
-        "minimum_trade_amount": "0.1",  # Minimum trade amount
-        "maximum_trade_amount": "0.1",  # Maximum trade amount
+        "minimum_trade_amount": "0.00067",  # Minimum trade amount
+        "maximum_trade_amount": "0.00069",  # Maximum trade amount
         "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
         "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
         "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
@@ -103,7 +103,7 @@ configuration: Dict[str, Any] = {
             }
         },
     },
-    "token_pairs": ["USDC/USDT"],
+    "token_pairs": ["SOL/USDT"],
 }
 
 
