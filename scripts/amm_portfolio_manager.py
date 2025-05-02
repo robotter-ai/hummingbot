@@ -83,7 +83,7 @@ configuration: Dict[str, Any] = {
             "pool": "60",  # Update pool data every x seconds
         },
         "use_async_data_updates": False,
-        "main_quote_token": "USDC",
+        "main_quote_token": "USDT",
     },
     "connections": {
         "polkadot": {
@@ -103,7 +103,7 @@ configuration: Dict[str, Any] = {
             }
         },
     },
-    "token_pairs": ["SOL/USDT"],
+    "token_pairs": ["USDC/USDT"],
 }
 
 
