@@ -697,6 +697,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _main_quote_token: str = "USDC"
 
     # State control
+    # _loop: asyncio.AbstractEventLoop = None
     _initialized: bool = False  # Indicates if database was initialized
     _initializing: bool = False  # Indicates if database is being initialized
     _is_running: bool = False  # Indicates if an update is in progress
@@ -710,6 +711,24 @@ class AMMPortfolioManager(ScriptStrategyBase):
             connectors: Dictionary of available connectors.
         """
         super().__init__(connectors)
+
+        # self._loop = asyncio.new_event_loop()
+        # thread = threading.Thread(target=self._start_loop, daemon=True)
+        # thread.start()
+
+    # def _start_loop(self):
+    #     """Starts the private event loop."""
+    #     asyncio.set_event_loop(self._loop)
+    #     self._loop.run_forever()
+
+    # noinspection PyMethodMayBeStatic
+    def _run_synchronously(self, coroutine):
+        """Schedule `coroutine` on our private loop and block until it’s done."""
+        # future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        # future = asyncio.run_coroutine_threadsafe(coroutine, asyncio.get_running_loop())
+        future = asyncio.get_event_loop().run_until_complete(coroutine)
+
+        return future.result()
 
     async def _initialize(self):
         """
@@ -825,7 +844,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             try:
                 self._initializing = True
 
-                asyncio.get_running_loop().run_until_complete(self._initialize())
+                self._run_synchronously(self._initialize())
 
                 self._initializing = False
             except Exception as exception:
@@ -841,7 +860,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 if current_time - self._last_arbitrage_check_time >= self._arbitrage_check_interval_seconds:
                     self._last_arbitrage_check_time = current_time
 
-                    asyncio.get_running_loop().run_until_complete(self._async_on_tick())
+                    self._run_synchronously(self._async_on_tick())
             finally:
                 self._is_running = False
 
@@ -1052,6 +1071,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
                             [PoolType.XYK.value, PoolType.STABLE.value, PoolType.AMM.value],
                             [base_token, quote_token],
                         )
+
+                        if not list_pools_response or not list_pools_response.get("pools"):
+                            raise Exception(f"No pools found for {token_pair} on {connector_name} {network_name}")
 
                         # Add found pools to our collection
                         for pool_information in list_pools_response.get("pools", []):
