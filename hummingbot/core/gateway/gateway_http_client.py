@@ -763,10 +763,6 @@ class GatewayHttpClient:
         if pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
-        # TODO: Fix Raydium implementation on Gateway to accept calls to quote the swap without informing a pool!!!
-        if connector == "raydium" and pool_address is None:
-            request_payload["poolAddress"] = "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
-
         return await self.api_request(
             "get", f"{connector}/amm/quote-swap", request_payload, fail_silently=fail_silently
         )
@@ -821,10 +817,6 @@ class GatewayHttpClient:
             "network": network,
             "poolAddress": pool_address,
         }
-
-        # TODO: Remove this hardcode when the listPools routes on the Gateway becomes stable!!!
-        if connector == "raydium":
-            query_params["poolAddress"] = "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
 
         return await self.api_request(
             "get",
@@ -895,37 +887,26 @@ class GatewayHttpClient:
         :param fail_silently: Whether to fail silently on error
         :return: List of available pools with their information
         """
-        query_params = {
-            "network": network,
-            "types": types,
-            "tokens_symbols": token_symbols,
-            "tokens_addresses": token_addresses,
-            "maxNumberOfPages": max_number_of_pages,
-            "useOfficialTokens": use_official_tokens,
-        }
+        query_params = {}
+
+        if network is not None:
+            query_params["network"] = network
+        if types is not None:
+            query_params["types"] = types
+        if token_symbols is not None:
+            query_params["tokenSymbols"] = token_symbols
+        if token_addresses is not None:
+            query_params["tokenAddresses"] = token_addresses
+        if max_number_of_pages is not None:
+            query_params["maxNumberOfPages"] = max_number_of_pages
+        if use_official_tokens is not None:
+            query_params["useOfficialTokens"] = str(use_official_tokens).lower()
+
         result = await self.api_request(
             "get",
             f"{connector}/amm/list-pools",
             params=query_params,
             fail_silently=fail_silently,
         )
-
-        # TODO: Remove this hardcode when the listPools routes on the Gateway becomes stable!!!
-        if connector == "raydium":
-            result = {
-                "pools": [
-                    pool
-                    for pool in result.get("pools", [])
-                    if pool.get("address") == "7TbGqz32RsuwXbXY7EyBCiAnMbJq1gm1wKmfjQjuwoyF"
-                ]
-            }
-        elif connector == "hydration":
-            result = {
-                "pools": [
-                    pool
-                    for pool in result.get("pools", [])
-                    if pool.get("address") == "7LVGEVLFXpsCCtnsvhzkSMQARU7gRVCtwMckG7u7d3V6FVvG"
-                ]
-            }
 
         return result
