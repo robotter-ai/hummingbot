@@ -36,7 +36,6 @@ from hummingbot.client.settings import GatewayConnectionSetting
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.core.event.events import TradeType
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
-from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
 # ==============================================================================
@@ -697,7 +696,6 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _main_quote_token: str = "USDC"
 
     # State control
-    # _loop: asyncio.AbstractEventLoop = None
     _initialized: bool = False  # Indicates if database was initialized
     _initializing: bool = False  # Indicates if database is being initialized
     _is_running: bool = False  # Indicates if an update is in progress
@@ -712,91 +710,80 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
         super().__init__(connectors)
 
-        # self._loop = asyncio.new_event_loop()
-        # thread = threading.Thread(target=self._start_loop, daemon=True)
-        # thread.start()
-
-    # def _start_loop(self):
-    #     """Starts the private event loop."""
-    #     asyncio.set_event_loop(self._loop)
-    #     self._loop.run_forever()
-
-    # noinspection PyMethodMayBeStatic
-    def _run_synchronously(self, coroutine):
-        """Schedule `coroutine` on our private loop and block until it’s done."""
-        # future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
-        # future = asyncio.run_coroutine_threadsafe(coroutine, asyncio.get_running_loop())
-        future = asyncio.get_event_loop().run_until_complete(coroutine)
-
-        return future.result()
-
     async def _initialize(self):
         """
         Configures gateway client, database structure and asynchronous updates.
         """
-        self._database: Dict[str, Any] = {
-            "connections": {},
-            "arbitrage_opportunities": [],
-            "execution_history": [],
-            "maps": {
-                "pools_by_tokens": {},  # "token1/token2" -> list of pool internal IDs
-                "wallets_by_pool": {},  # pool internal ID -> list of wallet internal IDs
-                "pools_by_wallet": {},  # wallet internal ID -> list of pool internal IDs
-            },
-        }
+        try:
+            self._initializing = True
 
-        self._database_lock = asyncio.Lock()
-
-        # Gateway client initialization
-        self._all_gateway_connections = GatewayConnectionSetting.load()
-        self._gateway_http_client = GatewayHttpClient.get_instance()
-
-        # Load configuration
-        self._configuration = configuration
-        global_configurations = self._configuration.get("globals", {})
-
-        # Strategy parameters
-        self._maximum_slippage_percentage = Decimal(global_configurations["maximum_slippage_percentage"])
-        self._minimum_profitability_percentage = Decimal(global_configurations["minimum_profitability_percentage"])
-        self._arbitrage_check_interval_seconds = int(global_configurations["arbitrage_check_interval_seconds"])
-        self._minimum_trade_amount = Decimal(global_configurations["minimum_trade_amount"])
-        self._maximum_trade_amount = Decimal(global_configurations["maximum_trade_amount"])
-        self._time_delay_between_arbitrages = int(global_configurations["time_delay_between_arbitrages"])
-        self._transaction_confirmation_delay = int(global_configurations["transaction_confirmation_delay"])
-        self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
-        self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
-        self._main_quote_token = global_configurations["main_quote_token"]
-
-        # Configure update intervals
-        data_update_intervals = global_configurations["data_update_intervals"]
-        if data_update_intervals:
-            self._data_update_intervals = {
-                "wallet": int(data_update_intervals["wallet"]),
-                "token": int(data_update_intervals["token"]),
-                "pool": int(data_update_intervals["pool"]),
+            self._database: Dict[str, Any] = {
+                "connections": {},
+                "arbitrage_opportunities": [],
+                "execution_history": [],
+                "maps": {
+                    "pools_by_tokens": {},  # "token1/token2" -> list of pool internal IDs
+                    "wallets_by_pool": {},  # pool internal ID -> list of wallet internal IDs
+                    "pools_by_wallet": {},  # wallet internal ID -> list of pool internal IDs
+                },
             }
 
-        # Configure transaction confirmation timeout
-        if self._transaction_confirmation_delay > 0:
-            self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
+            self._database_lock = asyncio.Lock()
 
-        self._token_pairs = self._configuration.get("token_pairs", [])
-        self._token_symbols = self._get_all_token_symbols_from_token_pairs()
+            # Gateway client initialization
+            self._all_gateway_connections = GatewayConnectionSetting.load()
+            self._gateway_http_client = GatewayHttpClient.get_instance()
 
-        await self._check_gateway_status()
+            # Load configuration
+            self._configuration = configuration
+            global_configurations = self._configuration.get("globals", {})
 
-        # Initialize database
-        await self._initialize_database_structure()
+            # Strategy parameters
+            self._maximum_slippage_percentage = Decimal(global_configurations["maximum_slippage_percentage"])
+            self._minimum_profitability_percentage = Decimal(global_configurations["minimum_profitability_percentage"])
+            self._arbitrage_check_interval_seconds = int(global_configurations["arbitrage_check_interval_seconds"])
+            self._minimum_trade_amount = Decimal(global_configurations["minimum_trade_amount"])
+            self._maximum_trade_amount = Decimal(global_configurations["maximum_trade_amount"])
+            self._time_delay_between_arbitrages = int(global_configurations["time_delay_between_arbitrages"])
+            self._transaction_confirmation_delay = int(global_configurations["transaction_confirmation_delay"])
+            self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
+            self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
+            self._main_quote_token = global_configurations["main_quote_token"]
 
-        # Start update task if configured
-        if self._use_async_data_updates:
-            self._start_data_update_task()
+            # Configure update intervals
+            data_update_intervals = global_configurations["data_update_intervals"]
+            if data_update_intervals:
+                self._data_update_intervals = {
+                    "wallet": int(data_update_intervals["wallet"]),
+                    "token": int(data_update_intervals["token"]),
+                    "pool": int(data_update_intervals["pool"]),
+                }
+
+            # Configure transaction confirmation timeout
+            if self._transaction_confirmation_delay > 0:
+                self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
+
+            self._token_pairs = self._configuration.get("token_pairs", [])
+            self._token_symbols = self._get_all_token_symbols_from_token_pairs()
+
+            await self._check_gateway_status()
+
+            # Initialize database
+            await self._initialize_database_structure()
+
+            # Start update task if configured
+            if self._use_async_data_updates:
+                self._start_data_update_task()
+        except Exception as exception:
+            raise exception
+        finally:
+            self._initializing = False
 
     def _start_data_update_task(self):
         """Starts the asynchronous data update task."""
         if self._data_update_task is not None:
             self._data_update_task.cancel()
-        self._data_update_task = safe_ensure_future(self._run_data_update_loop())
+        self._data_update_task = asyncio.ensure_future(self._run_data_update_loop())
         logger.info("Data update task started")
 
     async def _run_data_update_loop(self):
@@ -841,46 +828,36 @@ class AMMPortfolioManager(ScriptStrategyBase):
     def on_tick(self):
         """Called on each tick to execute the strategy."""
         if not self._initialized and not self._initializing:
-            try:
-                self._initializing = True
-
-                self._run_synchronously(self._initialize())
-
-                self._initializing = False
-            except Exception as exception:
-                logger.ignore_exception(exception, "Error during initialization")
-                self._initializing = False
+            asyncio.ensure_future(self._initialize())
 
         if self._initialized and not self._is_running:
-            try:
-                self._is_running = True
+            # Execute arbitrage strategy at configured interval
+            current_time = time.time()
+            if current_time - self._last_arbitrage_check_time >= self._arbitrage_check_interval_seconds:
+                self._last_arbitrage_check_time = current_time
 
-                # Execute arbitrage strategy at configured interval
-                current_time = time.time()
-                if current_time - self._last_arbitrage_check_time >= self._arbitrage_check_interval_seconds:
-                    self._last_arbitrage_check_time = current_time
-
-                    self._run_synchronously(self._async_on_tick())
-            finally:
-                self._is_running = False
+                asyncio.ensure_future(self._async_on_tick())
 
     async def _async_on_tick(self):
         """
         Main execution method. The strategy executes only if the database
         has been updated and the gateway is available.
         """
-        await self._check_gateway_status()
-
-        # Update database only if not using asynchronous updates
-        if not self._use_async_data_updates:
-            await self._update_database()
-
         try:
+            self._is_running = True
+
+            await self._check_gateway_status()
+
+            # Update database only if not using asynchronous updates
+            if not self._use_async_data_updates:
+                await self._update_database()
+
             await self._run_arbitrage_strategy()
         except Exception as exception:
             raise exception
         finally:
             logger.info("Arbitrage strategy execution completed")
+            self._is_running = False
 
     async def _check_gateway_status(self):
         """
