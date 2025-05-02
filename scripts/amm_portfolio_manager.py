@@ -14,6 +14,7 @@ Key Features:
   - All strategy and helper methods (arbitrage discovery, validation, execution)
     are fully implemented.
   - The arbitrage strategy runs only after the dynamic database has been fully updated at least once.
+  - Supports both token pair arbitrage and triangular (token triad) arbitrage.
 """
 
 import asyncio
@@ -83,6 +84,7 @@ configuration: Dict[str, Any] = {
         },
         "use_async_data_updates": False,
         "main_quote_token": "USDT",
+        "strategy_type": "TOKEN_PAIRS_ARBITRAGE",
     },
     "connections": {
         "polkadot": {
@@ -103,6 +105,7 @@ configuration: Dict[str, Any] = {
         },
     },
     "token_pairs": ["USDC/USDT"],
+    "token_triads": ["USDC/HDX/USDT"],
 }
 
 
@@ -400,6 +403,11 @@ def cached(ttl: int = 60):
 # Enumerators
 # ==============================================================================
 
+class StrategyType(Enum):
+    """Enum for different types of arbitrage strategies"""
+    TOKEN_PAIRS_ARBITRAGE = "TOKEN_PAIRS_ARBITRAGE"  # Token pairs arbitrage between different connectors
+    TOKEN_TRIADS_ARBITRAGE = "TOKEN_TRIADS_ARBITRAGE"  # Triangular arbitrage inside the same connector
+
 
 class PoolType(Enum):
     """Enum for different types of liquidity pools"""
@@ -527,6 +535,7 @@ class GlobalConfig(BaseClientModel):
     data_update_intervals: DataUpdateIntervals = Field(default_factory=DataUpdateIntervals)
     use_async_data_updates: bool = Field(default=True)
     main_quote_token: str = Field(default="USDC")
+    strategy_type: str = Field(default=StrategyType.TOKEN_PAIRS_ARBITRAGE.value)
 
 
 class AMMPortfolioManagerConfiguration(BaseClientModel):
@@ -540,6 +549,7 @@ class AMMPortfolioManagerConfiguration(BaseClientModel):
     globals: GlobalConfig = Field(default_factory=GlobalConfig)
     chains: Dict[str, ChainConfig] = Field(default_factory=dict)
     token_pairs: List[str] = Field(default_factory=list)
+    token_triads: List[str] = Field(default_factory=list)
 
     class Config:
         arbitrary_types_allowed = True
@@ -685,6 +695,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _transaction_confirmation_delay: int = 1
     _transaction_polling_interval: int = 1
     _maximum_transaction_confirmation_timeout: int = 60
+    _strategy_type: str = StrategyType.TOKEN_PAIRS_ARBITRAGE.value
 
     # Data update control
     _data_update_task: Optional[asyncio.Task] = None
@@ -694,6 +705,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _last_pool_update_time: float = 0
     _use_async_data_updates: bool = True
     _main_quote_token: str = "USDC"
+
+    # Token data storage
+    _token_pairs: List[str] = []
+    _token_triads: List[str] = []
+    _token_symbols: List[str] = []
 
     # State control
     _initialized: bool = False  # Indicates if database was initialized
@@ -749,6 +765,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
             self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
             self._main_quote_token = global_configurations["main_quote_token"]
+            self._strategy_type = global_configurations.get("strategy_type", StrategyType.TOKEN_PAIRS_ARBITRAGE.value)
 
             # Configure update intervals
             data_update_intervals = global_configurations["data_update_intervals"]
@@ -764,7 +781,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
 
             self._token_pairs = self._configuration.get("token_pairs", [])
-            self._token_symbols = self._get_all_token_symbols_from_token_pairs()
+            self._token_triads = self._configuration.get("token_triads", [])
+            self._token_symbols = self._get_all_token_symbols()
 
             await self._check_gateway_status()
 
@@ -888,12 +906,29 @@ class AMMPortfolioManager(ScriptStrategyBase):
     async def _run_arbitrage_strategy(self):
         """
         Executes the arbitrage strategy:
+         - Discovers promising token pairs or triads based on strategy type
+         - Validates each opportunity
+         - Executes arbitrage trades for opportunities that pass validation
+        """
+        logger.info(f"Executing arbitrage strategy: {self._strategy_type}")
+
+        # Choose strategy based on configuration
+        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
+            await self._run_token_pairs_arbitrage()
+        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
+            await self._run_token_triads_arbitrage()
+        else:
+            logger.warning(f"Unknown strategy type: {self._strategy_type}")
+
+        logger.info("Arbitrage strategy cycle completed.")
+
+    async def _run_token_pairs_arbitrage(self):
+        """
+        Executes the token pairs arbitrage strategy:
          - Discovers promising token pairs
          - Validates each opportunity
          - Executes arbitrage trades for opportunities that pass validation
         """
-        logger.info("Executing arbitrage strategy")
-
         # Finds promising token pairs
         promising_pairs = self._find_most_promising_token_pairs()
         if not promising_pairs:
@@ -939,7 +974,51 @@ class AMMPortfolioManager(ScriptStrategyBase):
             else:
                 logger.info("Opportunity invalidated after detailed validation.")
 
-        logger.info("Arbitrage strategy cycle completed.")
+    async def _run_token_triads_arbitrage(self):
+        """
+        Executes the token triads (triangular) arbitrage strategy:
+         - Discovers profitable triangular arbitrage opportunities
+         - Validates each opportunity
+         - Executes arbitrage trades for opportunities that pass validation
+        """
+        # Find profitable token triads
+        opportunities = await self._find_triangular_arbitrage_opportunities()
+        if not opportunities:
+            logger.info("No triangular arbitrage opportunity found.")
+
+            return
+
+        logger.info(f"Found {len(opportunities)} triangular arbitrage opportunities.")
+
+        # Validates and executes each opportunity
+        for opportunity in opportunities:
+            # Registers the opportunity in the database
+            if "arbitrage_opportunities" not in self._database:
+                self._database["arbitrage_opportunities"] = []
+            self._database["arbitrage_opportunities"].append(opportunity)
+
+            # Validates the opportunity
+            logger.info(
+                f"Validating triangular opportunity: {opportunity['token1']}->{opportunity['token2']}->{opportunity['token3']}->{opportunity['token1']} "
+                f"with expected profit of {opportunity['expected_profit_percentage']:.2f}%"
+            )
+            valid = await self._validate_triangular_opportunity(opportunity)
+
+            if valid:
+                # Executes arbitrage if valid
+                logger.info(f"Executing triangular arbitrage: {opportunity['token1']}->{opportunity['token2']}->{opportunity['token3']}->{opportunity['token1']}")
+                success = await self._execute_triangular_arbitrage(opportunity)
+
+                if success:
+                    logger.info("Triangular arbitrage executed successfully.")
+                else:
+                    logger.warning("Triangular arbitrage execution failed.")
+
+                # Waits the configured delay between arbitrages
+                if self._time_delay_between_arbitrages > 0:
+                    await asyncio.sleep(self._time_delay_between_arbitrages)
+            else:
+                logger.info("Triangular opportunity invalidated after detailed validation.")
 
     # --------------------------------------------------------------------------
     # Permanent Database Initialization and Mapping Methods
@@ -1044,7 +1123,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                     # 2. Process each token pair
                     for token_pair in self._token_pairs:
-                        base_token, quote_token = self._extract_base_and_quote_token_symbols_from_token_pair(token_pair)
+                        base_token, quote_token = self._extract_token_symbols_from_token_pair(token_pair)
 
                         # Find pools containing this token pair
                         list_pools_response = await self._gateway_list_pools(
@@ -1383,7 +1462,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         # Process each configured token pair
         for token_pair in self._token_pairs:
-            base_token, quote_token = self._extract_base_and_quote_token_symbols_from_token_pair(token_pair)
+            base_token, quote_token = self._extract_token_symbols_from_token_pair(token_pair)
 
             # Finds pools containing both tokens
             pools = self._find_pools_with_token_pair(base_token, quote_token)
@@ -2496,36 +2575,685 @@ class AMMPortfolioManager(ScriptStrategyBase):
         return False
 
     # noinspection PyMethodMayBeStatic
-    def _extract_base_and_quote_token_symbols_from_token_pair(self, target: str) -> Tuple[str, str]:
+    def _extract_token_symbols_from_token_pair(self, pair: str) -> Tuple[str, str]:
         """
         Extracts base and quote token symbols from a token pair string.
         """
-        if "/" not in target:
-            raise ValueError(f"Invalid token pair: {target}")
+        tokens = pair.split("/")
 
-        base_token, quote_token = target.split("/")
+        if len(tokens) != 2:
+            raise ValueError(f"Invalid token pair: {pair}. Expected format: TOKEN1/TOKEN2")
 
-        return base_token, quote_token
+        return tokens[0], tokens[1]
 
-    def _get_all_token_symbols_from_token_pairs(self) -> List[str]:
+    # noinspection PyMethodMayBeStatic
+    def _extract_token_symbols_from_token_triad(self, triad: str) -> Tuple[str, str, str]:
         """
-        Extracts individual tokens from the token pairs in configuration.
+        Extracts tokens from a token triad string.
+
+        Args:
+            triad: Token triad string in format "TOKEN1/TOKEN2/TOKEN3"
+        Returns:
+            Tuple of (token1, token2, token3)
+        """
+        tokens = triad.split("/")
+
+        if len(tokens) != 3:
+            raise ValueError(f"Invalid token triad: {triad}. Expected format: TOKEN1/TOKEN2/TOKEN3")
+
+        return tokens[0], tokens[1], tokens[2]
+
+    def _get_all_token_symbols(self) -> List[str]:
+        """
+        Extracts individual tokens from token pairs or token triads depending on the strategy type.
 
         Returns:
             List of unique token symbols.
         """
-        all_tokens = set()
+        tokens_set = set()
+        tokens_list = []
 
-        for pair in self._token_pairs:
-            if "/" not in pair:
-                raise ValueError(f"Invalid token pair: {pair}")
+        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
+            for pair in self._token_pairs:
+                tokens_list = pair.split("/")
 
-            base_token, quote_token = self._extract_base_and_quote_token_symbols_from_token_pair(pair)
+                if len(tokens_list) != 2:
+                    raise ValueError(f"Invalid token pair: {pair}. Expected format: TOKEN1/TOKEN2")
+        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
+            for triad in self._token_triads:
+                tokens_list = triad.split("/")
 
-            all_tokens.add(base_token)
-            all_tokens.add(quote_token)
+                if len(tokens_list) != 3:
+                    raise ValueError(f"Invalid token triad: {triad}. Expected format: TOKEN1/TOKEN2/TOKEN3")
 
-        return list(all_tokens)
+        for token in tokens_list:
+            tokens_set.add(token)
+
+        return list(tokens_set)
+
+    def _find_pools_for_token_triad(self, token1: str, token2: str, token3: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Searches the database for pools containing each pair of tokens in the triad.
+        Returns a dictionary with pools for each pair in the triad.
+
+        Args:
+            token1: First token symbol
+            token2: Second token symbol
+            token3: Third token symbol
+        Returns:
+            Dictionary with pools for each segment of the triangular path:
+            {
+                "1/2": [pools containing token1 and token2],
+                "2/3": [pools containing token2 and token3],
+                "3/1": [pools containing token3 and token1]
+            }
+        """
+        result = {
+            "1/2": self._find_pools_with_token_pair(token1, token2),
+            "2/3": self._find_pools_with_token_pair(token2, token3),
+            "3/1": self._find_pools_with_token_pair(token3, token1)
+        }
+
+        return result
+
+    async def _find_triangular_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
+        """
+        Finds triangular arbitrage opportunities based on token triads.
+
+        Returns:
+            List of dictionaries of triangular arbitrage opportunities.
+        """
+        opportunities = []
+
+        for triad in self._token_triads:
+            token1, token2, token3 = self._extract_token_symbols_from_token_triad(triad)
+
+            # Find pools for each pair in the triad
+            triad_pools = self._find_pools_for_token_triad(token1, token2, token3)
+
+            # Check if we have pools for all three pairs
+            if (
+                not triad_pools["1/2"] or
+                not triad_pools["2/3"] or
+                not triad_pools["3/1"]
+            ):
+                logger.info(f"Skipping triad {triad} because not all pairs have pools.")
+
+                continue
+
+            # For each combination of pools, check if there's an arbitrage opportunity
+            for pool1_2 in triad_pools["1/2"]:
+                for pool2_3 in triad_pools["2/3"]:
+                    for pool3_1 in triad_pools["3/1"]:
+                        try:
+                            # Get prices from pools
+                            price1_2 = self._get_token_pair_relative_price_in_pool(pool1_2, token1, token2)
+                            price2_3 = self._get_token_pair_relative_price_in_pool(pool2_3, token2, token3)
+                            price3_1 = self._get_token_pair_relative_price_in_pool(pool3_1, token3, token1)
+
+                            # Skip if any price is None
+                            if price1_2 is None or price2_3 is None or price3_1 is None:
+                                continue
+
+                            # Calculate the product of prices for the circular path
+                            # In a perfect market with no arbitrage, this should be 1.0
+                            # If it's < 1.0, we'd lose money following the triangle
+                            # If it's > 1.0, there's potential for arbitrage
+                            circular_product = DECIMAL_ONE / (price1_2 * price2_3 * price3_1)
+
+                            # Calculate profit percentage (product minus 1, times 100)
+                            profit_percentage = (circular_product - DECIMAL_ONE) * DECIMAL_ONE_HUNDRED
+
+                            # Skip if profit is below minimum
+                            if profit_percentage <= self._minimum_profitability_percentage:
+                                continue
+
+                            # Simulated trade with minimum amount
+                            test_amount = self._minimum_trade_amount
+                            expected_profit = await self._simulate_triangular_trade(
+                                token1, token2, token3,
+                                pool1_2, pool2_3, pool3_1,
+                                test_amount
+                            )
+
+                            if expected_profit["profit_percentage"] <= self._minimum_profitability_percentage:
+                                continue
+
+                            # Create opportunity record
+                            opportunity = {
+                                "type": "triangular",
+                                "token1": token1,
+                                "token2": token2,
+                                "token3": token3,
+                                "pool1_2": pool1_2,
+                                "pool2_3": pool2_3,
+                                "pool3_1": pool3_1,
+                                "price1_2": price1_2,
+                                "price2_3": price2_3,
+                                "price3_1": price3_1,
+                                "circular_product": circular_product,
+                                "price_difference_percentage": profit_percentage,
+                                "estimated_profit_amount": expected_profit["profit_amount"],
+                                "expected_profit_percentage": expected_profit["profit_percentage"],
+                                "timestamp": time.time(),
+                            }
+
+                            opportunities.append(opportunity)
+                            logger.info(
+                                f"Triangular arbitrage opportunity found: {token1}->{token2}->{token3}->{token1} "
+                                f"with expected profit {profit_percentage:.2f}%"
+                            )
+                        except Exception as exception:
+                            logger.ignore_exception(
+                                exception,
+                                f"Error evaluating triangular arbitrage for {token1}/{token2}/{token3}"
+                            )
+
+                            continue
+
+        # Sort opportunities by expected profit (descending)
+        opportunities.sort(key=lambda opportunity: opportunity["expected_profit_percentage"], reverse=True)
+
+        return opportunities
+
+    async def _simulate_triangular_trade(
+        self,
+        token1: str,
+        token2: str,
+        token3: str,
+        pool1_2: Dict[str, Any],
+        pool2_3: Dict[str, Any],
+        pool3_1: Dict[str, Any],
+        amount: Decimal
+    ) -> Dict[str, Any]:
+        """
+        Simulates a triangular trade to calculate expected profit.
+
+        Args:
+            token1: First token in the triangle
+            token2: Second token in the triangle
+            token3: Third token in the triangle
+            pool1_2: Pool for token1-token2 swap
+            pool2_3: Pool for token2-token3 swap
+            pool3_1: Pool for token3-token1 swap
+            amount: Initial amount of token1 to trade
+
+        Returns:
+            Dictionary with profit information
+        """
+        try:
+            # Simulate first swap: token1 -> token2
+            swap1_quote = await self._gateway_quote_swap(
+                pool1_2.get("network"),
+                pool1_2.get("connector"),
+                token1,
+                token2,
+                amount,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                pool1_2.get("address"),
+            )
+
+            if not swap1_quote or "estimatedAmountOut" not in swap1_quote:
+                return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
+
+            token2_amount = Decimal(str(swap1_quote["estimatedAmountOut"]))
+
+            # Simulate second swap: token2 -> token3
+            swap2_quote = await self._gateway_quote_swap(
+                pool2_3.get("network"),
+                pool2_3.get("connector"),
+                token2,
+                token3,
+                token2_amount,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                pool2_3.get("address"),
+            )
+
+            if not swap2_quote or "estimatedAmountOut" not in swap2_quote:
+                return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
+
+            token3_amount = Decimal(str(swap2_quote["estimatedAmountOut"]))
+
+            # Simulate third swap: token3 -> token1
+            swap3_quote = await self._gateway_quote_swap(
+                pool3_1.get("network"),
+                pool3_1.get("connector"),
+                token3,
+                token1,
+                token3_amount,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                pool3_1.get("address"),
+            )
+
+            if not swap3_quote or "estimatedAmountOut" not in swap3_quote:
+                return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
+
+            final_token1_amount = Decimal(str(swap3_quote["estimatedAmountOut"]))
+
+            # Calculate profit
+            profit_amount = final_token1_amount - amount
+            profit_percentage = (profit_amount / amount) * DECIMAL_ONE_HUNDRED
+
+            return {
+                "profit_amount": profit_amount,
+                "profit_percentage": profit_percentage,
+                "initial_amount": amount,
+                "token2_amount": token2_amount,
+                "token3_amount": token3_amount,
+                "final_amount": final_token1_amount
+            }
+
+        except Exception as exception:
+            logger.ignore_exception(exception, "Error in triangular trade simulation")
+
+            return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
+
+    async def _validate_triangular_opportunity(self, opportunity: Dict[str, Any]) -> bool:
+        """
+        Validates a triangular arbitrage opportunity by checking available balances and
+        simulating trades with optimal amounts.
+
+        Args:
+            opportunity: Dictionary of triangular arbitrage opportunity.
+        Returns:
+            True if opportunity is valid and expected profit meets threshold;
+            otherwise, False.
+        """
+        token1 = opportunity["token1"]
+
+        # Checks if there is available balance for token1
+        # TODO: do not use all wallets!!!
+        available_balance = await self._get_total_token_balance_from_all_wallets(token1)
+        if available_balance < self._minimum_trade_amount:
+            logger.info(f"Insufficient balance of {token1}: {available_balance}")
+
+            return False
+
+        # Calculates ideal trade amount
+        trade_amount = await self._calculate_optimal_triangular_trade_amount(opportunity, available_balance)
+        if not trade_amount or trade_amount <= DECIMAL_ZERO:
+            logger.info(f"Invalid optimal trade amount: {trade_amount}")
+
+            return False
+
+        # Simulate the triangular trade with the optimal amount
+        expected_profit = await self._simulate_triangular_trade(
+            opportunity["token1"],
+            opportunity["token2"],
+            opportunity["token3"],
+            opportunity["pool1_2"],
+            opportunity["pool2_3"],
+            opportunity["pool3_1"],
+            trade_amount
+        )
+
+        # Checks if opportunity meets minimum profitability
+        if expected_profit["profit_percentage"] < self._minimum_profitability_percentage:
+            logger.info(
+                f"Triangular opportunity not profitable: "
+                f"{expected_profit['profit_percentage']:.2f}% < {self._minimum_profitability_percentage}%"
+            )
+
+            return False
+
+        # Update opportunity with calculated values
+        opportunity.update({
+            "trade_amount": trade_amount,
+            "expected_token2_amount": expected_profit["token2_amount"],
+            "expected_token3_amount": expected_profit["token3_amount"],
+            "expected_final_amount": expected_profit["final_amount"],
+            "expected_profit_amount": expected_profit["profit_amount"],
+            "expected_profit_percentage": expected_profit["profit_percentage"]
+        })
+
+        logger.info(
+            f"Triangular opportunity validated: {token1}->{opportunity['token2']}->{opportunity['token3']}->{token1} "
+            f"with expected profit {expected_profit['profit_percentage']:.2f}%"
+        )
+
+        return True
+
+    async def _calculate_optimal_triangular_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
+        """
+        Determines the optimal trade amount for triangular arbitrage by simulating profits at different sizes.
+
+        Args:
+            opportunity: Triangular arbitrage opportunity dictionary.
+            maximum_available: Maximum available balance of token1.
+        Returns:
+            Optimal trade amount as Decimal.
+        """
+        # Cap maximum available to configured maximum trade amount
+        maximum_available = min(maximum_available, self._maximum_trade_amount)
+
+        if maximum_available <= self._minimum_trade_amount:
+            return maximum_available if maximum_available > DECIMAL_ZERO else DECIMAL_ZERO
+
+        test_amounts = [
+            self._minimum_trade_amount,
+            maximum_available * DECIMAL_TEN_PERCENT,
+            maximum_available * DECIMAL_TWENTY_FIVE_PERCENT,
+            maximum_available * DECIMAL_FIFTY_PERCENT,
+            maximum_available * DECIMAL_SEVENTY_FIVE_PERCENT,
+            maximum_available,
+        ]
+
+        best_amount = DECIMAL_ZERO
+        best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
+
+        for amount in sorted(test_amounts):
+            if amount < self._minimum_trade_amount or amount > maximum_available:
+                continue
+
+            # Simulate triangular trade with different amounts
+            profit_info = await self._simulate_triangular_trade(
+                opportunity["token1"],
+                opportunity["token2"],
+                opportunity["token3"],
+                opportunity["pool1_2"],
+                opportunity["pool2_3"],
+                opportunity["pool3_1"],
+                amount
+            )
+
+            if profit_info["profit_percentage"] > best_profit_percentage:
+                best_profit_percentage = profit_info["profit_percentage"]
+                best_amount = amount
+
+        return best_amount if best_amount > DECIMAL_ZERO else self._minimum_trade_amount
+
+    async def _execute_triangular_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
+        """
+        Executes a triangular arbitrage trade by performing three sequential swaps.
+
+        Args:
+            opportunity: Triangular arbitrage opportunity dictionary.
+        Returns:
+            True if the trade is executed successfully with profit; otherwise, False.
+        """
+        token1 = opportunity["token1"]
+        token2 = opportunity["token2"]
+        token3 = opportunity["token3"]
+        pool1_2 = opportunity["pool1_2"]
+        pool2_3 = opportunity["pool2_3"]
+        pool3_1 = opportunity["pool3_1"]
+        trade_amount = opportunity["trade_amount"]
+
+        logger.info(f"Executing triangular arbitrage: {token1}->{token2}->{token3}->{token1}")
+
+        # Find wallets for each pool
+        wallets1_2 = await self._get_wallets_for_pool(pool1_2)
+        wallets2_3 = await self._get_wallets_for_pool(pool2_3)
+        wallets3_1 = await self._get_wallets_for_pool(pool3_1)
+
+        if not wallets1_2 or not wallets2_3 or not wallets3_1:
+            logger.error("No wallets found for one or more pools")
+
+            return False
+
+        # For simplicity, use the first wallet for each pool
+        wallet1_2 = wallets1_2[0]
+        wallet2_3 = wallets2_3[0]
+        wallet3_1 = wallets3_1[0]
+
+        try:
+            # Step 1: Swap token1 -> token2
+            logger.info(f"Step 1: Swapping {trade_amount} {token1} for {token2} in pool {pool1_2.get('address')}")
+            initial_balances1_2 = await self._gateway_get_balances(
+                pool1_2.get("chain"),
+                pool1_2.get("network"),
+                wallet1_2.get("address"),
+                [token1, token2]
+            )
+
+            if not initial_balances1_2 or "balances" not in initial_balances1_2:
+                logger.error(f"Failed to get initial balances for wallet {wallet1_2.get('internal_id')}")
+
+                return False
+
+            initial_token1_balance = Decimal(str(initial_balances1_2["balances"].get(token1, 0)))
+            if initial_token1_balance < trade_amount:
+                logger.info(f"Insufficient balance in {wallet1_2.get('internal_id')}: {initial_token1_balance} {token1}")
+
+                return False
+
+            swap1 = await self._gateway_execute_swap(
+                pool1_2.get("network"),
+                pool1_2.get("connector"),
+                wallet1_2.get("address"),
+                token1,
+                token2,
+                TradeType.SELL,
+                trade_amount,
+                self._maximum_slippage_percentage,
+                pool1_2.get("address"),
+            )
+
+            if not swap1 or "signature" not in swap1:
+                logger.error(f"First swap failed in wallet {wallet1_2.get('internal_id')}")
+
+                return False
+
+            swap1_confirmation = await self._wait_for_transaction_confirmation(
+                pool1_2.get("chain"),
+                pool1_2.get("network"),
+                swap1["signature"]
+            )
+
+            if not swap1_confirmation:
+                logger.error("First swap transaction not confirmed")
+
+                return False
+
+            await asyncio.sleep(3)  # Wait for balance update
+
+            # Get updated balances to determine the amount received
+            final_balances1_2 = await self._gateway_get_balances(
+                pool1_2.get("chain"),
+                pool1_2.get("network"),
+                wallet1_2.get("address"),
+                [token1, token2]
+            )
+
+            if not final_balances1_2 or "balances" not in final_balances1_2:
+                logger.error(f"Failed to get updated balances for wallet {wallet1_2.get('internal_id')}")
+
+                return False
+
+            initial_token2_balance = Decimal(str(initial_balances1_2["balances"].get(token2, 0)))
+            final_token2_balance = Decimal(str(final_balances1_2["balances"].get(token2, 0)))
+            received_token2_amount = final_token2_balance - initial_token2_balance
+
+            # Use actual received amount or expected amount if balance update is not captured
+            token2_amount = (
+                received_token2_amount
+                if received_token2_amount > DECIMAL_ZERO
+                else opportunity.get("expected_token2_amount")
+            )
+
+            # Step 2: Swap token2 -> token3
+            logger.info(f"Step 2: Swapping {token2_amount} {token2} for {token3} in pool {pool2_3.get('address')}")
+            initial_balances2_3 = await self._gateway_get_balances(
+                pool2_3.get("chain"),
+                pool2_3.get("network"),
+                wallet2_3.get("address"),
+                [token2, token3]
+            )
+
+            if not initial_balances2_3 or "balances" not in initial_balances2_3:
+                logger.error(f"Failed to get initial balances for wallet {wallet2_3.get('internal_id')}")
+
+                return False
+
+            swap2 = await self._gateway_execute_swap(
+                pool2_3.get("network"),
+                pool2_3.get("connector"),
+                wallet2_3.get("address"),
+                token2,
+                token3,
+                TradeType.SELL,
+                token2_amount,
+                self._maximum_slippage_percentage,
+                pool2_3.get("address"),
+            )
+
+            if not swap2 or "signature" not in swap2:
+                logger.error(f"Second swap failed in wallet {wallet2_3.get('internal_id')}")
+
+                return False
+
+            swap2_confirmation = await self._wait_for_transaction_confirmation(
+                pool2_3.get("chain"),
+                pool2_3.get("network"),
+                swap2["signature"]
+            )
+
+            if not swap2_confirmation:
+                logger.error("Second swap transaction not confirmed")
+
+                return False
+
+            await asyncio.sleep(3)  # Wait for balance update
+
+            # Get updated balances to determine the amount received
+            final_balances2_3 = await self._gateway_get_balances(
+                pool2_3.get("chain"),
+                pool2_3.get("network"),
+                wallet2_3.get("address"),
+                [token2, token3]
+            )
+
+            if not final_balances2_3 or "balances" not in final_balances2_3:
+                logger.error(f"Failed to get updated balances for wallet {wallet2_3.get('internal_id')}")
+
+                return False
+
+            initial_token3_balance = Decimal(str(initial_balances2_3["balances"].get(token3, 0)))
+            final_token3_balance = Decimal(str(final_balances2_3["balances"].get(token3, 0)))
+            received_token3_amount = final_token3_balance - initial_token3_balance
+
+            # Use actual received amount or expected amount if balance update is not captured
+            token3_amount = (
+                received_token3_amount
+                if received_token3_amount > DECIMAL_ZERO
+                else opportunity.get("expected_token3_amount")
+            )
+
+            # Step 3: Swap token3 -> token1
+            logger.info(f"Step 3: Swapping {token3_amount} {token3} for {token1} in pool {pool3_1.get('address')}")
+            initial_balances3_1 = await self._gateway_get_balances(
+                pool3_1.get("chain"),
+                pool3_1.get("network"),
+                wallet3_1.get("address"),
+                [token3, token1]
+            )
+
+            if not initial_balances3_1 or "balances" not in initial_balances3_1:
+                logger.error(f"Failed to get initial balances for wallet {wallet3_1.get('internal_id')}")
+
+                return False
+
+            swap3 = await self._gateway_execute_swap(
+                pool3_1.get("network"),
+                pool3_1.get("connector"),
+                wallet3_1.get("address"),
+                token3,
+                token1,
+                TradeType.SELL,
+                token3_amount,
+                self._maximum_slippage_percentage,
+                pool3_1.get("address"),
+            )
+
+            if not swap3 or "signature" not in swap3:
+                logger.error(f"Third swap failed in wallet {wallet3_1.get('internal_id')}")
+
+                return False
+
+            swap3_confirmation = await self._wait_for_transaction_confirmation(
+                pool3_1.get("chain"),
+                pool3_1.get("network"),
+                swap3["signature"]
+            )
+
+            if not swap3_confirmation:
+                logger.error("Third swap transaction not confirmed")
+
+                return False
+
+            await asyncio.sleep(3)  # Wait for balance update
+
+            # Get final balances to determine profit
+            final_balances3_1 = await self._gateway_get_balances(
+                pool3_1.get("chain"),
+                pool3_1.get("network"),
+                wallet3_1.get("address"),
+                [token3, token1]
+            )
+
+            if not final_balances3_1 or "balances" not in final_balances3_1:
+                logger.error(f"Failed to get updated balances for wallet {wallet3_1.get('internal_id')}")
+
+                return False
+
+            initial_token1_final_balance = Decimal(str(initial_balances3_1["balances"].get(token1, 0)))
+            final_token1_final_balance = Decimal(str(final_balances3_1["balances"].get(token1, 0)))
+            received_token1_amount = final_token1_final_balance - initial_token1_final_balance
+
+            # Calculate actual profit
+            actual_profit = received_token1_amount - trade_amount
+            actual_profit_percentage = (actual_profit / trade_amount) * DECIMAL_ONE_HUNDRED
+
+            # Record trade execution
+            trade_record = {
+                "type": "triangular",
+                "timestamp": time.time(),
+                "token1": token1,
+                "token2": token2,
+                "token3": token3,
+                "wallet1_2": wallet1_2.get("internal_id"),
+                "wallet2_3": wallet2_3.get("internal_id"),
+                "wallet3_1": wallet3_1.get("internal_id"),
+                "pool1_2": pool1_2.get("internal_id"),
+                "pool2_3": pool2_3.get("internal_id"),
+                "pool3_1": pool3_1.get("internal_id"),
+                "trade_amount": trade_amount,
+                "token2_amount": token2_amount,
+                "token3_amount": token3_amount,
+                "final_amount": received_token1_amount,
+                "profit_amount": actual_profit,
+                "profit_percentage": actual_profit_percentage,
+                "swap1_transaction_hash": swap1["signature"],
+                "swap2_transaction_hash": swap2["signature"],
+                "swap3_transaction_hash": swap3["signature"],
+            }
+
+            # Store trade record in database
+            if "execution_history" not in self._database:
+                self._database["execution_history"] = []
+            self._database["execution_history"].append(trade_record)
+
+            logger.info("Trade record:", trade_record)
+
+            if actual_profit_percentage > 0:
+                logger.info(
+                    f"Triangular arbitrage successful! Profit: {actual_profit} {token1} ({actual_profit_percentage:.2f}%)"
+                )
+
+                return True
+            else:
+                logger.warning(
+                    f"Triangular arbitrage executed with loss or no profit: {actual_profit} {token1} ({actual_profit_percentage:.2f}%)"
+                )
+
+                return False
+
+        except Exception as exception:
+            logger.ignore_exception(exception, "Error during triangular arbitrage execution")
+            return False
 
     # --------------------------------------------------------------------------
     # Gateway Methods (using retry/timeout)
@@ -2551,29 +3279,29 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_tokens(
-        self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None
+            self, chain: str, network: str, token_symbols: Optional[Union[str, List[str]]] = None
     ):
         """Retrieves token information from the gateway."""
         return await self._gateway_http_client.get_tokens(chain, network, token_symbols)
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_balances(
-        self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
+            self, chain: str, network: str, address: str, token_symbols: Optional[Union[str, List[str]]] = None
     ):
         """Retrieves token balances for a wallet address from the gateway."""
         return await self._gateway_http_client.get_balances(chain, network, address, token_symbols)
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_quote_swap(
-        self,
-        network: str,
-        connector: str,
-        base_asset: str,
-        quote_asset: str,
-        amount: Decimal,
-        side: TradeType,
-        slippage_percentage: Decimal,
-        pool_address: Optional[str] = None,
+            self,
+            network: str,
+            connector: str,
+            base_asset: str,
+            quote_asset: str,
+            amount: Decimal,
+            side: TradeType,
+            slippage_percentage: Decimal,
+            pool_address: Optional[str] = None,
     ):
         """Requests a swap quote from the gateway."""
         return await self._gateway_http_client.amm_quote_swap(
@@ -2589,16 +3317,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_execute_swap(
-        self,
-        network: str,
-        connector: str,
-        wallet_address: str,
-        base_asset: str,
-        quote_asset: str,
-        side: TradeType,
-        amount: Decimal,
-        slippage_percentage: Decimal,
-        pool_address: str,
+            self,
+            network: str,
+            connector: str,
+            wallet_address: str,
+            base_asset: str,
+            quote_asset: str,
+            side: TradeType,
+            amount: Decimal,
+            slippage_percentage: Decimal,
+            pool_address: str,
     ):
         """Executes a swap transaction via the gateway."""
         return await self._gateway_http_client.amm_execute_swap(
@@ -2620,14 +3348,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_list_pools(
-        self,
-        connector: str,
-        network: str,
-        types: Optional[List[str]] = None,
-        token_symbols: Optional[List[str]] = None,
-        token_addresses: Optional[List[str]] = None,
-        max_number_of_pages: int = 3,
-        use_official_tokens: bool = True,
+            self,
+            connector: str,
+            network: str,
+            types: Optional[List[str]] = None,
+            token_symbols: Optional[List[str]] = None,
+            token_addresses: Optional[List[str]] = None,
+            max_number_of_pages: int = 3,
+            use_official_tokens: bool = True,
     ):
         """List pools filtering the results"""
         return await self._gateway_http_client.amm_list_pools(
