@@ -3253,6 +3253,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         except Exception as exception:
             logger.ignore_exception(exception, "Error during triangular arbitrage execution")
+
             return False
 
     # --------------------------------------------------------------------------
