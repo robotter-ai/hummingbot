@@ -703,6 +703,45 @@ class GatewayHttpClient:
                 "error": str(e)
             }
 
+    async def amm_add_liquidity(
+            self,
+            connector: str,
+            network: str,
+            wallet_address: str,
+            pool_address: str,
+            base_token_amount: Decimal,
+            quote_token_amount: Decimal,
+            slippage_percentage: Optional[Decimal] = None,
+            fail_silently: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Adds liquidity to an AMM pool
+        :param connector: The connector/protocol (e.g., "raydium")
+        :param network: The network to use (e.g., "mainnet")
+        :param wallet_address: The wallet address adding liquidity
+        :param pool_address: The address of the pool
+        :param base_token_amount: The amount of base token to add
+        :param quote_token_amount: The amount of quote token to add
+        :param slippage_percentage: Allowed slippage percentage
+        """
+        request_payload = {
+            "network": network,
+            "walletAddress": wallet_address,
+            "poolAddress": pool_address,
+            "baseTokenAmount": float(base_token_amount),
+            "quoteTokenAmount": float(quote_token_amount),
+        }
+
+        if slippage_percentage is not None:
+            request_payload["slippagePct"] = float(slippage_percentage)
+
+        return await self.api_request(
+            "post",
+            f"{connector}/amm/add-liquidity",
+            request_payload,
+            fail_silently=fail_silently,
+        )
+
     async def amm_remove_liquidity(
             self,
             connector: str,
