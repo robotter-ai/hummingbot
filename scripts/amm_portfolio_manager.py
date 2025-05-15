@@ -925,9 +925,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
         logger.info(f"Executing arbitrage strategy: {self._strategy_type.value}")
 
         # Choose strategy based on configuration
-        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE:
+        if self._strategy_type.value == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
             await self._run_token_pairs_arbitrage()
-        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE:
+        elif self._strategy_type.value == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
             await self._run_token_triads_arbitrage()
         else:
             logger.warning(f"Unknown strategy type: {self._strategy_type.value}")
@@ -1125,7 +1125,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         """
 
         # We don't need pools for token triads
-        if self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE:
+        if self._strategy_type.value == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
             return
 
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
@@ -2630,13 +2630,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
         tokens_set = set()
         tokens_list = []
 
-        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE:
+        if self._strategy_type.value == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
             for pair in self._token_pairs:
                 tokens_list = pair.split("/")
 
                 if len(tokens_list) != 2:
                     raise ValueError(f"Invalid token pair: {pair}. Expected format: TOKEN1/TOKEN2")
-        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE:
+        elif self._strategy_type.value == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
             for triad in self._token_triads:
                 tokens_list = triad.split("/")
 
