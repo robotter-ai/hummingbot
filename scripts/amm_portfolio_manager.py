@@ -891,6 +891,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             raise exception
         finally:
             logger.info("Arbitrage strategy execution completed")
+
             self._is_running = False
 
     async def _check_gateway_status(self):
@@ -2966,7 +2967,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         chain = opportunity["chain"]
         network = opportunity["network"]
         connector = opportunity["connector"]
-        trade_amount = opportunity["trade_amount"]
+        token1_amount = opportunity["trade_amount"]
 
         logger.info(f"Executing triangular arbitrage: {token1}->{token2}->{token3}->{token1}")
 
@@ -2990,13 +2991,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return False
 
             initial_token1_balance = Decimal(str(initial_balances["balances"].get(token1, 0)))
-            if initial_token1_balance < trade_amount:
+            if initial_token1_balance < token1_amount:
                 logger.info(f"Insufficient balance in wallet {wallet_address}: {initial_token1_balance} {token1}")
 
                 return False
 
             # Step 1: Swap token1 -> token2
-            logger.info(f"Step 1: Swapping {trade_amount} {token1} for {token2}")
+            logger.info(f"Step 1: Swapping {token1_amount} {token1} for {token2}")
             swap1 = await self._gateway_execute_swap(
                 network,
                 connector,
@@ -3004,7 +3005,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 token1,
                 token2,
                 TradeType.SELL,
-                trade_amount,
+                token1_amount,
                 self._maximum_slippage_percentage,
                 None  # No specific pool address needed
             )
@@ -3123,7 +3124,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             # Calculate actual profit
             actual_profit = final_token1_balance - initial_token1_balance
-            actual_profit_percentage = (actual_profit / trade_amount) * DECIMAL_ONE_HUNDRED
+            actual_profit_percentage = (actual_profit / token1_amount) * DECIMAL_ONE_HUNDRED
 
             # Record trade execution
             trade_record = {
@@ -3136,10 +3137,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 "chain": chain,
                 "network": network,
                 "connector": connector,
-                "trade_amount": trade_amount,
+                "token1_amount": token1_amount,
                 "token2_amount": token2_amount,
                 "token3_amount": token3_amount,
-                "final_amount": final_token1_balance,
+                "initial_token1_balance": initial_token1_balance,
+                "final_token1_balance": final_token1_balance,
                 "profit_amount": actual_profit,
                 "profit_percentage": actual_profit_percentage,
                 "swap1_transaction_hash": swap1["signature"],
