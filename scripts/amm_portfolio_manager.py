@@ -91,6 +91,8 @@ configuration: Dict[str, Any] = {
         "polkadot": {
             "mainnet": {
                 "hydration": {
+                    "native_token_symbol": "HDX",
+                    "fee_payment_token_symbol": "HDX",
                     "wallets": [
                         os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]
                     ],
@@ -101,6 +103,8 @@ configuration: Dict[str, Any] = {
         # "solana": {
         #     "mainnet-beta": {
         #         "raydium": {
+        #             "native_token_symbol": "SOL",
+        #             "fee_payment_token_symbol": "SOL",
         #             "wallets": [
         #                 os.environ["SOLANA_MAINNET_BETA_RAYDIUM_WALLET_ADDRESS"]
         #             ],
@@ -1061,6 +1065,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     self._database["connections"][chain_name][network_name].setdefault(
                         connector_name,
                         {
+                            "fee_payment_token_symbol": connector_configuration.get("fee_payment_token_symbol"),
+                            "native_token_symbol": connector_configuration.get("native_token_symbol"),
                             "wallets": {},
                             "tokens": {},
                             "pools": {},
@@ -2968,6 +2974,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
         network = opportunity["network"]
         connector = opportunity["connector"]
         token1_amount = opportunity["trade_amount"]
+        connector_configuration = self._database["connections"][chain][network][connector]
+        fee_payment_token_symbol = connector_configuration.get("fee_payment_token_symbol")
 
         logger.info(f"Executing triangular arbitrage: {token1}->{token2}->{token3}->{token1}")
 
@@ -2991,10 +2999,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return False
 
             initial_token1_balance = Decimal(str(initial_balances["balances"].get(token1, 0)))
+            initial_token2_balance = Decimal(str(initial_balances["balances"].get(token2, 0)))
+            initial_token3_balance = Decimal(str(initial_balances["balances"].get(token3, 0)))
+
             if initial_token1_balance < token1_amount:
                 logger.info(f"Insufficient balance in wallet {wallet_address}: {initial_token1_balance} {token1}")
 
                 return False
+
+            fees_cost = DECIMAL_ZERO
 
             # Step 1: Swap token1 -> token2
             logger.info(f"Step 1: Swapping {token1_amount} {token1} for {token2}")
@@ -3038,6 +3051,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             # token2_amount = received_token2_amount if received_token2_amount > DECIMAL_ZERO else opportunity.get("expected_token2_amount")
 
             token2_amount = Decimal(swap1.get("totalOutputSwapped"))
+            fees_cost += Decimal(swap1.get("fee", 0))
 
             # Step 2: Swap token2 -> token3
             logger.info(f"Step 2: Swapping {token2_amount} {token2} for {token3}")
@@ -3081,6 +3095,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             # token3_amount = received_token3_amount if received_token3_amount > DECIMAL_ZERO else opportunity.get("expected_token3_amount")
 
             token3_amount = Decimal(swap2.get("totalOutputSwapped"))
+            fees_cost += Decimal(swap2.get("fee", 0))
 
             # Step 3: Swap token3 -> token1
             logger.info(f"Step 3: Swapping {token3_amount} {token3} for {token1}")
@@ -3109,6 +3124,24 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 return False
 
+            fees_cost += Decimal(swap3.get("fee", 0))
+
+            fees_quote_swap = await self._gateway_quote_swap(
+                network,
+                connector,
+                fee_payment_token_symbol,
+                token1,
+                fees_cost,
+                TradeType.SELL,
+                self._maximum_slippage_percentage,
+                None
+            )
+
+            if not fees_quote_swap or "estimatedAmountOut" not in fees_quote_swap:
+                raise Exception(f"Failed to get fees cost in {token1} for {fees_cost} {fee_payment_token_symbol}")
+
+            fees_cost_in_token1 = Decimal(fees_quote_swap.get("estimatedAmountOut"))
+
             await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
 
             # Get final balances to determine profit
@@ -3121,9 +3154,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return False
 
             final_token1_balance = Decimal(str(final_balances["balances"].get(token1, 0)))
+            final_token2_balance = Decimal(str(final_balances["balances"].get(token2, 0)))
+            final_token3_balance = Decimal(str(final_balances["balances"].get(token3, 0)))
 
             # Calculate actual profit
-            actual_profit = final_token1_balance - initial_token1_balance
+            actual_profit = final_token1_balance - initial_token1_balance - fees_cost_in_token1
             actual_profit_percentage = (actual_profit / token1_amount) * DECIMAL_ONE_HUNDRED
 
             # Record trade execution
@@ -3141,12 +3176,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 "token2_amount": token2_amount,
                 "token3_amount": token3_amount,
                 "initial_token1_balance": initial_token1_balance,
+                "initial_token2_balance": initial_token2_balance,
+                "initial_token3_balance": initial_token3_balance,
                 "final_token1_balance": final_token1_balance,
+                "final_token2_balance": final_token2_balance,
+                "final_token3_balance": final_token3_balance,
+                "token_1_balance_change": final_token1_balance - initial_token1_balance,
+                "token_2_balance_change": final_token2_balance - initial_token2_balance,
+                "token_3_balance_change": final_token3_balance - initial_token3_balance,
                 "profit_amount": actual_profit,
                 "profit_percentage": actual_profit_percentage,
                 "swap1_transaction_hash": swap1["signature"],
                 "swap2_transaction_hash": swap2["signature"],
                 "swap3_transaction_hash": swap3["signature"],
+                "total_fees_cost": fees_cost,
+                "fees_cost_in_token1": fees_cost_in_token1,
             }
 
             # Store trade record in database
