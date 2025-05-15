@@ -76,6 +76,7 @@ configuration: Dict[str, Any] = {
         "maximum_trade_amount": "0.1",  # Maximum trade amount
         "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
         "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
+        "balance_update_delay": "3",  # Delay for wallet balance_update_delay"
         "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
         "data_update_intervals": {
             "wallet": "60",  # Update wallet data every x seconds
@@ -543,6 +544,7 @@ class GlobalConfig(BaseClientModel):
     maximum_trade_amount: Decimal = Field(default=Decimal("10"))
     time_delay_between_arbitrages: int = Field(default=1)
     transaction_confirmation_delay: int = Field(default=1)
+    balance_update_delay: int = Field(default=3)
     transaction_polling_interval: int = Field(default=1)
     data_update_intervals: DataUpdateIntervals = Field(default_factory=DataUpdateIntervals)
     use_async_data_updates: bool = Field(default=True)
@@ -705,6 +707,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _maximum_trade_amount: Decimal = DECIMAL_ZERO
     _time_delay_between_arbitrages: int = 1
     _transaction_confirmation_delay: int = 1
+    _balance_update_delay: int = 3
     _transaction_polling_interval: int = 1
     _maximum_transaction_confirmation_timeout: int = 60
     _strategy_type: StrategyType = StrategyType.TOKEN_PAIRS_ARBITRAGE
@@ -774,6 +777,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             self._maximum_trade_amount = Decimal(global_configurations["maximum_trade_amount"])
             self._time_delay_between_arbitrages = int(global_configurations["time_delay_between_arbitrages"])
             self._transaction_confirmation_delay = int(global_configurations["transaction_confirmation_delay"])
+            self._balance_update_delay = int(global_configurations["balance_update_delay"])
             self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
             self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
             self._main_quote_token = global_configurations["main_quote_token"]
@@ -2460,13 +2464,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     f"Arbitrage trade successful! Profit: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
                 )
 
-                return True
+                result = True
             else:
                 logger.warning(
                     f"Arbitrage trade executed with loss or no profit: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
                 )
 
-                return False
+                result = False
+
+            return result
         except Exception as exception:
             logger.ignore_exception(exception, "Error during arbitrage execution")
 
@@ -2676,7 +2682,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     async def _find_triangular_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
         """
         Finds triangular arbitrage opportunities based on token triads.
-        Uses direct gateway quotes instead of relying on pool information.
+        Uses direct quotes instead of relying on pool information.
 
         Returns:
             List of dictionaries of triangular arbitrage opportunities.
@@ -2711,7 +2717,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 "chain": chain_name,
                                 "network": network_name,
                                 "connector": connector_name,
-                                "estimated_profit_amount": expected_profit["profit_amount"],
+                                "expected_profit_amount": expected_profit["profit_amount"],
                                 "expected_profit_percentage": expected_profit["profit_percentage"],
                                 "timestamp": time.time(),
                             }
@@ -2746,7 +2752,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         amount: Decimal
     ) -> Dict[str, Any]:
         """
-        Simulates a triangular trade using direct gateway swaps without requiring pool information.
+        Simulates a triangular trade using direct swaps without requiring pool information.
 
         Args:
             _chain: Blockchain chain
@@ -2824,6 +2830,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         except Exception as exception:
             logger.ignore_exception(exception, "Error in triangular trade simulation")
+
             return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
 
     async def _validate_triangular_opportunity(self, opportunity: Dict[str, Any]) -> bool:
@@ -3015,19 +3022,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 return False
 
-            await asyncio.sleep(3)  # Wait for balance update
+            # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
+            #
+            # # Get updated balances to determine the amount received
+            # intermediate_balances = await self._gateway_get_balances(
+            #     chain, network, wallet_address, [token1, token2, token3]
+            # )
+            # if not intermediate_balances or "balances" not in intermediate_balances:
+            #     logger.error(f"Failed to get updated balances for wallet {wallet_address}")
+            #
+            #     return False
+            #
+            # received_token2_amount = Decimal(str(intermediate_balances["balances"].get(token2, 0)))
+            # token2_amount = received_token2_amount if received_token2_amount > DECIMAL_ZERO else opportunity.get("expected_token2_amount")
 
-            # Get updated balances to determine the amount received
-            intermediate_balances = await self._gateway_get_balances(
-                chain, network, wallet_address, [token1, token2, token3]
-            )
-            if not intermediate_balances or "balances" not in intermediate_balances:
-                logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-
-                return False
-
-            received_token2_amount = Decimal(str(intermediate_balances["balances"].get(token2, 0)))
-            token2_amount = received_token2_amount if received_token2_amount > DECIMAL_ZERO else opportunity.get("expected_token2_amount")
+            token2_amount = Decimal(swap1.get("totalOutputSwapped"))
 
             # Step 2: Swap token2 -> token3
             logger.info(f"Step 2: Swapping {token2_amount} {token2} for {token3}")
@@ -3056,19 +3065,21 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 return False
 
-            await asyncio.sleep(3)  # Wait for balance update
+            # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
+            #
+            # # Get updated balances to determine the amount received
+            # intermediate_balances2 = await self._gateway_get_balances(
+            #     chain, network, wallet_address, [token1, token2, token3]
+            # )
+            # if not intermediate_balances2 or "balances" not in intermediate_balances2:
+            #     logger.error(f"Failed to get updated balances for wallet {wallet_address}")
+            #
+            #     return False
+            #
+            # received_token3_amount = Decimal(str(intermediate_balances2["balances"].get(token3, 0)))
+            # token3_amount = received_token3_amount if received_token3_amount > DECIMAL_ZERO else opportunity.get("expected_token3_amount")
 
-            # Get updated balances to determine the amount received
-            intermediate_balances2 = await self._gateway_get_balances(
-                chain, network, wallet_address, [token1, token2, token3]
-            )
-            if not intermediate_balances2 or "balances" not in intermediate_balances2:
-                logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-
-                return False
-
-            received_token3_amount = Decimal(str(intermediate_balances2["balances"].get(token3, 0)))
-            token3_amount = received_token3_amount if received_token3_amount > DECIMAL_ZERO else opportunity.get("expected_token3_amount")
+            token3_amount = Decimal(swap2.get("totalOutputSwapped"))
 
             # Step 3: Swap token3 -> token1
             logger.info(f"Step 3: Swapping {token3_amount} {token3} for {token1}")
@@ -3097,7 +3108,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                 return False
 
-            await asyncio.sleep(3)  # Wait for balance update
+            await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
 
             # Get final balances to determine profit
             final_balances = await self._gateway_get_balances(
@@ -3148,16 +3159,18 @@ class AMMPortfolioManager(ScriptStrategyBase):
                     f"Triangular arbitrage successful! Profit: {actual_profit} {token1} ({actual_profit_percentage:.2f}%)"
                 )
 
-                return True
+                result = True
             else:
                 logger.warning(
                     f"Triangular arbitrage executed with loss or no profit: {actual_profit} {token1} ({actual_profit_percentage:.2f}%)"
                 )
 
-                return False
+                result = False
 
+            return result
         except Exception as exception:
             logger.ignore_exception(exception, "Error during triangular arbitrage execution")
+
             return False
 
     async def _get_wallet_for_chain_network_connector(self, chain: str, network: str, connector: str) -> Optional[Dict[str, Any]]:
