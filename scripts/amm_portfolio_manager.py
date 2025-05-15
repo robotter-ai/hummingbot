@@ -84,25 +84,29 @@ configuration: Dict[str, Any] = {
         },
         "use_async_data_updates": False,
         "main_quote_token": "USDT",
-        "strategy_type": "TOKEN_PAIRS_ARBITRAGE",
+        "strategy_type": "TOKEN_TRIADS_ARBITRAGE",
     },
     "connections": {
         "polkadot": {
             "mainnet": {
                 "hydration": {
-                    "wallets": [os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]],
+                    "wallets": [
+                        os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]
+                    ],
                     "pools": [],
                 }
             },
         },
-        "solana": {
-            "mainnet-beta": {
-                "raydium": {
-                    "wallets": [os.environ["SOLANA_MAINNET_BETA_RAYDIUM_WALLET_ADDRESS"]],
-                    "pools": [],
-                }
-            }
-        },
+        # "solana": {
+        #     "mainnet-beta": {
+        #         "raydium": {
+        #             "wallets": [
+        #                 os.environ["SOLANA_MAINNET_BETA_RAYDIUM_WALLET_ADDRESS"]
+        #             ],
+        #             "pools": [],
+        #         }
+        #     }
+        # },
     },
     "token_pairs": ["USDC/USDT"],
     "token_triads": ["USDC/HDX/USDT"],
@@ -408,6 +412,14 @@ class StrategyType(Enum):
     TOKEN_PAIRS_ARBITRAGE = "TOKEN_PAIRS_ARBITRAGE"  # Token pairs arbitrage between different connectors
     TOKEN_TRIADS_ARBITRAGE = "TOKEN_TRIADS_ARBITRAGE"  # Triangular arbitrage inside the same connector
 
+    @staticmethod
+    def get_by_id(identifier: str):
+        for strategy_type in StrategyType:
+            if strategy_type.value == identifier:
+                return strategy_type
+
+        raise ValueError(f"Unknown strategy type: {identifier}")
+
 
 class PoolType(Enum):
     """Enum for different types of liquidity pools"""
@@ -695,7 +707,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
     _transaction_confirmation_delay: int = 1
     _transaction_polling_interval: int = 1
     _maximum_transaction_confirmation_timeout: int = 60
-    _strategy_type: str = StrategyType.TOKEN_PAIRS_ARBITRAGE.value
+    _strategy_type: StrategyType = StrategyType.TOKEN_PAIRS_ARBITRAGE
 
     # Data update control
     _data_update_task: Optional[asyncio.Task] = None
@@ -765,7 +777,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
             self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
             self._main_quote_token = global_configurations["main_quote_token"]
-            self._strategy_type = global_configurations.get("strategy_type", StrategyType.TOKEN_PAIRS_ARBITRAGE.value)
+            self._strategy_type = StrategyType.get_by_id(global_configurations.get("strategy_type", StrategyType.TOKEN_PAIRS_ARBITRAGE.value))
 
             # Configure update intervals
             data_update_intervals = global_configurations["data_update_intervals"]
@@ -910,15 +922,15 @@ class AMMPortfolioManager(ScriptStrategyBase):
          - Validates each opportunity
          - Executes arbitrage trades for opportunities that pass validation
         """
-        logger.info(f"Executing arbitrage strategy: {self._strategy_type}")
+        logger.info(f"Executing arbitrage strategy: {self._strategy_type.value}")
 
         # Choose strategy based on configuration
-        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
+        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE:
             await self._run_token_pairs_arbitrage()
-        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
+        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE:
             await self._run_token_triads_arbitrage()
         else:
-            logger.warning(f"Unknown strategy type: {self._strategy_type}")
+            logger.warning(f"Unknown strategy type: {self._strategy_type.value}")
 
         logger.info("Arbitrage strategy cycle completed.")
 
@@ -1111,6 +1123,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         All pools are assumed to have exactly 2 tokens.
         """
+
+        # We don't need pools for token triads
+        if self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE:
+            return
+
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
             for network_name, network_configuration in chain_configuration.items():
                 for connector_name, connector_configuration in network_configuration.items():
@@ -2613,13 +2630,13 @@ class AMMPortfolioManager(ScriptStrategyBase):
         tokens_set = set()
         tokens_list = []
 
-        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
+        if self._strategy_type == StrategyType.TOKEN_PAIRS_ARBITRAGE:
             for pair in self._token_pairs:
                 tokens_list = pair.split("/")
 
                 if len(tokens_list) != 2:
                     raise ValueError(f"Invalid token pair: {pair}. Expected format: TOKEN1/TOKEN2")
-        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
+        elif self._strategy_type == StrategyType.TOKEN_TRIADS_ARBITRAGE:
             for triad in self._token_triads:
                 tokens_list = triad.split("/")
 
@@ -3236,7 +3253,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
             side: TradeType,
             amount: Decimal,
             slippage_percentage: Decimal,
-            pool_address: str,
+            pool_address: Optional[str] = None,
     ):
         """Executes a swap transaction via the gateway."""
         return await self._gateway_http_client.amm_execute_swap(
