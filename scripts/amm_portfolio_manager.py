@@ -2726,6 +2726,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                                 "connector": connector_name,
                                 "expected_profit_amount": expected_profit["profit_amount"],
                                 "expected_profit_percentage": expected_profit["profit_percentage"],
+                                "expected_fees_cost": expected_profit["fees_cost"],
+                                "expected_fees_cost_in_token1": expected_profit["fees_cost_in_token1"],
                                 "timestamp": time.time(),
                             }
 
@@ -2733,7 +2735,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
                             logger.info(
                                 f"Triangular arbitrage opportunity found: {token1}->{token2}->{token3}->{token1} "
-                                f"on {chain_name}/{network_name}/{connector_name} with expected profit {expected_profit['profit_percentage']:.2f}%"
+                                f"on {chain_name}/{network_name}/{connector_name} with expected profit {expected_profit['profit_percentage']:.2f}% after fees"
                             )
             except Exception as exception:
                 logger.ignore_exception(
@@ -2774,6 +2776,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
             Dictionary with profit information
         """
         try:
+            connector_configuration = self._database["connections"].get(_chain, {}).get(network, {}).get(connector, {})
+            fee_payment_token_symbol = connector_configuration.get("fee_payment_token_symbol")
+
+            fees_cost = DECIMAL_ZERO
+
             # Simulate first swap: token1 -> token2
             swap1_quote = await self._gateway_quote_swap(
                 network,
@@ -2789,6 +2796,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
 
             token2_amount = Decimal(str(swap1_quote["estimatedAmountOut"]))
+            if "gasCost" in swap1_quote:
+                fees_cost += Decimal(str(swap1_quote["gasCost"]))
 
             # Simulate second swap: token2 -> token3
             swap2_quote = await self._gateway_quote_swap(
@@ -2805,6 +2814,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
 
             token3_amount = Decimal(str(swap2_quote["estimatedAmountOut"]))
+            if "gasCost" in swap2_quote:
+                fees_cost += Decimal(str(swap2_quote["gasCost"]))
 
             # Simulate third swap: token3 -> token1
             swap3_quote = await self._gateway_quote_swap(
@@ -2821,9 +2832,33 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
 
             final_token1_amount = Decimal(str(swap3_quote["estimatedAmountOut"]))
+            if "gasCost" in swap3_quote:
+                fees_cost += Decimal(str(swap3_quote["gasCost"]))
 
-            # Calculate profit
-            profit_amount = final_token1_amount - amount
+            # Convert fees to token1 value if fee payment token is different from token1
+            fees_cost_in_token1 = DECIMAL_ZERO
+            if fees_cost > DECIMAL_ZERO:
+                if fee_payment_token_symbol and fee_payment_token_symbol != token1:
+                    fees_quote_swap = await self._gateway_quote_swap(
+                        network,
+                        connector,
+                        fee_payment_token_symbol,
+                        token1,
+                        fees_cost,
+                        TradeType.SELL,
+                        self._maximum_slippage_percentage,
+                        None
+                    )
+
+                    if fees_quote_swap and "estimatedAmountOut" in fees_quote_swap:
+                        fees_cost_in_token1 = Decimal(str(fees_quote_swap["estimatedAmountOut"]))
+                    else:
+                        raise Exception(f"Failed to get quote for {fee_payment_token_symbol} to {token1}")
+                else:
+                    fees_cost_in_token1 = fees_cost  # Fee token is already token1
+
+            # Calculate profit accounting for fees
+            profit_amount = final_token1_amount - amount - fees_cost_in_token1
             profit_percentage = (profit_amount / amount) * DECIMAL_ONE_HUNDRED
 
             return {
@@ -2832,7 +2867,9 @@ class AMMPortfolioManager(ScriptStrategyBase):
                 "initial_amount": amount,
                 "token2_amount": token2_amount,
                 "token3_amount": token3_amount,
-                "final_amount": final_token1_amount
+                "final_amount": final_token1_amount,
+                "fees_cost": fees_cost,
+                "fees_cost_in_token1": fees_cost_in_token1
             }
 
         except Exception as exception:
@@ -2899,12 +2936,14 @@ class AMMPortfolioManager(ScriptStrategyBase):
             "expected_token3_amount": expected_profit["token3_amount"],
             "expected_final_amount": expected_profit["final_amount"],
             "expected_profit_amount": expected_profit["profit_amount"],
-            "expected_profit_percentage": expected_profit["profit_percentage"]
+            "expected_profit_percentage": expected_profit["profit_percentage"],
+            "expected_fees_cost": expected_profit["fees_cost"],
+            "expected_fees_cost_in_token1": expected_profit["fees_cost_in_token1"]
         })
 
         logger.info(
             f"Triangular opportunity validated: {opportunity["token1"]}->{opportunity["token2"]}->{opportunity["token3"]}->{opportunity["token1"]} "
-            f"with expected profit {expected_profit['profit_percentage']:.2f}%"
+            f"with expected profit {expected_profit['profit_percentage']:.2f}% after fees"
         )
 
         return True
@@ -3126,21 +3165,26 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
             fees_cost += Decimal(swap3.get("fee", 0))
 
-            fees_quote_swap = await self._gateway_quote_swap(
-                network,
-                connector,
-                fee_payment_token_symbol,
-                token1,
-                fees_cost,
-                TradeType.SELL,
-                self._maximum_slippage_percentage,
-                None
-            )
+            fees_cost_in_token1 = DECIMAL_ZERO
+            if fees_cost > DECIMAL_ZERO:
+                if fee_payment_token_symbol and fee_payment_token_symbol != token1:
+                    fees_quote_swap = await self._gateway_quote_swap(
+                        network,
+                        connector,
+                        fee_payment_token_symbol,
+                        token1,
+                        fees_cost,
+                        TradeType.SELL,
+                        self._maximum_slippage_percentage,
+                        None
+                    )
 
-            if not fees_quote_swap or "estimatedAmountOut" not in fees_quote_swap:
-                raise Exception(f"Failed to get fees cost in {token1} for {fees_cost} {fee_payment_token_symbol}")
-
-            fees_cost_in_token1 = Decimal(fees_quote_swap.get("estimatedAmountOut"))
+                    if fees_quote_swap and "estimatedAmountOut" in fees_quote_swap:
+                        fees_cost_in_token1 = Decimal(str(fees_quote_swap["estimatedAmountOut"]))
+                    else:
+                        raise Exception(f"Failed to get quote for {fee_payment_token_symbol} to {token1}")
+                else:
+                    fees_cost_in_token1 = fees_cost  # Fee token is already token1
 
             await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
 
