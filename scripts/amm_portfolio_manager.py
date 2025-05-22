@@ -582,7 +582,7 @@ logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
 # ==============================================================================
 # AMMPortfolioManager Strategy Class
 # ==============================================================================
-@logged_class(logger=logger, disallowed_methods=["on_tick"])
+# @logged_class(logger=logger, disallowed_methods=["on_tick"])
 class AMMPortfolioManager(ScriptStrategyBase):
     """
     AMM Portfolio Manager Strategy
@@ -743,12 +743,16 @@ class AMMPortfolioManager(ScriptStrategyBase):
         Args:
             connectors: Dictionary of available connectors.
         """
+        logger.info("Initializing AMM Portfolio Manager strategy")
+
         super().__init__(connectors)
 
     async def _initialize(self):
         """
         Configures gateway client, database structure and asynchronous updates.
         """
+        logger.info("Initializing database")
+
         try:
             self._initializing = True
 
@@ -812,7 +816,11 @@ class AMMPortfolioManager(ScriptStrategyBase):
             # Start update task if configured
             if self._use_async_data_updates:
                 self._start_data_update_task()
+
+            logger.info("Database initialized")
         except Exception as exception:
+            logger.info("Database initialization failed")
+
             raise exception
         finally:
             self._initializing = False
@@ -882,6 +890,8 @@ class AMMPortfolioManager(ScriptStrategyBase):
         has been updated and the gateway is available.
         """
         try:
+            logger.info("Starting a new strategy cycle")
+
             self._is_running = True
 
             await self._check_gateway_status()
@@ -894,7 +904,7 @@ class AMMPortfolioManager(ScriptStrategyBase):
         except Exception as exception:
             raise exception
         finally:
-            logger.info("Arbitrage strategy execution completed")
+            logger.info("Strategy cycle completed")
 
             self._is_running = False
 
@@ -1313,49 +1323,58 @@ class AMMPortfolioManager(ScriptStrategyBase):
 
         Updates database maps only if any update has been performed.
         """
-        current_time = time.time()
+        logger.info("Updating database")
 
-        # Update intervals configured
-        wallet_interval = self._data_update_intervals["wallet"]
-        token_interval = self._data_update_intervals["token"]
-        pool_interval = self._data_update_intervals["pool"]
+        try:
+            current_time = time.time()
 
-        # Flag to indicate if any update has been performed
-        updates_performed = False
+            # Update intervals configured
+            wallet_interval = self._data_update_intervals["wallet"]
+            token_interval = self._data_update_intervals["token"]
+            pool_interval = self._data_update_intervals["pool"]
 
-        async with DatabaseLock(self._database_lock, logger, "_update_database") as lock_acquired:
-            if not lock_acquired:
-                logger.warning("Unable to acquire lock for update, skipping this cycle...")
+            # Flag to indicate if any update has been performed
+            updates_performed = False
 
-                return
+            async with DatabaseLock(self._database_lock, logger, "_update_database") as lock_acquired:
+                if not lock_acquired:
+                    logger.warning("Unable to acquire lock for update, skipping this cycle...")
 
-            # Token update
-            if (not hasattr(self, "_last_token_update_time")) or (
-                current_time - self._last_token_update_time >= token_interval
-            ):
-                self._last_token_update_time = current_time
-                await self._update_token_information()
-                updates_performed = True
+                    return
 
-            # Pool update
-            if (not hasattr(self, "_last_pool_update_time")) or (
-                current_time - self._last_pool_update_time >= pool_interval
-            ):
-                self._last_pool_update_time = current_time
-                await self._update_pool_information()
-                updates_performed = True
+                # Token update
+                if (not hasattr(self, "_last_token_update_time")) or (
+                    current_time - self._last_token_update_time >= token_interval
+                ):
+                    self._last_token_update_time = current_time
+                    await self._update_token_information()
+                    updates_performed = True
 
-            # Wallet update
-            if (not hasattr(self, "_last_wallet_update_time")) or (
-                current_time - self._last_wallet_update_time >= wallet_interval
-            ):
-                self._last_wallet_update_time = current_time
-                await self._update_wallet_balances()
-                updates_performed = True
+                # Pool update
+                if (not hasattr(self, "_last_pool_update_time")) or (
+                    current_time - self._last_pool_update_time >= pool_interval
+                ):
+                    self._last_pool_update_time = current_time
+                    await self._update_pool_information()
+                    updates_performed = True
 
-            # Updates maps only if any update has been performed
-            if updates_performed:
-                await self._update_database_maps()
+                # Wallet update
+                if (not hasattr(self, "_last_wallet_update_time")) or (
+                    current_time - self._last_wallet_update_time >= wallet_interval
+                ):
+                    self._last_wallet_update_time = current_time
+                    await self._update_wallet_balances()
+                    updates_performed = True
+
+                # Updates maps only if any update has been performed
+                if updates_performed:
+                    await self._update_database_maps()
+
+            logger.info("Database updated")
+        except Exception as exception:
+            logger.error("Database update failed")
+
+            raise exception
 
     async def _update_pool_information(self):
         """
