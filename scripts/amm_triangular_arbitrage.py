@@ -1,20 +1,18 @@
 """
 AMM Triangular Arbitrage Strategy
 
-This module implements an arbitrage strategy that monitors liquidity pools
-across multiple chains, identifies arbitrage opportunities, and executes trades
-to profit from price discrepancies.
+This module implements a triangular arbitrage strategy that monitors liquidity pools
+across multiple chains, identifies price discrepancies between three related tokens,
+and executes a series of trades to profit from these discrepancies.
 
 Key Features:
-  - Asynchronous periodic updates using asyncio tasks.
-  - Permanent (static) database information is built once; dynamic fields
-    (wallet balances, token prices, pool statistics, etc.) are updated periodically.
-  - The database schema exactly follows the provided specification.
-  - Gateway API calls are wrapped with retry/timeout decorators.
-  - All strategy and helper methods (arbitrage discovery, validation, execution)
-    are fully implemented.
-  - The arbitrage strategy runs only after the dynamic database has been fully updated at least once.
-  - Supports both token pair arbitrage and triangular (token triad) arbitrage.
+  - Identifies and executes profitable triangular trading paths (token1->token2->token3->token1)
+  - Calculates optimal trade amounts to maximize arbitrage profits
+  - Simulates trades with slippage consideration before execution
+  - Tracks and validates arbitrage opportunities before execution
+  - Handles transaction confirmation and profit calculation
+  - Asynchronous periodic updates for wallet balances, token prices, and pool statistics
+  - Comprehensive error handling and trade validation
 """
 
 import asyncio
@@ -39,27 +37,27 @@ from scripts.community.amm_portfolio_base import (
 )
 
 # ==============================================================================
-# Global Configurations for the Strategy
+# Global Configurations for the Triangular Arbitrage Strategy
 # ==============================================================================
 configuration: Dict[str, Any] = {
     "globals": {
-        "maximum_slippage_percentage": "0.5",  # 0.5% allowed slippage
-        "minimum_profitability_percentage": "1",  # Profit threshold (e.g., "1" for 1%)
-        "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
-        "minimum_trade_amount": "0.1",  # Minimum trade amount
-        "maximum_trade_amount": "0.1",  # Maximum trade amount
-        "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
-        "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
-        "balance_update_delay": "3",  # Delay for wallet balance_update_delay"
-        "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
+        "maximum_slippage_percentage": "0.5",  # Maximum allowed price slippage when executing trades (0.5%)
+        "minimum_profitability_percentage": "1",  # Minimum profit threshold required to execute an arbitrage (1%)
+        "arbitrage_check_interval_seconds": "60",  # Time interval between subsequent arbitrage opportunity checks
+        "minimum_trade_amount": "0.1",  # Minimum amount to trade in the first token of the triangle
+        "maximum_trade_amount": "0.1",  # Maximum amount to trade in the first token of the triangle
+        "time_delay_between_arbitrages": "1",  # Delay in seconds between consecutive arbitrage executions
+        "transaction_confirmation_delay": "2",  # Delay in seconds before checking for transaction confirmation
+        "balance_update_delay": "3",  # Delay in seconds to wait for wallet balances to update after a trade
+        "transaction_polling_interval": "2",  # Time interval between checks for transaction confirmation status
         "data_update_intervals": {
-            "wallet": "60",  # Update wallet data every x seconds
-            "token": "60",  # Update token data every x seconds
-            "pool": "60",  # Update pool data every x seconds
+            "wallet": "60",  # Update wallet balance data every 60 seconds
+            "token": "60",  # Update token price data every 60 seconds
+            "pool": "60",  # Update pool statistics data every 60 seconds
         },
-        "use_async_data_updates": False,
-        "main_quote_token": "USDT",
-        "strategy_type": "TOKEN_TRIADS_ARBITRAGE",
+        "use_async_data_updates": False,  # Whether to update data asynchronously or synchronously
+        "main_quote_token": "USDT",  # Main quote token used for price references
+        "strategy_type": "TOKEN_TRIADS_ARBITRAGE",  # Strategy type identifier for triangular arbitrage
     },
     "connections": {
         "polkadot": {
@@ -76,7 +74,7 @@ configuration: Dict[str, Any] = {
         }
     },
     "token_pairs": [],
-    "token_triads": ["USDC/HDX/USDT"],
+    "token_triads": ["USDC/HDX/USDT"],  # Token triads to monitor for triangular arbitrage opportunities
 }
 
 # ==============================================================================
@@ -93,9 +91,16 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
     """
     AMM Triangular Arbitrage Strategy
 
-    This strategy monitors AMM pools, discovers arbitrage opportunities
-    and executes paired trades between pools with differing prices.
-    Uses asynchronous tasks for dynamic data updates.
+    This strategy monitors AMM pools to identify and exploit price discrepancies
+    between three related tokens (token triads). It executes a sequence of three trades:
+    token1 → token2 → token3 → token1, to profit from these discrepancies.
+
+    The strategy includes:
+    - Opportunity discovery for token triads
+    - Profit simulation with fee consideration
+    - Optimal trade amount calculation
+    - Multi-step trade execution with confirmation
+    - Profit tracking and validation
     """
 
     def __init__(self, *args, **kwargs):
@@ -105,10 +110,15 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
     async def _run_token_triads_arbitrage(self):
         """
-        Executes the token triads (triangular) arbitrage strategy:
-         - Discovers profitable triangular arbitrage opportunities
-         - Validates each opportunity
-         - Executes arbitrage trades for opportunities that pass validation
+        Executes the token triads (triangular) arbitrage strategy by following these steps:
+        1. Discovers profitable triangular arbitrage opportunities (token1->token2->token3->token1)
+        2. Registers found opportunities in the database for tracking
+        3. Validates each opportunity by checking balances and simulating trades
+        4. Executes trades for validated opportunities using the optimal amount
+        5. Implements configurable delays between arbitrage executions
+
+        The strategy targets opportunities where the final amount exceeds the initial amount plus fees,
+        resulting in a profitable cycle of trades.
         """
         # Find profitable token triads
         opportunities = await self._find_triangular_arbitrage_opportunities()
@@ -151,11 +161,17 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
     async def _find_triangular_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
         """
-        Finds triangular arbitrage opportunities based on token triads.
-        Uses direct quotes instead of relying on pool information.
+        Discovers triangular arbitrage opportunities by analyzing token triads.
+
+        For each configured triad (e.g., USDC/HDX/USDT), the method:
+        1. Extracts the three token symbols in the triad
+        2. Simulates the three sequential trades (token1->token2->token3->token1)
+        3. Calculates expected profit after accounting for fees
+        4. Records opportunities exceeding the minimum profitability threshold
 
         Returns:
-            List of dictionaries of triangular arbitrage opportunities.
+            List of dictionaries containing details of triangular arbitrage opportunities,
+            sorted by expected profit percentage in descending order.
         """
         opportunities = []
 
@@ -224,19 +240,29 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         amount: Decimal
     ) -> Dict[str, Any]:
         """
-        Simulates a triangular trade using direct swaps without requiring pool information.
+        Simulates a complete triangular trade cycle to estimate profitability.
+
+        This method performs these steps:
+        1. Simulates swap from token1 to token2 with the input amount
+        2. Simulates swap from token2 to token3 with the result of the first swap
+        3. Simulates swap from token3 back to token1 with the result of the second swap
+        4. Calculates fees for all three swaps and converts them to token1 value
+        5. Computes the final profit amount and percentage after accounting for all fees
 
         Args:
-            _chain: Blockchain chain
-            network: Network name
-            connector: Connector name
-            token1: First token in the triangle
-            token2: Second token in the triangle
-            token3: Third token in the triangle
+            _chain: Blockchain chain identifier
+            network: Network name (e.g., "mainnet")
+            connector: Protocol connector name (e.g., "hydration")
+            token1: First token in the triangular path
+            token2: Second token in the triangular path
+            token3: Third token in the triangular path
             amount: Initial amount of token1 to trade
 
         Returns:
-            Dictionary with profit information
+            Dictionary containing profit information including:
+            - profit_amount: Absolute profit amount in token1
+            - profit_percentage: Percentage profit relative to initial amount
+            - intermediate amounts and fee details
         """
         try:
             connector_configuration = self._database["connections"].get(_chain, {}).get(network, {}).get(connector, {})
@@ -342,14 +368,20 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
     async def _validate_triangular_opportunity(self, opportunity: Dict[str, Any]) -> bool:
         """
-        Validates a triangular arbitrage opportunity by checking available balances and
-        simulating trades with optimal amounts.
+        Validates a triangular arbitrage opportunity before execution.
+
+        This method performs comprehensive validation including:
+        1. Checking if there is sufficient token1 balance across all wallets
+        2. Calculating the optimal trade amount based on available balance
+        3. Simulating the triangular trade with the optimal amount
+        4. Verifying that the expected profit meets the minimum threshold
+        5. Updating the opportunity record with calculated values
 
         Args:
-            opportunity: Dictionary of triangular arbitrage opportunity.
+            opportunity: Dictionary containing triangular arbitrage opportunity details
+
         Returns:
-            True if opportunity is valid and expected profit meets threshold;
-            otherwise, False.
+            True if the opportunity is valid and expected to be profitable; False otherwise
         """
         chain = opportunity["chain"]
         network = opportunity["network"]
@@ -413,13 +445,24 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
     async def _calculate_optimal_triangular_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
         """
-        Determines the optimal trade amount for triangular arbitrage by simulating profits at different sizes.
+        Determines the optimal trade amount for triangular arbitrage to maximize profit.
+
+        This method:
+        1. Tests multiple trade amounts within the available balance range
+        2. Simulates the complete triangular trade at each test amount
+        3. Identifies the amount that yields the highest profit percentage
+        4. Respects configured minimum and maximum trade amount limits
+
+        The test amounts include various percentages of the maximum available balance
+        to find the sweet spot where profitability is highest, accounting for trade size
+        impact on slippage and fees.
 
         Args:
-            opportunity: Triangular arbitrage opportunity dictionary.
-            maximum_available: Maximum available balance of token1.
+            opportunity: Triangular arbitrage opportunity dictionary
+            maximum_available: Maximum available balance of token1
+
         Returns:
-            Optimal trade amount as Decimal.
+            Optimal trade amount as a Decimal value
         """
         # Cap maximum available to configured maximum trade amount
         maximum_available = min(maximum_available, self._maximum_trade_amount)
@@ -464,10 +507,24 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         """
         Executes a triangular arbitrage trade by performing three sequential swaps.
 
+        This method:
+        1. Retrieves initial balances for all tokens in the triangular path
+        2. Executes the first swap: token1 -> token2
+        3. Waits for transaction confirmation before proceeding
+        4. Executes the second swap: token2 -> token3
+        5. Waits for transaction confirmation before proceeding
+        6. Executes the third swap: token3 -> token1
+        7. Calculates actual profit after all trades complete
+        8. Records the complete trade execution in the database
+
+        The method implements proper error handling and transaction confirmation
+        at each step to ensure the integrity of the arbitrage execution.
+
         Args:
-            opportunity: Triangular arbitrage opportunity dictionary.
+            opportunity: Dictionary containing validated triangular arbitrage opportunity details
+
         Returns:
-            True if the trade is executed successfully with profit; otherwise, False.
+            True if the arbitrage was executed successfully with a profit; False otherwise
         """
         token1 = opportunity["token1"]
         token2 = opportunity["token2"]
