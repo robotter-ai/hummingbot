@@ -41,8 +41,8 @@ from scripts.community.amm_portfolio_base import (
 # ==============================================================================
 configuration: Dict[str, Any] = {
     "globals": {
-        "maximum_slippage_percentage": "0.5",  # Maximum allowed price slippage when executing trades (0.5%)
-        "minimum_profitability_percentage": "1",  # Minimum profit threshold required to execute an arbitrage (1%)
+        "maximum_slippage_percentage": "0.5",  # Maximum allowed price slippage when executing trades (Ex.: 0.5%)
+        "minimum_profitability_percentage": "1",  # Minimum profit threshold required to execute an arbitrage (Ex.:1%)
         "arbitrage_check_interval_seconds": "60",  # Time interval between subsequent arbitrage opportunity checks
         "minimum_trade_amount": "0.1",  # Minimum amount to trade in the first token of the triangle
         "maximum_trade_amount": "0.1",  # Maximum amount to trade in the first token of the triangle
@@ -51,9 +51,9 @@ configuration: Dict[str, Any] = {
         "balance_update_delay": "3",  # Delay in seconds to wait for wallet balances to update after a trade
         "transaction_polling_interval": "2",  # Time interval between checks for transaction confirmation status
         "data_update_intervals": {
-            "wallet": "60",  # Update wallet balance data every 60 seconds
-            "token": "60",  # Update token price data every 60 seconds
-            "pool": "60",  # Update pool statistics data every 60 seconds
+            "wallet": "60",  # Update wallet balance data every x seconds
+            "token": "60",  # Update token price data every x seconds
+            "pool": "60",  # Update pool statistics data every x seconds
         },
         "use_async_data_updates": False,  # Whether to update data asynchronously or synchronously
         "main_quote_token": "USDT",  # Main quote token used for price references
