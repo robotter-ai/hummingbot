@@ -580,10 +580,10 @@ logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
 
 
 # ==============================================================================
-# AMMPortfolioManager Strategy Class
+# AMMPortfolioManagerBase Strategy Class
 # ==============================================================================
 # @logged_class(logger=logger, disallowed_methods=["on_tick"])
-class AMMPortfolioManager(ScriptStrategyBase):
+class AMMPortfolioManagerBase(ScriptStrategyBase):
     """
     AMM Portfolio Manager Strategy
 
