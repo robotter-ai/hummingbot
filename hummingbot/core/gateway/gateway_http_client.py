@@ -302,7 +302,7 @@ class GatewayHttpClient:
             }
             return await self.api_request(
                 method="post",
-                path_url=f"{chain}/balances",
+                path_url=f"chains/{chain}/balances",
                 params=request_params,
                 fail_silently=fail_silently,
             )
@@ -317,14 +317,14 @@ class GatewayHttpClient:
             fail_silently: bool = True
     ) -> Dict[str, Any]:
         if token_symbols is None:
-            return await self.api_request("get", f"{chain}/tokens", {"network": network}, fail_silently=fail_silently)
+            return await self.api_request("get", f"chains/{chain}/tokens", {"network": network}, fail_silently=fail_silently)
         else:
             if isinstance(token_symbols, str):
                 token_symbols = [token_symbols]
 
             return await self.api_request(
                 "get",
-                f"{chain}/tokens",
+                f"chains/{chain}/tokens",
                 {"network": network, "tokenSymbols": token_symbols},
                 fail_silently=fail_silently,
             )
@@ -338,7 +338,7 @@ class GatewayHttpClient:
         req_data: Dict[str, str] = {}
         if chain is not None and network is not None:
             req_data["network"] = network
-            return await self.api_request("get", f"{chain}/status", req_data, fail_silently=fail_silently)
+            return await self.api_request("get", f"chains/{chain}/status", req_data, fail_silently=fail_silently)
         return await self.api_request("get", "network/status", req_data, fail_silently=fail_silently)  # Default endpoint when chain is None
 
     async def approve_token(
@@ -396,7 +396,7 @@ class GatewayHttpClient:
             "network": network,
             "txHash": transaction_hash
         }
-        return await self.api_request("post", f"{chain}/poll", request, fail_silently=fail_silently)
+        return await self.api_request("post", f"chains/{chain}/poll", request, fail_silently=fail_silently)
 
     async def wallet_sign(
         self,
