@@ -469,7 +469,7 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "get",
-            f"{connector}/quote-swap",
+            f"connectors/{connector}/quote-swap",
             request_payload,
             fail_silently=fail_silently
         )
@@ -511,7 +511,7 @@ class GatewayHttpClient:
             request_payload["poolAddress"] = pool_address
         return await self.api_request(
             "post",
-            f"{connector}/execute-swap",
+            f"connectors/{connector}/execute-swap",
             request_payload
         )
 
@@ -521,7 +521,7 @@ class GatewayHttpClient:
             network: str,
             gas_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        return await self.api_request("post", f"{chain}/estimate-gas", {
+        return await self.api_request("post", f"chains/{chain}/estimate-gas", {
             "chain": chain,
             "network": network,
             "gasLimit": gas_limit
@@ -548,7 +548,7 @@ class GatewayHttpClient:
         }
         return await self.api_request(
             "get",
-            f"{connector}/pool-info",
+            f"connectors/{connector}/pool-info",
             params=query_params,
             fail_silently=fail_silently,
         )
@@ -577,7 +577,7 @@ class GatewayHttpClient:
         }
         return await self.api_request(
             "get",
-            f"{connector}/position-info",
+            f"connectors/{connector}/position-info",
             params=query_params,
             fail_silently=fail_silently,
         )
@@ -625,7 +625,7 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "post",
-            f"{connector}/open-position",
+            f"connectors/{connector}/open-position",
             request_payload,
             fail_silently=fail_silently,
         )
@@ -654,7 +654,7 @@ class GatewayHttpClient:
         }
         return await self.api_request(
             "post",
-            f"{connector}/close-position",
+            f"connectors/{connector}/close-position",
             request_payload,
             fail_silently=fail_silently,
         )
@@ -737,7 +737,7 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "post",
-            f"{connector}/amm/add-liquidity",
+            f"connectors/{connector}/amm/add-liquidity",
             request_payload,
             fail_silently=fail_silently,
         )
@@ -770,7 +770,7 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "post",
-            f"{connector}/amm/remove-liquidity",
+            f"connectors/{connector}/amm/remove-liquidity",
             request_payload,
             fail_silently=fail_silently,
         )
@@ -803,7 +803,7 @@ class GatewayHttpClient:
             request_payload["poolAddress"] = pool_address
 
         return await self.api_request(
-            "get", f"{connector}/amm/quote-swap", request_payload, fail_silently=fail_silently
+            "get", f"connectors/{connector}/amm/quote-swap", request_payload, fail_silently=fail_silently
         )
 
     async def amm_execute_swap(
@@ -839,7 +839,7 @@ class GatewayHttpClient:
             request_payload["nonce"] = int(nonce)
         if pool_address is not None:
             request_payload["poolAddress"] = pool_address
-        return await self.api_request("post", f"{connector}/amm/execute-swap", request_payload)
+        return await self.api_request("post", f"connectors/{connector}/amm/execute-swap", request_payload)
 
     async def amm_pool_info(
             self, connector: str, network: str, pool_address: str, fail_silently: bool = False
@@ -859,7 +859,7 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "get",
-            f"{connector}/amm/pool-info",
+            f"connectors/{connector}/amm/pool-info",
             params=query_params,
             fail_silently=fail_silently,
         )
@@ -898,7 +898,7 @@ class GatewayHttpClient:
 
         return await self.api_request(
             "get",
-            f"{connector}/amm/quote-liquidity",
+            f"connectors/{connector}/amm/quote-liquidity",
             params=query_params,
             fail_silently=fail_silently,
         )
@@ -943,7 +943,7 @@ class GatewayHttpClient:
 
         result = await self.api_request(
             "get",
-            f"{connector}/amm/list-pools",
+            f"connectors/{connector}/amm/list-pools",
             params=query_params,
             fail_silently=fail_silently,
         )
