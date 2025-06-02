@@ -2,17 +2,20 @@
 AMM Triangular Arbitrage Strategy
 
 This module implements a triangular arbitrage strategy that monitors liquidity pools
-across multiple chains, identifies price discrepancies between three related tokens,
-and executes a series of trades to profit from these discrepancies.
+within a single connector (DEX/AMM), identifies price discrepancies between three related
+tokens, and executes a series of trades to profit from these discrepancies.
 
 Key Features:
   - Identifies and executes profitable triangular trading paths (token1->token2->token3->token1)
-  - Calculates optimal trade amounts to maximize arbitrage profits
+  - Calculates optimal trade amounts to maximize arbitrage profits while managing risk
   - Simulates trades with slippage consideration before execution
   - Tracks and validates arbitrage opportunities before execution
   - Handles transaction confirmation and profit calculation
   - Asynchronous periodic updates for wallet balances, token prices, and pool statistics
   - Comprehensive error handling and trade validation
+  - Portfolio-based profit calculation for accurate profitability assessment
+  - Configurable parameters for slippage, minimum profitability, trade amounts, and delays
+  - Detailed logging and monitoring of trade execution and performance
 """
 
 import asyncio
@@ -34,6 +37,7 @@ from scripts.community.amm_portfolio_base import (
     AMMPortfolioManagerBase,
     Logger,
     StrategyType,
+    logged_class,
 )
 
 # ==============================================================================
@@ -41,11 +45,11 @@ from scripts.community.amm_portfolio_base import (
 # ==============================================================================
 configuration: Dict[str, Any] = {
     "globals": {
-        "maximum_slippage_percentage": "0.5",  # Maximum allowed price slippage when executing trades (Ex.: 0.5%)
-        "minimum_profitability_percentage": "1",  # Minimum profit threshold required to execute an arbitrage (Ex.:1%)
+        "maximum_slippage_percentage": "0.5",  # Maximum allowed price slippage when executing trades (Ex.: 0.5 for 0.5%)
+        "minimum_profitability_percentage": "-30",  # Minimum profit threshold required to execute an arbitrage (Ex.: 1 for 1%)
         "arbitrage_check_interval_seconds": "60",  # Time interval between subsequent arbitrage opportunity checks
         "minimum_trade_amount": "0.1",  # Minimum amount to trade in the first token of the triangle
-        "maximum_trade_amount": "0.1",  # Maximum amount to trade in the first token of the triangle
+        "maximum_trade_amount": "0.2",  # Maximum amount to trade in the first token of the triangle
         "time_delay_between_arbitrages": "1",  # Delay in seconds between consecutive arbitrage executions
         "transaction_confirmation_delay": "2",  # Delay in seconds before checking for transaction confirmation
         "balance_update_delay": "3",  # Delay in seconds to wait for wallet balances to update after a trade
@@ -57,7 +61,7 @@ configuration: Dict[str, Any] = {
         },
         "use_async_data_updates": False,  # Whether to update data asynchronously or synchronously
         "main_quote_token": "USDT",  # Main quote token used for price references
-        "strategy_type": "TOKEN_TRIADS_ARBITRAGE",  # Strategy type identifier for triangular arbitrage
+        "strategy_type": StrategyType.TRIANGULAR_ARBITRAGE,  # Strategy type identifier for triangular arbitrage
     },
     "connections": {
         "polkadot": {
@@ -74,43 +78,54 @@ configuration: Dict[str, Any] = {
         }
     },
     "token_pairs": [],
-    "token_triads": ["USDC/HDX/USDT"],  # Token triads to monitor for triangular arbitrage opportunities
+    "token_triads": [
+        "USDC/HDX/USDT",
+    ],
 }
 
 # ==============================================================================
 # Logger Initialization
 # ==============================================================================
-logger = Logger(path="logs/logs_amm_triangular_arbitrage.py", level=logging.DEBUG)
+logger = Logger(path="logs/logs_amm_triangular_arbitrage.log", level=logging.DEBUG)
 
 
 # ==============================================================================
 # AMMTriangularArbitrage Strategy Class
 # ==============================================================================
-# @logged_class(logger=logger, disallowed_methods=["on_tick"])
+@logged_class(logger=logger, disallowed_methods=["on_tick"])
 class AMMTriangularArbitrage(AMMPortfolioManagerBase):
     """
     AMM Triangular Arbitrage Strategy
 
-    This strategy monitors AMM pools to identify and exploit price discrepancies
-    between three related tokens (token triads). It executes a sequence of three trades:
-    token1 → token2 → token3 → token1, to profit from these discrepancies.
+    This strategy monitors AMM pools within a single connector to identify and exploit
+    price discrepancies between three related tokens (token triads). It executes a
+    sequence of three trades: token1 → token2 → token3 → token1, to profit from
+    these discrepancies.
 
-    The strategy includes:
-    - Opportunity discovery for token triads
-    - Profit simulation with fee consideration
-    - Optimal trade amount calculation
-    - Multi-step trade execution with confirmation
-    - Profit tracking and validation
+    The strategy works by:
+    1. Monitoring configured token triads (e.g., USDC/HDX/USDT) within a connector
+    2. Identifying price discrepancies that create profitable trading cycles
+    3. Simulating trades to calculate expected profits and fees
+    4. Validating opportunities by checking balances and simulating trades
+    5. Executing trades when opportunities are validated and profitable
+    6. Managing the portfolio to optimize returns
+
+    The strategy uses a portfolio-based approach to calculate profitability, taking into
+    account:
+    - Token balances and prices
+    - Expected trade amounts and slippage
+    - Transaction costs and fees
+    - Market impact and liquidity constraints
     """
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs, configuration=configuration)
 
-        self._strategy_type = StrategyType.TOKEN_TRIADS_ARBITRAGE
+        self._strategy_type = StrategyType.TRIANGULAR_ARBITRAGE
 
-    async def _run_token_triads_arbitrage(self):
+    async def _run_triangular_arbitrage(self):
         """
-        Executes the token triads (triangular) arbitrage strategy by following these steps:
+        Executes the triangular arbitrage strategy by following these steps:
         1. Discovers profitable triangular arbitrage opportunities (token1->token2->token3->token1)
         2. Registers found opportunities in the database for tracking
         3. Validates each opportunity by checking balances and simulating trades
@@ -121,7 +136,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         resulting in a profitable cycle of trades.
         """
         # Find profitable token triads
-        opportunities = await self._find_triangular_arbitrage_opportunities()
+        opportunities = await self._find_arbitrage_opportunities()
         if not opportunities:
             logger.info("No triangular arbitrage opportunity found.")
 
@@ -141,12 +156,12 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 f"Validating triangular opportunity: {opportunity['token1']}->{opportunity['token2']}->{opportunity['token3']}->{opportunity['token1']} "
                 f"with expected profit of {opportunity['expected_profit_percentage']:.2f}%"
             )
-            valid = await self._validate_triangular_opportunity(opportunity)
+            valid = await self._validate_opportunity(opportunity)
 
             if valid:
                 # Executes arbitrage if valid
                 logger.info(f"Executing triangular arbitrage: {opportunity['token1']}->{opportunity['token2']}->{opportunity['token3']}->{opportunity['token1']}")
-                success = await self._execute_triangular_arbitrage(opportunity)
+                success = await self._execute_arbitrage(opportunity)
 
                 if success:
                     logger.info("Triangular arbitrage executed successfully.")
@@ -159,7 +174,10 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             else:
                 logger.info("Triangular opportunity invalidated after detailed validation.")
 
-    async def _find_triangular_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
+    async def _run_connectors_arbitrage(self):
+        pass
+
+    async def _find_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
         """
         Discovers triangular arbitrage opportunities by analyzing token triads.
 
@@ -175,7 +193,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         """
         opportunities = []
 
-        for triad in self._token_triads:
+        for triad in self._triangular_arbitrage:
             token1, token2, token3 = self._extract_token_symbols_from_token_triad(triad)
 
             try:
@@ -185,7 +203,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                     for network_name, network_configuration in chain_configuration.items():
                         for connector_name in network_configuration.keys():
                             # Simulate the triangular trade with minimum amount
-                            expected_profit = await self._simulate_triangular_trade(
+                            expected_profit = await self._simulate_arbitrage_trade(
                                 chain_name, network_name, connector_name,
                                 token1, token2, token3,
                                 self._minimum_trade_amount
@@ -229,7 +247,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
         return opportunities
 
-    async def _simulate_triangular_trade(
+    async def _simulate_arbitrage_trade(
         self,
         _chain: str,
         network: str,
@@ -366,7 +384,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
             return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
 
-    async def _validate_triangular_opportunity(self, opportunity: Dict[str, Any]) -> bool:
+    async def _validate_opportunity(self, opportunity: Dict[str, Any]) -> bool:
         """
         Validates a triangular arbitrage opportunity before execution.
 
@@ -395,7 +413,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             return False
 
         # Calculates ideal trade amount
-        trade_amount = await self._calculate_optimal_triangular_trade_amount(
+        trade_amount = await self._calculate_optimal_trade_amount(
             opportunity, available_balance
         )
 
@@ -405,7 +423,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             return False
 
         # Simulate the triangular trade with the optimal amount
-        expected_profit = await self._simulate_triangular_trade(
+        expected_profit = await self._simulate_arbitrage_trade(
             chain,
             network,
             connector,
@@ -443,7 +461,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
         return True
 
-    async def _calculate_optimal_triangular_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
+    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
         """
         Determines the optimal trade amount for triangular arbitrage to maximize profit.
 
@@ -487,7 +505,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 continue
 
             # Simulate triangular trade with different amounts
-            profit_info = await self._simulate_triangular_trade(
+            profit_info = await self._simulate_arbitrage_trade(
                 opportunity["chain"],
                 opportunity["network"],
                 opportunity["connector"],
@@ -503,7 +521,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
         return best_amount if best_amount > DECIMAL_ZERO else self._minimum_trade_amount
 
-    async def _execute_triangular_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
+    async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
         """
         Executes a triangular arbitrage trade by performing three sequential swaps.
 
