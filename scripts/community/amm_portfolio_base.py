@@ -1,20 +1,15 @@
 """
-AMM Portfolio Manager Strategy
+AMM Portfolio Manager Base Strategy
 
-This module implements an arbitrage strategy that monitors liquidity pools
-across multiple chains, identifies arbitrage opportunities, and executes trades
-to profit from price discrepancies.
+This module provides the base class for AMM arbitrage strategies, implementing common
+functionality for portfolio management, data updates, and arbitrage execution.
 
 Key Features:
-  - Asynchronous periodic updates using asyncio tasks.
-  - Permanent (static) database information is built once; dynamic fields
-    (wallet balances, token prices, pool statistics, etc.) are updated periodically.
-  - The database schema exactly follows the provided specification.
-  - Gateway API calls are wrapped with retry/timeout decorators.
-  - All strategy and helper methods (arbitrage discovery, validation, execution)
-    are fully implemented.
-  - The arbitrage strategy runs only after the dynamic database has been fully updated at least once.
-  - Supports both token pair arbitrage and triangular (token triad) arbitrage.
+  - Common database structure and management
+  - Shared portfolio tracking and profit calculation
+  - Unified data update mechanisms
+  - Abstract arbitrage execution methods
+  - Common utility functions and helpers
 """
 
 import asyncio
@@ -24,6 +19,7 @@ import logging
 import os
 import time
 import traceback
+from abc import ABC, abstractmethod
 from decimal import Decimal
 from enum import Enum
 from functools import wraps
@@ -69,37 +65,37 @@ LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 # noinspection SpellCheckingInspection
 configuration: Dict[str, Any] = {
     "globals": {
-        "maximum_slippage_percentage": "0.5",  # 0.5% allowed slippage
-        "minimum_profitability_percentage": "1",  # Profit threshold (e.g., "1" for 1%)
-        "arbitrage_check_interval_seconds": "60",  # Time between arbitrage checks
-        "minimum_trade_amount": "0.1",  # Minimum trade amount
-        "maximum_trade_amount": "0.1",  # Maximum trade amount
-        "time_delay_between_arbitrages": "1",  # Delay between arbitrage trades
-        "transaction_confirmation_delay": "2",  # Delay for transaction confirmation polling
-        "balance_update_delay": "3",  # Delay for wallet balance_update_delay"
-        "transaction_polling_interval": "2",  # Polling interval for transaction confirmation
+        "maximum_slippage_percentage": None,  # Maximum allowed price slippage when executing trades (Ex.: 0.5 for 0.5%)
+        "minimum_profitability_percentage": None,  # Minimum profit threshold required to execute an arbitrage (Ex.: 1 for 1%)
+        "arbitrage_check_interval_seconds": "60",  # Time interval between subsequent arbitrage opportunity checks
+        "minimum_trade_amount": None,  # Minimum trade amount
+        "maximum_trade_amount": None,  # Maximum trade amount
+        "time_delay_between_arbitrages": "1",  # Delay in seconds between consecutive arbitrage executions
+        "transaction_confirmation_delay": "2",  # Delay in seconds before checking for transaction confirmation
+        "balance_update_delay": "3",  # Delay in seconds to wait for wallet balances to update after a trade
+        "transaction_polling_interval": "2",  # Time interval between checks for transaction confirmation status
         "data_update_intervals": {
-            "wallet": "60",  # Update wallet data every x seconds
-            "token": "60",  # Update token data every x seconds
-            "pool": "60",  # Update pool data every x seconds
+            "wallet": "60",  # Update wallet balance data every x seconds
+            "token": "60",  # Update token price data every x seconds
+            "pool": "60",  # Update pool statistics data every x seconds
         },
-        "use_async_data_updates": False,
-        "main_quote_token": "USDT",
-        "strategy_type": "TOKEN_TRIADS_ARBITRAGE",
+        "use_async_data_updates": False,  # Whether to update data asynchronously or synchronously
+        "main_quote_token": "USDT",  # Main quote token used for price references
+        "strategy_type": "TRIANGULAR_ARBITRAGE",  # Strategy type identifier for arbitrage strategy
     },
     "connections": {
-        "polkadot": {
-            "mainnet": {
-                "hydration": {
-                    "native_token_symbol": "HDX",
-                    "fee_payment_token_symbol": "HDX",
-                    "wallets": [
-                        os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]
-                    ],
-                    "pools": [],
-                }
-            },
-        },
+        # "polkadot": {
+        #     "mainnet": {
+        #         "hydration": {
+        #             "native_token_symbol": "HDX",
+        #             "fee_payment_token_symbol": "HDX",
+        #             "wallets": [
+        #                 os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]
+        #             ],
+        #             "pools": [],
+        #         }
+        #     },
+        # },
         # "solana": {
         #     "mainnet-beta": {
         #         "raydium": {
@@ -113,8 +109,8 @@ configuration: Dict[str, Any] = {
         #     }
         # },
     },
-    "token_pairs": ["USDC/USDT"],
-    "token_triads": ["USDC/HDX/USDT"],
+    "token_pairs": [],  # List of token pairs to track
+    "token_triads": ["USDC/HDX/USDT"],  # List of token triads to track
 }
 
 
@@ -414,8 +410,8 @@ def cached(ttl: int = 60):
 
 class StrategyType(Enum):
     """Enum for different types of arbitrage strategies"""
-    TOKEN_PAIRS_ARBITRAGE = "TOKEN_PAIRS_ARBITRAGE"  # Token pairs arbitrage between different connectors
-    TOKEN_TRIADS_ARBITRAGE = "TOKEN_TRIADS_ARBITRAGE"  # Triangular arbitrage inside the same connector
+    CONNECTORS_ARBITRAGE = "CONNECTORS_ARBITRAGE"  # Arbitrage between different connectors
+    TRIANGULAR_ARBITRAGE = "TRIANGULAR_ARBITRAGE"  # Triangular arbitrage inside the same connector
 
     @staticmethod
     def get_by_id(identifier: str):
@@ -553,7 +549,7 @@ class GlobalConfig(BaseClientModel):
     data_update_intervals: DataUpdateIntervals = Field(default_factory=DataUpdateIntervals)
     use_async_data_updates: bool = Field(default=True)
     main_quote_token: str = Field(default="USDC")
-    strategy_type: str = Field(default=StrategyType.TOKEN_PAIRS_ARBITRAGE.value)
+    strategy_type: str = Field(default=StrategyType.CONNECTORS_ARBITRAGE.value)
 
 
 class AMMPortfolioManagerConfiguration(BaseClientModel):
@@ -576,20 +572,29 @@ class AMMPortfolioManagerConfiguration(BaseClientModel):
 # ==============================================================================
 # Logger Initialization
 # ==============================================================================
-logger = Logger(path="logs/logs_amm_portfolio_manager.py", level=logging.DEBUG)
+logger = Logger(path="logs/logs_amm_portfolio_base.log", level=logging.DEBUG)
+# TODO - HANDLE LOG INSTANCE CORRECTLY !!!
 
 
 # ==============================================================================
 # AMMPortfolioManagerBase Strategy Class
 # ==============================================================================
 # @logged_class(logger=logger, disallowed_methods=["on_tick"])
-class AMMPortfolioManagerBase(ScriptStrategyBase):
+class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
     """
-    AMM Portfolio Manager Strategy
+    AMM Portfolio Manager Base Strategy
 
-    This strategy monitors AMM pools, discovers arbitrage opportunities
-    and executes paired trades between pools with differing prices.
-    Uses asynchronous tasks for dynamic data updates.
+    This is the base class for AMM arbitrage strategies, providing common functionality
+    for portfolio management, data updates, and arbitrage execution. Specific arbitrage
+    strategies should inherit from this class and implement their own arbitrage execution
+    methods.
+
+    The base class handles:
+    - Database initialization and management
+    - Portfolio tracking and profit calculation
+    - Data updates for wallets, tokens, and pools
+    - Common utility functions and helpers
+    - Abstract arbitrage execution methods
     """
 
     markets: Dict[str, Any] = {}  # Not used, but mandatory because of inheritance
@@ -714,7 +719,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
     _balance_update_delay: int = 3
     _transaction_polling_interval: int = 1
     _maximum_transaction_confirmation_timeout: int = 60
-    _strategy_type: StrategyType = StrategyType.TOKEN_PAIRS_ARBITRAGE
+    _strategy_type: StrategyType = None
 
     # Data update control
     _data_update_task: Optional[asyncio.Task] = None
@@ -727,7 +732,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
 
     # Token data storage
     _token_pairs: List[str] = []
-    _token_triads: List[str] = []
+    _triangular_arbitrage: List[str] = []
     _token_symbols: List[str] = []
 
     # State control
@@ -736,7 +741,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
     _is_running: bool = False  # Indicates if an update is in progress
     _database_lock: asyncio.Lock = None
 
-    def __init__(self, connectors: Dict[str, ConnectorBase]):
+    def __init__(self, connectors: Dict[str, ConnectorBase], configuration: Dict[str, Any]):
         """
         Initializes the strategy: loads configuration and prepares database.
 
@@ -746,6 +751,8 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
         logger.info("Initializing AMM Portfolio Manager strategy")
 
         super().__init__(connectors)
+
+        self._configuration = configuration
 
     async def _initialize(self):
         """
@@ -774,7 +781,6 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
             self._gateway_http_client = GatewayHttpClient.get_instance()
 
             # Load configuration
-            self._configuration = configuration
             global_configurations = self._configuration.get("globals", {})
 
             # Strategy parameters
@@ -789,7 +795,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
             self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
             self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
             self._main_quote_token = global_configurations["main_quote_token"]
-            self._strategy_type = StrategyType.get_by_id(global_configurations.get("strategy_type", StrategyType.TOKEN_PAIRS_ARBITRAGE.value))
+            self._strategy_type = StrategyType.get_by_id(global_configurations.get("strategy_type", StrategyType.TRIANGULAR_ARBITRAGE).value)
 
             # Configure update intervals
             data_update_intervals = global_configurations["data_update_intervals"]
@@ -805,7 +811,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
                 self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
 
             self._token_pairs = self._configuration.get("token_pairs", [])
-            self._token_triads = self._configuration.get("token_triads", [])
+            self._triangular_arbitrage = self._configuration.get("token_triads", [])
             self._token_symbols = self._get_all_token_symbols()
 
             await self._check_gateway_status()
@@ -944,112 +950,32 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
         logger.info(f"Executing arbitrage strategy: {self._strategy_type.value}")
 
         # Choose strategy based on configuration
-        if self._strategy_type.value == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
-            await self._run_token_pairs_arbitrage()
-        elif self._strategy_type.value == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
-            await self._run_token_triads_arbitrage()
+        if self._strategy_type.value == StrategyType.CONNECTORS_ARBITRAGE.value:
+            await self._run_connectors_arbitrage()
+        elif self._strategy_type.value == StrategyType.TRIANGULAR_ARBITRAGE.value:
+            await self._run_triangular_arbitrage()
         else:
             logger.warning(f"Unknown strategy type: {self._strategy_type.value}")
 
         logger.info("Arbitrage strategy cycle completed.")
 
-    async def _run_token_pairs_arbitrage(self):
+    @abstractmethod
+    async def _run_connectors_arbitrage(self):
         """
-        Executes the token pairs arbitrage strategy:
-         - Discovers promising token pairs
-         - Validates each opportunity
-         - Executes arbitrage trades for opportunities that pass validation
+        Abstract method for executing connectors arbitrage strategy.
+        This method should be implemented by specific arbitrage strategies
+        that handle connectors arbitrage between different connectors.
         """
-        # Finds promising token pairs
-        promising_pairs = self._find_most_promising_token_pairs()
-        if not promising_pairs:
-            logger.info("No promising token pair found.")
+        pass
 
-            return
-
-        # Searches for arbitrage opportunities in promising pairs
-        opportunities = await self._find_arbitrage_opportunities(promising_pairs)
-        if not opportunities:
-            logger.info("No arbitrage opportunity found.")
-
-            return
-
-        logger.info(f"Found {len(opportunities)} arbitrage opportunities.")
-
-        # Validates and executes each opportunity
-        for opportunity in opportunities:
-            # Registers the opportunity in the database
-            if "arbitrage_opportunities" not in self._database:
-                self._database["arbitrage_opportunities"] = []
-            self._database["arbitrage_opportunities"].append(opportunity)
-
-            # Validates the opportunity
-            logger.info(
-                f"Validating opportunity: {opportunity['base_token']}/{opportunity['quote_token']} with difference of {opportunity['price_difference_percentage']:.2f}%"
-            )
-            valid = await self._validate_opportunity(opportunity)
-
-            if valid:
-                # Executes arbitrage if valid
-                logger.info(f"Executing arbitrage: {opportunity['base_token']}/{opportunity['quote_token']}")
-                success = await self._execute_arbitrage(opportunity)
-
-                if success:
-                    logger.info("Arbitrage executed successfully.")
-                else:
-                    logger.warning("Arbitrage execution failed.")
-
-                # Waits the configured delay between arbitrages
-                if self._time_delay_between_arbitrages > 0:
-                    await asyncio.sleep(self._time_delay_between_arbitrages)
-            else:
-                logger.info("Opportunity invalidated after detailed validation.")
-
-    async def _run_token_triads_arbitrage(self):
+    @abstractmethod
+    async def _run_triangular_arbitrage(self):
         """
-        Executes the token triads (triangular) arbitrage strategy:
-         - Discovers profitable triangular arbitrage opportunities
-         - Validates each opportunity
-         - Executes arbitrage trades for opportunities that pass validation
+        Abstract method for executing triangular arbitrage strategy.
+        This method should be implemented by specific arbitrage strategies
+        that handle triangular arbitrage within a single connector.
         """
-        # Find profitable token triads
-        opportunities = await self._find_triangular_arbitrage_opportunities()
-        if not opportunities:
-            logger.info("No triangular arbitrage opportunity found.")
-
-            return
-
-        logger.info(f"Found {len(opportunities)} triangular arbitrage opportunities.")
-
-        # Validates and executes each opportunity
-        for opportunity in opportunities:
-            # Registers the opportunity in the database
-            if "arbitrage_opportunities" not in self._database:
-                self._database["arbitrage_opportunities"] = []
-            self._database["arbitrage_opportunities"].append(opportunity)
-
-            # Validates the opportunity
-            logger.info(
-                f"Validating triangular opportunity: {opportunity['token1']}->{opportunity['token2']}->{opportunity['token3']}->{opportunity['token1']} "
-                f"with expected profit of {opportunity['expected_profit_percentage']:.2f}%"
-            )
-            valid = await self._validate_triangular_opportunity(opportunity)
-
-            if valid:
-                # Executes arbitrage if valid
-                logger.info(f"Executing triangular arbitrage: {opportunity['token1']}->{opportunity['token2']}->{opportunity['token3']}->{opportunity['token1']}")
-                success = await self._execute_triangular_arbitrage(opportunity)
-
-                if success:
-                    logger.info("Triangular arbitrage executed successfully.")
-                else:
-                    logger.warning("Triangular arbitrage execution failed.")
-
-                # Waits the configured delay between arbitrages
-                if self._time_delay_between_arbitrages > 0:
-                    await asyncio.sleep(self._time_delay_between_arbitrages)
-            else:
-                logger.info("Triangular opportunity invalidated after detailed validation.")
+        pass
 
     # --------------------------------------------------------------------------
     # Permanent Database Initialization and Mapping Methods
@@ -1145,8 +1071,8 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
         All pools are assumed to have exactly 2 tokens.
         """
 
-        # We don't need pools for token triads
-        if self._strategy_type.value == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
+        # We don't need pools for triangular arbitrage
+        if self._strategy_type.value == StrategyType.TRIANGULAR_ARBITRAGE.value:
             return
 
         for chain_name, chain_configuration in self._configuration.get("connections", {}).items():
@@ -1663,848 +1589,8 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
 
         return ((price_2 - price_1) / price_1) * DECIMAL_ONE_HUNDRED
 
-    async def _find_arbitrage_opportunities(self, promising_pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Finds arbitrage opportunities based on promising token pairs.
-        Uses portfolio approach to calculate expected profitability.
-
-        Args:
-            promising_pairs: List of dictionaries of token pairs.
-        Returns:
-            List of dictionaries of arbitrage opportunities.
-        """
-        opportunities = []
-
-        # Extracts token pairs from dictionaries
-        token_pairs = [(pair["base_token"], pair["quote_token"]) for pair in promising_pairs]
-
-        for base_token, quote_token in token_pairs:
-            # Finds all pools containing both tokens
-            pools = self._find_pools_with_token_pair(base_token, quote_token)
-
-            # Needs at least 2 pools for arbitrage
-            if len(pools) < 2:
-                continue
-
-            # Compares each pair of pools for potential arbitrage
-            for pool_1_index in range(len(pools)):
-                for pool_2_index in range(pool_1_index + 1, len(pools)):
-                    pool_1, pool_2 = pools[pool_1_index], pools[pool_2_index]
-
-                    # Quick check using price difference as initial filter
-                    price_difference_percentage = await self._calculate_price_difference_percentage(
-                        base_token, quote_token, pool_1, pool_2
-                    )
-
-                    # Skip if price difference is below threshold or can't be calculated
-                    if (
-                        price_difference_percentage is None
-                        or abs(price_difference_percentage) <= self._minimum_profitability_percentage
-                    ):
-                        continue
-
-                    # Determine buy and sell pools based on price difference
-                    if price_difference_percentage > 0:
-                        buy_pool, sell_pool = pool_1, pool_2
-                    else:
-                        buy_pool, sell_pool = pool_2, pool_1
-
-                    # Initial opportunity record with basic information
-                    opportunity = {
-                        "base_token": base_token,
-                        "quote_token": quote_token,
-                        "buy_pool": buy_pool,
-                        "sell_pool": sell_pool,
-                        "price_difference_percentage": abs(price_difference_percentage),
-                        "timestamp": time.time(),
-                    }
-
-                    # Run a simulated validation to get a more accurate profitability assessment
-                    # This is computationally more expensive but gives more accurate results
-                    test_amount = self._minimum_trade_amount
-
-                    # Get wallet addresses for each pool to simulate portfolio value
-                    buy_wallets = await self._get_wallets_for_pool(buy_pool)
-                    sell_wallets = await self._get_wallets_for_pool(sell_pool)
-
-                    if not buy_wallets or not sell_wallets:
-                        logger.info(f"No wallets found for pools - skipping {base_token}/{quote_token}")
-                        continue
-
-                    # For simplicity, use first wallet for each pool
-                    buy_wallet = buy_wallets[0]
-                    sell_wallet = sell_wallets[0]
-
-                    try:
-                        # Get initial balances to simulate portfolio value
-                        buy_pool_initial_balances = await self._gateway_get_balances(
-                            buy_pool.get("chain"),
-                            buy_pool.get("network"),
-                            buy_wallet.get("address"),
-                            [base_token, quote_token],
-                        )
-                        if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
-                            continue
-
-                        sell_pool_initial_balances = await self._gateway_get_balances(
-                            sell_pool.get("chain"),
-                            sell_pool.get("network"),
-                            sell_wallet.get("address"),
-                            [base_token, quote_token],
-                        )
-                        if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
-                            continue
-
-                        # Simulates buy: base_token -> quote_token
-                        buy_quote = await self._gateway_quote_swap(
-                            buy_pool.get("network"),
-                            buy_pool.get("connector"),
-                            base_token,
-                            quote_token,
-                            test_amount,
-                            TradeType.SELL,
-                            self._maximum_slippage_percentage,
-                            buy_pool.get("address"),
-                        )
-                        if not buy_quote or "estimatedAmountOut" not in buy_quote:
-                            continue
-
-                        expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
-
-                        # Simulates sell: quote_token -> base_token
-                        sell_quote = await self._gateway_quote_swap(
-                            sell_pool.get("network"),
-                            sell_pool.get("connector"),
-                            quote_token,
-                            base_token,
-                            expected_quote,
-                            TradeType.SELL,
-                            self._maximum_slippage_percentage,
-                            sell_pool.get("address"),
-                        )
-                        if not sell_quote or "estimatedAmountOut" not in sell_quote:
-                            continue
-
-                        # Make sure we have the most recent token prices
-                        await self._update_token_information()
-
-                        # Get token prices
-                        base_token_price_buy = self._database["connections"][buy_pool.get("chain")][
-                            buy_pool.get("network")
-                        ][buy_pool.get("connector")]["tokens"][base_token]["price"]
-
-                        quote_token_price_buy = self._database["connections"][buy_pool.get("chain")][
-                            buy_pool.get("network")
-                        ][buy_pool.get("connector")]["tokens"][quote_token]["price"]
-
-                        base_token_price_sell = self._database["connections"][sell_pool.get("chain")][
-                            sell_pool.get("network")
-                        ][sell_pool.get("connector")]["tokens"][base_token]["price"]
-
-                        quote_token_price_sell = self._database["connections"][sell_pool.get("chain")][
-                            sell_pool.get("network")
-                        ][sell_pool.get("connector")]["tokens"][quote_token]["price"]
-
-                        # Simulate final balances after transactions
-                        buy_pool_initial_base_balance = Decimal(
-                            str(buy_pool_initial_balances["balances"].get(base_token, 0))
-                        )
-                        buy_pool_initial_quote_balance = Decimal(
-                            str(buy_pool_initial_balances["balances"].get(quote_token, 0))
-                        )
-                        sell_pool_initial_base_balance = Decimal(
-                            str(sell_pool_initial_balances["balances"].get(base_token, 0))
-                        )
-                        sell_pool_initial_quote_balance = Decimal(
-                            str(sell_pool_initial_balances["balances"].get(quote_token, 0))
-                        )
-
-                        # Simulate buy transaction effect
-                        buy_pool_final_base_balance = buy_pool_initial_base_balance - test_amount
-                        buy_pool_final_quote_balance = buy_pool_initial_quote_balance + expected_quote
-
-                        # Simulate sell transaction effect
-                        expected_return = Decimal(str(sell_quote["estimatedAmountOut"]))
-                        sell_pool_final_quote_balance = sell_pool_initial_quote_balance - expected_quote
-                        sell_pool_final_base_balance = sell_pool_initial_base_balance + expected_return
-
-                        # Calculate profit using portfolio approach
-                        profit_information = self.calculate_portfolio_profit(
-                            {
-                                "buy": {
-                                    "base": {
-                                        "balance": {
-                                            "initial": buy_pool_initial_base_balance,
-                                            "final": buy_pool_final_base_balance,
-                                        },
-                                        "price": base_token_price_buy,
-                                    },
-                                    "quote": {
-                                        "balance": {
-                                            "initial": buy_pool_initial_quote_balance,
-                                            "final": buy_pool_final_quote_balance,
-                                        },
-                                        "price": quote_token_price_buy,
-                                    },
-                                },
-                                "sell": {
-                                    "base": {
-                                        "balance": {
-                                            "initial": sell_pool_initial_base_balance,
-                                            "final": sell_pool_final_base_balance,
-                                        },
-                                        "price": base_token_price_sell,
-                                    },
-                                    "quote": {
-                                        "balance": {
-                                            "initial": sell_pool_initial_quote_balance,
-                                            "final": sell_pool_final_quote_balance,
-                                        },
-                                        "price": quote_token_price_sell,
-                                    },
-                                },
-                            }
-                        )
-
-                        # Add simulated profitability to opportunity record
-                        opportunity.update(
-                            {
-                                "simulated_profit_percentage": profit_information["profit"]["percentage"],
-                                "simulated_profit_absolute": profit_information["profit"]["absolute"],
-                            }
-                        )
-
-                        # Only add if expected to be profitable
-                        if profit_information["profit"]["percentage"] > self._minimum_profitability_percentage:
-                            opportunities.append(opportunity)
-                            logger.info(
-                                f"Arbitrage opportunity found: {base_token}/{quote_token} "
-                                f"difference {abs(price_difference_percentage):.2f}% between {buy_pool.get('internal_id')} and {sell_pool.get('internal_id')} "
-                                f"with expected profit {profit_information['profit']['percentage']:.2f}%"
-                            )
-                    except Exception as exception:
-                        logger.ignore_exception(exception, f"Error simulating arbitrage for {base_token}/{quote_token}")
-                        continue
-
-        return opportunities
-
-    async def _validate_opportunity(self, opportunity: Dict[str, Any]) -> bool:
-        """
-        Validates an arbitrage opportunity by checking available balances and
-        simulating quotes.
-
-        Args:
-            opportunity: Dictionary of arbitrage opportunity.
-        Returns:
-            True if opportunity is valid and expected profit meets threshold;
-            otherwise, False.
-        """
-        base_token = opportunity["base_token"]
-        quote_token = opportunity["quote_token"]
-        buy_pool = opportunity["buy_pool"]
-        sell_pool = opportunity["sell_pool"]
-
-        # Checks if there is available balance
-        available_balance = await self._get_total_token_balance_from_all_wallets(base_token)
-        if available_balance < self._minimum_trade_amount:
-            logger.info(f"Insufficient balance of {base_token}: {available_balance}")
-
-            return False
-
-        # Calculates ideal trade amount
-        trade_amount = await self._calculate_optimal_trade_amount(opportunity, available_balance)
-        if not trade_amount or trade_amount <= DECIMAL_ZERO:
-            logger.info(f"Invalid optimal trade amount: {trade_amount}")
-
-            return False
-
-        try:
-            # Get wallet addresses for each pool to simulate portfolio value
-            buy_wallets = await self._get_wallets_for_pool(buy_pool)
-            sell_wallets = await self._get_wallets_for_pool(sell_pool)
-            if not buy_wallets or not sell_wallets:
-                logger.info("No wallets found for pools")
-                return False
-
-            # For simplicity, use first wallet for each pool
-            buy_wallet = buy_wallets[0]
-            sell_wallet = sell_wallets[0]
-
-            # Get initial balances to calculate initial portfolio value
-            buy_pool_initial_balances = await self._gateway_get_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
-            )
-            if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
-                logger.error(f"Failed to get initial balances for wallet {buy_wallet.get('internal_id')}")
-                return False
-
-            sell_pool_initial_balances = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
-            )
-            if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
-                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet.get('internal_id')}")
-                return False
-
-            # Simulates buy: base_token -> quote_token
-            buy_quote = await self._gateway_quote_swap(
-                buy_pool.get("network"),
-                buy_pool.get("connector"),
-                base_token,
-                quote_token,
-                trade_amount,
-                TradeType.SELL,
-                self._maximum_slippage_percentage,
-                buy_pool.get("address"),
-            )
-            if not buy_quote or "estimatedAmountOut" not in buy_quote:
-                logger.info(f"Buy quote unavailable for pool {buy_pool.get('internal_id')}")
-                return False
-
-            expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
-
-            # Simulates sell: quote_token -> base_token
-            sell_quote = await self._gateway_quote_swap(
-                sell_pool.get("network"),
-                sell_pool.get("connector"),
-                quote_token,
-                base_token,
-                expected_quote,
-                TradeType.SELL,
-                self._maximum_slippage_percentage,
-                sell_pool.get("address"),
-            )
-            if not sell_quote or "estimatedAmountOut" not in sell_quote:
-                logger.info(f"Sell quote unavailable for pool {sell_pool.get('internal_id')}")
-                return False
-
-            # Make sure we have the most recent token prices
-            await self._update_token_information()
-
-            # Get token prices
-            base_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
-                buy_pool.get("connector")
-            ]["tokens"][base_token]["price"]
-
-            quote_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
-                buy_pool.get("connector")
-            ]["tokens"][quote_token]["price"]
-
-            base_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
-                sell_pool.get("connector")
-            ]["tokens"][base_token]["price"]
-
-            quote_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
-                sell_pool.get("connector")
-            ]["tokens"][quote_token]["price"]
-
-            # Simulate final balances after transactions
-            buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
-            buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
-            sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
-            sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
-
-            # Simulate buy transaction effect
-            buy_pool_final_base_balance = buy_pool_initial_base_balance - trade_amount
-            buy_pool_final_quote_balance = buy_pool_initial_quote_balance + expected_quote
-
-            # Simulate sell transaction effect
-            expected_return = Decimal(str(sell_quote["estimatedAmountOut"]))
-            sell_pool_final_quote_balance = sell_pool_initial_quote_balance - expected_quote
-            sell_pool_final_base_balance = sell_pool_initial_base_balance + expected_return
-
-            # Calculate profit using portfolio approach
-            profit_information = self.calculate_portfolio_profit(
-                {
-                    "buy": {
-                        "base": {
-                            "balance": {
-                                "initial": buy_pool_initial_base_balance,
-                                "final": buy_pool_final_base_balance,
-                            },
-                            "price": base_token_price_buy,
-                        },
-                        "quote": {
-                            "balance": {
-                                "initial": buy_pool_initial_quote_balance,
-                                "final": buy_pool_final_quote_balance,
-                            },
-                            "price": quote_token_price_buy,
-                        },
-                    },
-                    "sell": {
-                        "base": {
-                            "balance": {
-                                "initial": sell_pool_initial_base_balance,
-                                "final": sell_pool_final_base_balance,
-                            },
-                            "price": base_token_price_sell,
-                        },
-                        "quote": {
-                            "balance": {
-                                "initial": sell_pool_initial_quote_balance,
-                                "final": sell_pool_final_quote_balance,
-                            },
-                            "price": quote_token_price_sell,
-                        },
-                    },
-                }
-            )
-
-            # Updates opportunity with calculated values
-            opportunity.update(
-                {
-                    "trade_amount": trade_amount,
-                    "expected_quote_token": expected_quote,
-                    "expected_base_token_return": expected_return,
-                    "expected_profit": profit_information["profit"]["absolute"],
-                    "expected_profit_percentage": profit_information["profit"]["percentage"],
-                }
-            )
-
-            # Checks if opportunity meets minimum profitability
-            if profit_information["profit"]["percentage"] < self._minimum_profitability_percentage:
-                logger.info(
-                    f"Opportunity not profitable after slippage: "
-                    f"{profit_information['profit']['percentage']:.2f}% < {self._minimum_profitability_percentage}%"
-                )
-                return False
-
-            logger.info(
-                f"Opportunity validated: {base_token}/{quote_token} expected profit {profit_information['profit']['percentage']:.2f}%"
-            )
-            return True
-        except Exception as exception:
-            logger.ignore_exception(exception, "Error during opportunity validation")
-            return False
-
-    async def _calculate_optimal_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
-        """
-        Determines the optimal trade amount by simulating profits at different sizes.
-
-        Args:
-            opportunity: Arbitrage opportunity dictionary.
-            maximum_available: Maximum available balance of the base token.
-        Returns:
-            Optimal trade amount as Decimal.
-        """
-        # Cap maximum available to configured maximum trade amount
-        maximum_available = min(maximum_available, self._maximum_trade_amount)
-
-        if maximum_available <= self._minimum_trade_amount:
-            return maximum_available if maximum_available > DECIMAL_ZERO else DECIMAL_ZERO
-
-        test_amounts = [
-            self._minimum_trade_amount,
-            maximum_available * DECIMAL_TEN_PERCENT,
-            maximum_available * DECIMAL_TWENTY_FIVE_PERCENT,
-            maximum_available * DECIMAL_FIFTY_PERCENT,
-            maximum_available * DECIMAL_SEVENTY_FIVE_PERCENT,
-            maximum_available,
-        ]
-
-        best_amount = DECIMAL_ZERO
-        best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
-
-        for amount in sorted(test_amounts):
-            if amount < self._minimum_trade_amount or amount > maximum_available:
-                continue
-
-            profit_percentage = await self._simulate_arbitrage_profit(opportunity, amount)
-
-            if profit_percentage > best_profit_percentage:
-                best_profit_percentage = profit_percentage
-                best_amount = amount
-
-        return best_amount if best_amount > DECIMAL_ZERO else self._minimum_trade_amount
-
-    async def _simulate_arbitrage_profit(self, opportunity: Dict[str, Any], amount: Decimal) -> Decimal:
-        """
-        Simulates expected profit percentage for a given trade amount using portfolio approach.
-
-        Args:
-            opportunity: Arbitrage opportunity dictionary.
-            amount: Proposed trade amount.
-        Returns:
-            Expected profit percentage as Decimal.
-        """
-        base_token = opportunity["base_token"]
-        quote_token = opportunity["quote_token"]
-        buy_pool = opportunity["buy_pool"]
-        sell_pool = opportunity["sell_pool"]
-
-        try:
-            # Get wallet addresses for each pool
-            buy_wallets = await self._get_wallets_for_pool(buy_pool)
-            sell_wallets = await self._get_wallets_for_pool(sell_pool)
-
-            if not buy_wallets or not sell_wallets:
-                return DECIMAL_NEGATIVE_INFINITY
-
-            # For simplicity, use first wallet for each pool
-            buy_wallet = buy_wallets[0]
-            sell_wallet = sell_wallets[0]
-
-            # Get initial balances
-            buy_pool_initial_balances = await self._gateway_get_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
-            )
-            if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
-                return DECIMAL_NEGATIVE_INFINITY
-
-            sell_pool_initial_balances = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
-            )
-            if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
-                return DECIMAL_NEGATIVE_INFINITY
-
-            # Simulate buy trade
-            buy_quote = await self._gateway_quote_swap(
-                buy_pool.get("network"),
-                buy_pool.get("connector"),
-                base_token,
-                quote_token,
-                amount,
-                TradeType.SELL,
-                self._maximum_slippage_percentage,
-                buy_pool.get("address"),
-            )
-
-            if not buy_quote or "estimatedAmountOut" not in buy_quote:
-                return DECIMAL_NEGATIVE_INFINITY
-
-            expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
-
-            # Simulate sell trade
-            sell_quote = await self._gateway_quote_swap(
-                sell_pool.get("network"),
-                sell_pool.get("connector"),
-                quote_token,
-                base_token,
-                expected_quote,
-                TradeType.SELL,
-                self._maximum_slippage_percentage,
-                sell_pool.get("address"),
-            )
-
-            if not sell_quote or "estimatedAmountOut" not in sell_quote:
-                return DECIMAL_NEGATIVE_INFINITY
-
-            # Update token prices
-            await self._update_token_information()
-
-            # Get token prices
-            base_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
-                buy_pool.get("connector")
-            ]["tokens"][base_token]["price"]
-
-            quote_token_price_buy = self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
-                buy_pool.get("connector")
-            ]["tokens"][quote_token]["price"]
-
-            base_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
-                sell_pool.get("connector")
-            ]["tokens"][base_token]["price"]
-
-            quote_token_price_sell = self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
-                sell_pool.get("connector")
-            ]["tokens"][quote_token]["price"]
-
-            # Process balances
-            buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
-            buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
-            sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
-            sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
-
-            # Simulate final balances after trades
-            buy_pool_final_base_balance = buy_pool_initial_base_balance - amount
-            buy_pool_final_quote_balance = buy_pool_initial_quote_balance + expected_quote
-
-            expected_return = Decimal(str(sell_quote["estimatedAmountOut"]))
-            sell_pool_final_quote_balance = sell_pool_initial_quote_balance - expected_quote
-            sell_pool_final_base_balance = sell_pool_initial_base_balance + expected_return
-
-            # Calculate profit using portfolio approach
-            profit_information = self.calculate_portfolio_profit(
-                {
-                    "buy": {
-                        "base": {
-                            "balance": {
-                                "initial": buy_pool_initial_base_balance,
-                                "final": buy_pool_final_base_balance,
-                            },
-                            "price": base_token_price_buy,
-                        },
-                        "quote": {
-                            "balance": {
-                                "initial": buy_pool_initial_quote_balance,
-                                "final": buy_pool_final_quote_balance,
-                            },
-                            "price": quote_token_price_buy,
-                        },
-                    },
-                    "sell": {
-                        "base": {
-                            "balance": {
-                                "initial": sell_pool_initial_base_balance,
-                                "final": sell_pool_final_base_balance,
-                            },
-                            "price": base_token_price_sell,
-                        },
-                        "quote": {
-                            "balance": {
-                                "initial": sell_pool_initial_quote_balance,
-                                "final": sell_pool_final_quote_balance,
-                            },
-                            "price": quote_token_price_sell,
-                        },
-                    },
-                }
-            )
-
-            return profit_information["profit"]["percentage"]
-        except Exception as exception:
-            logger.ignore_exception(exception, "Error simulating arbitrage profit")
-            return DECIMAL_NEGATIVE_INFINITY
-
-    async def _execute_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
-        """
-        Executes an arbitrage trade by performing sequential swaps.
-
-        Args:
-            opportunity: Arbitrage opportunity dictionary.
-        Returns:
-            True if the trade is executed successfully with profit; otherwise, False.
-        """
-        base_token = opportunity["base_token"]
-        quote_token = opportunity["quote_token"]
-        buy_pool = opportunity["buy_pool"]
-        sell_pool = opportunity["sell_pool"]
-        buy_pool_swap_amount = opportunity["trade_amount"]
-        expected_quote = opportunity["expected_quote_token"]
-
-        logger.info(f"Executing arbitrage for {base_token}/{quote_token}")
-
-        # Gets wallet addresses for each pool.
-        buy_wallets = await self._get_wallets_for_pool(buy_pool)
-        sell_wallets = await self._get_wallets_for_pool(sell_pool)
-        if not buy_wallets:
-            logger.error(f"No wallet found for buy pool {buy_pool.get('address')}")
-
-            return False
-        if not sell_wallets:
-            logger.error(f"No wallet found for sell pool {sell_pool.get('address')}")
-
-            return False
-
-        # TODO: Support multiple wallets per pool.
-        # For now, we only support one wallet per pool.
-        buy_wallet = buy_wallets[0]
-        sell_wallet = sell_wallets[0]
-
-        try:
-            # First swap (buy pool): base_token -> quote_token.
-            logger.info(
-                f"Step 1: Swapping {buy_pool_swap_amount} {base_token} for {quote_token} in pool {buy_pool.get('address')}"
-            )
-            buy_pool_initial_balances = await self._gateway_get_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
-            )
-            if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
-                logger.error(f"Failed to get initial balances for wallet {buy_wallet.get('internal_id')}")
-
-                return False
-
-            buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
-            buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
-            if buy_pool_initial_base_balance < buy_pool_swap_amount:
-                logger.info(
-                    f"Insufficient balance in {buy_wallet.get('internal_id')}: {buy_pool_initial_base_balance} {base_token}"
-                )
-
-                return False
-
-            buy_pool_swap = await self._gateway_execute_swap(
-                buy_pool.get("network"),
-                buy_pool.get("connector"),
-                buy_wallet.get("address"),
-                base_token,
-                quote_token,
-                TradeType.SELL,
-                buy_pool_swap_amount,
-                self._maximum_slippage_percentage,
-                buy_pool.get("address"),
-            )
-            if not buy_pool_swap or "signature" not in buy_pool_swap:
-                logger.error(f"First swap failed in wallet {buy_wallet.get('internal_id')}")
-
-                return False
-
-            logger.info(f"First swap signature: {buy_pool_swap['signature']}")
-
-            buy_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_pool_swap["signature"]
-            )
-            if not buy_pool_swap_confirmation:
-                logger.error("First swap transaction not confirmed")
-
-                return False
-
-            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
-            buy_pool_final_balances = await self._gateway_get_balances(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
-            )
-            if not buy_pool_final_balances or "balances" not in buy_pool_final_balances:
-                logger.error(f"Failed to get updated balances for wallet {buy_wallet.get('internal_id')}")
-
-                return False
-
-            buy_pool_final_base_balance = Decimal(str(buy_pool_final_balances["balances"].get(base_token, 0)))
-            buy_pool_final_quote_balance = Decimal(str(buy_pool_final_balances["balances"].get(quote_token, 0)))
-            buy_pool_quote_balance_received = buy_pool_final_quote_balance - buy_pool_initial_quote_balance
-            sell_pool_swap_amount = (
-                buy_pool_quote_balance_received if buy_pool_quote_balance_received > DECIMAL_ZERO else expected_quote
-            )
-            if buy_pool_quote_balance_received <= 0:
-                logger.warning(f"Actual quote received undetermined; using expected: {expected_quote} {quote_token}")
-
-            # Second swap (sell pool): quote_token -> base_token.
-            logger.info(
-                f"Step 2: Swapping {sell_pool_swap_amount} {quote_token} to {base_token} in pool {sell_pool.get('address')}"
-            )
-
-            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
-            sell_pool_initial_balances = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
-            )
-            if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
-                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet.get('internal_id')}")
-
-                return False
-
-            sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
-            sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
-            sell_pool_swap = await self._gateway_execute_swap(
-                sell_pool.get("network"),
-                sell_pool.get("connector"),
-                sell_wallet.get("address"),
-                quote_token,
-                base_token,
-                TradeType.SELL,
-                sell_pool_swap_amount,
-                self._maximum_slippage_percentage,
-                sell_pool.get("address"),
-            )
-            if not sell_pool_swap or "signature" not in sell_pool_swap:
-                logger.error(f"Second swap failed in wallet {sell_wallet.get('address')}")
-
-                return False
-
-            logger.info(f"Second swap signature: {sell_pool_swap['signature']}")
-            sell_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_pool_swap["signature"]
-            )
-            if not sell_pool_swap_confirmation:
-                logger.error("Second swap transaction not confirmed")
-
-                return False
-
-            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
-            sell_pool_final_balances = await self._gateway_get_balances(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
-            )
-            if not sell_pool_final_balances or "balances" not in sell_pool_final_balances:
-                logger.error(f"Failed to get updated sell wallet balance for {sell_wallet.get('address')}")
-
-                return False
-
-            sell_pool_final_base_balance = Decimal(str(sell_pool_final_balances["balances"].get(base_token, 0)))
-            sell_pool_final_quote_balance = Decimal(str(sell_pool_final_balances["balances"].get(quote_token, 0)))
-
-            await self._update_token_information()
-
-            profit_information = self.calculate_portfolio_profit(
-                {
-                    "buy": {
-                        "base": {
-                            "balance": {
-                                "initial": buy_pool_initial_base_balance,
-                                "final": buy_pool_final_base_balance,
-                            },
-                            "price": self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
-                                buy_pool.get("connector")
-                            ]["tokens"][base_token]["price"],
-                        },
-                        "quote": {
-                            "balance": {
-                                "initial": buy_pool_initial_quote_balance,
-                                "final": buy_pool_final_quote_balance,
-                            },
-                            "price": self._database["connections"][buy_pool.get("chain")][buy_pool.get("network")][
-                                buy_pool.get("connector")
-                            ]["tokens"][quote_token]["price"],
-                        },
-                    },
-                    "sell": {
-                        "base": {
-                            "balance": {
-                                "initial": sell_pool_initial_base_balance,
-                                "final": sell_pool_final_base_balance,
-                            },
-                            "price": self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
-                                sell_pool.get("connector")
-                            ]["tokens"][base_token]["price"],
-                        },
-                        "quote": {
-                            "balance": {
-                                "initial": sell_pool_initial_quote_balance,
-                                "final": sell_pool_final_quote_balance,
-                            },
-                            "price": self._database["connections"][sell_pool.get("chain")][sell_pool.get("network")][
-                                sell_pool.get("connector")
-                            ]["tokens"][quote_token]["price"],
-                        },
-                    },
-                }
-            )
-
-            trade_record = {
-                "timestamp": time.time(),
-                "buy_wallet": buy_wallet.get("internal_id"),
-                "sell_wallet": sell_wallet.get("internal_id"),
-                "base_token": base_token,
-                "quote_token": quote_token,
-                "buy_pool": buy_pool.get("internal_id"),
-                "sell_pool": sell_pool.get("internal_id"),
-                "buy_pool_swap_amount": buy_pool_swap_amount,
-                "sell_pool_swap_amount": sell_pool_swap_amount,
-                "profit": profit_information,
-                "buy_pool_swap_transaction_hash": buy_pool_swap["signature"],
-                "sell_pool_swap_transaction_hash": sell_pool_swap["signature"],
-            }
-            self._database["execution_history"].append(trade_record)
-
-            logger.info("Trade record:", trade_record)
-
-            if profit_information["profit"]["percentage"] > 0:
-                logger.info(
-                    f"Arbitrage trade successful! Profit: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
-                )
-
-                result = True
-            else:
-                logger.warning(
-                    f"Arbitrage trade executed with loss or no profit: {profit_information['profit']['absolute']} {base_token} ({profit_information['profit']['percentage']:.2f}%)"
-                )
-
-                result = False
-
-            return result
-        except Exception as exception:
-            logger.ignore_exception(exception, "Error during arbitrage execution")
-
-            return False
-
     # noinspection PyMethodMayBeStatic
+
     def calculate_portfolio_profit(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculates the profit of the portfolio.
@@ -2662,14 +1748,14 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
         tokens_set = set()
         tokens_list = []
 
-        if self._strategy_type.value == StrategyType.TOKEN_PAIRS_ARBITRAGE.value:
+        if self._strategy_type.value == StrategyType.CONNECTORS_ARBITRAGE.value:
             for pair in self._token_pairs:
                 tokens_list = pair.split("/")
 
                 if len(tokens_list) != 2:
                     raise ValueError(f"Invalid token pair: {pair}. Expected format: TOKEN1/TOKEN2")
-        elif self._strategy_type.value == StrategyType.TOKEN_TRIADS_ARBITRAGE.value:
-            for triad in self._token_triads:
+        elif self._strategy_type.value == StrategyType.TRIANGULAR_ARBITRAGE.value:
+            for triad in self._triangular_arbitrage:
                 tokens_list = triad.split("/")
 
                 if len(tokens_list) != 3:
@@ -2704,583 +1790,6 @@ class AMMPortfolioManagerBase(ScriptStrategyBase):
         }
 
         return result
-
-    async def _find_triangular_arbitrage_opportunities(self) -> List[Dict[str, Any]]:
-        """
-        Finds triangular arbitrage opportunities based on token triads.
-        Uses direct quotes instead of relying on pool information.
-
-        Returns:
-            List of dictionaries of triangular arbitrage opportunities.
-        """
-        opportunities = []
-
-        for triad in self._token_triads:
-            token1, token2, token3 = self._extract_token_symbols_from_token_triad(triad)
-
-            try:
-                # For each triad, we need to check if there's a profitable circular path
-                # Get quotes for all three legs of the triangle
-                for chain_name, chain_configuration in self._database["connections"].items():
-                    for network_name, network_configuration in chain_configuration.items():
-                        for connector_name in network_configuration.keys():
-                            # Simulate the triangular trade with minimum amount
-                            expected_profit = await self._simulate_triangular_trade(
-                                chain_name, network_name, connector_name,
-                                token1, token2, token3,
-                                self._minimum_trade_amount
-                            )
-
-                            if expected_profit["profit_percentage"] <= self._minimum_profitability_percentage:
-                                continue
-
-                            # Create opportunity record
-                            opportunity = {
-                                "type": "triangular",
-                                "token1": token1,
-                                "token2": token2,
-                                "token3": token3,
-                                "chain": chain_name,
-                                "network": network_name,
-                                "connector": connector_name,
-                                "expected_profit_amount": expected_profit["profit_amount"],
-                                "expected_profit_percentage": expected_profit["profit_percentage"],
-                                "expected_fees_cost": expected_profit["fees_cost"],
-                                "expected_fees_cost_in_token1": expected_profit["fees_cost_in_token1"],
-                                "timestamp": time.time(),
-                            }
-
-                            opportunities.append(opportunity)
-
-                            logger.info(
-                                f"Triangular arbitrage opportunity found: {token1}->{token2}->{token3}->{token1} "
-                                f"on {chain_name}/{network_name}/{connector_name} with expected profit {expected_profit['profit_percentage']:.2f}% after fees"
-                            )
-            except Exception as exception:
-                logger.ignore_exception(
-                    exception,
-                    f"Error evaluating triangular arbitrage for {token1}/{token2}/{token3}"
-                )
-
-                continue
-
-        # Sort opportunities by expected profit (descending)
-        opportunities.sort(key=lambda opportunity: opportunity["expected_profit_percentage"], reverse=True)
-
-        return opportunities
-
-    async def _simulate_triangular_trade(
-        self,
-        _chain: str,
-        network: str,
-        connector: str,
-        token1: str,
-        token2: str,
-        token3: str,
-        amount: Decimal
-    ) -> Dict[str, Any]:
-        """
-        Simulates a triangular trade using direct swaps without requiring pool information.
-
-        Args:
-            _chain: Blockchain chain
-            network: Network name
-            connector: Connector name
-            token1: First token in the triangle
-            token2: Second token in the triangle
-            token3: Third token in the triangle
-            amount: Initial amount of token1 to trade
-
-        Returns:
-            Dictionary with profit information
-        """
-        try:
-            connector_configuration = self._database["connections"].get(_chain, {}).get(network, {}).get(connector, {})
-            fee_payment_token_symbol = connector_configuration.get("fee_payment_token_symbol")
-
-            fees_cost = DECIMAL_ZERO
-
-            # Simulate first swap: token1 -> token2
-            swap1_quote = await self._gateway_quote_swap(
-                network,
-                connector,
-                token1,
-                token2,
-                amount,
-                TradeType.SELL,
-                self._maximum_slippage_percentage
-            )
-
-            if not swap1_quote or "estimatedAmountOut" not in swap1_quote:
-                return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
-
-            token2_amount = Decimal(str(swap1_quote["estimatedAmountOut"]))
-            if "gasCost" in swap1_quote:
-                fees_cost += Decimal(str(swap1_quote["gasCost"]))
-
-            # Simulate second swap: token2 -> token3
-            swap2_quote = await self._gateway_quote_swap(
-                network,
-                connector,
-                token2,
-                token3,
-                token2_amount,
-                TradeType.SELL,
-                self._maximum_slippage_percentage
-            )
-
-            if not swap2_quote or "estimatedAmountOut" not in swap2_quote:
-                return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
-
-            token3_amount = Decimal(str(swap2_quote["estimatedAmountOut"]))
-            if "gasCost" in swap2_quote:
-                fees_cost += Decimal(str(swap2_quote["gasCost"]))
-
-            # Simulate third swap: token3 -> token1
-            swap3_quote = await self._gateway_quote_swap(
-                network,
-                connector,
-                token3,
-                token1,
-                token3_amount,
-                TradeType.SELL,
-                self._maximum_slippage_percentage
-            )
-
-            if not swap3_quote or "estimatedAmountOut" not in swap3_quote:
-                return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
-
-            final_token1_amount = Decimal(str(swap3_quote["estimatedAmountOut"]))
-            if "gasCost" in swap3_quote:
-                fees_cost += Decimal(str(swap3_quote["gasCost"]))
-
-            # Convert fees to token1 value if fee payment token is different from token1
-            fees_cost_in_token1 = DECIMAL_ZERO
-            if fees_cost > DECIMAL_ZERO:
-                if fee_payment_token_symbol and fee_payment_token_symbol != token1:
-                    fees_quote_swap = await self._gateway_quote_swap(
-                        network,
-                        connector,
-                        fee_payment_token_symbol,
-                        token1,
-                        fees_cost,
-                        TradeType.SELL,
-                        self._maximum_slippage_percentage,
-                        None
-                    )
-
-                    if fees_quote_swap and "estimatedAmountOut" in fees_quote_swap:
-                        fees_cost_in_token1 = Decimal(str(fees_quote_swap["estimatedAmountOut"]))
-                    else:
-                        raise Exception(f"Failed to get quote for {fee_payment_token_symbol} to {token1}")
-                else:
-                    fees_cost_in_token1 = fees_cost  # Fee token is already token1
-
-            # Calculate profit accounting for fees
-            profit_amount = final_token1_amount - amount - fees_cost_in_token1
-            profit_percentage = (profit_amount / amount) * DECIMAL_ONE_HUNDRED
-
-            return {
-                "profit_amount": profit_amount,
-                "profit_percentage": profit_percentage,
-                "initial_amount": amount,
-                "token2_amount": token2_amount,
-                "token3_amount": token3_amount,
-                "final_amount": final_token1_amount,
-                "fees_cost": fees_cost,
-                "fees_cost_in_token1": fees_cost_in_token1
-            }
-
-        except Exception as exception:
-            logger.ignore_exception(exception, "Error in triangular trade simulation")
-
-            return {"profit_amount": DECIMAL_ZERO, "profit_percentage": DECIMAL_ZERO}
-
-    async def _validate_triangular_opportunity(self, opportunity: Dict[str, Any]) -> bool:
-        """
-        Validates a triangular arbitrage opportunity by checking available balances and
-        simulating trades with optimal amounts.
-
-        Args:
-            opportunity: Dictionary of triangular arbitrage opportunity.
-        Returns:
-            True if opportunity is valid and expected profit meets threshold;
-            otherwise, False.
-        """
-        chain = opportunity["chain"]
-        network = opportunity["network"]
-        connector = opportunity["connector"]
-
-        # Checks if there is available balance for token1
-        available_balance = await self._get_total_token_balance_from_all_wallets(opportunity["token1"])
-        if available_balance < self._minimum_trade_amount:
-            logger.info(f"Insufficient balance of {opportunity["token1"]}: {available_balance}")
-
-            return False
-
-        # Calculates ideal trade amount
-        trade_amount = await self._calculate_optimal_triangular_trade_amount(
-            opportunity, available_balance
-        )
-
-        if not trade_amount or trade_amount <= DECIMAL_ZERO:
-            logger.info(f"Invalid optimal trade amount: {trade_amount}")
-
-            return False
-
-        # Simulate the triangular trade with the optimal amount
-        expected_profit = await self._simulate_triangular_trade(
-            chain,
-            network,
-            connector,
-            opportunity["token1"],
-            opportunity["token2"],
-            opportunity["token3"],
-            trade_amount
-        )
-
-        # Checks if opportunity meets minimum profitability
-        if expected_profit["profit_percentage"] < self._minimum_profitability_percentage:
-            logger.info(
-                f"Triangular opportunity not profitable: "
-                f"{expected_profit['profit_percentage']:.2f}% < {self._minimum_profitability_percentage}%"
-            )
-
-            return False
-
-        # Update opportunity with calculated values
-        opportunity.update({
-            "trade_amount": trade_amount,
-            "expected_token2_amount": expected_profit["token2_amount"],
-            "expected_token3_amount": expected_profit["token3_amount"],
-            "expected_final_amount": expected_profit["final_amount"],
-            "expected_profit_amount": expected_profit["profit_amount"],
-            "expected_profit_percentage": expected_profit["profit_percentage"],
-            "expected_fees_cost": expected_profit["fees_cost"],
-            "expected_fees_cost_in_token1": expected_profit["fees_cost_in_token1"]
-        })
-
-        logger.info(
-            f"Triangular opportunity validated: {opportunity["token1"]}->{opportunity["token2"]}->{opportunity["token3"]}->{opportunity["token1"]} "
-            f"with expected profit {expected_profit['profit_percentage']:.2f}% after fees"
-        )
-
-        return True
-
-    async def _calculate_optimal_triangular_trade_amount(self, opportunity: Dict[str, Any], maximum_available: Decimal) -> Decimal:
-        """
-        Determines the optimal trade amount for triangular arbitrage by simulating profits at different sizes.
-
-        Args:
-            opportunity: Triangular arbitrage opportunity dictionary.
-            maximum_available: Maximum available balance of token1.
-        Returns:
-            Optimal trade amount as Decimal.
-        """
-        # Cap maximum available to configured maximum trade amount
-        maximum_available = min(maximum_available, self._maximum_trade_amount)
-
-        if maximum_available <= self._minimum_trade_amount:
-            return maximum_available if maximum_available > DECIMAL_ZERO else DECIMAL_ZERO
-
-        test_amounts = [
-            self._minimum_trade_amount,
-            maximum_available * DECIMAL_TEN_PERCENT,
-            maximum_available * DECIMAL_TWENTY_FIVE_PERCENT,
-            maximum_available * DECIMAL_FIFTY_PERCENT,
-            maximum_available * DECIMAL_SEVENTY_FIVE_PERCENT,
-            maximum_available,
-        ]
-
-        best_amount = DECIMAL_ZERO
-        best_profit_percentage = DECIMAL_NEGATIVE_INFINITY
-
-        for amount in sorted(test_amounts):
-            if amount < self._minimum_trade_amount or amount > maximum_available:
-                continue
-
-            # Simulate triangular trade with different amounts
-            profit_info = await self._simulate_triangular_trade(
-                opportunity["chain"],
-                opportunity["network"],
-                opportunity["connector"],
-                opportunity["token1"],
-                opportunity["token2"],
-                opportunity["token3"],
-                amount
-            )
-
-            if profit_info["profit_percentage"] > best_profit_percentage:
-                best_profit_percentage = profit_info["profit_percentage"]
-                best_amount = amount
-
-        return best_amount if best_amount > DECIMAL_ZERO else self._minimum_trade_amount
-
-    async def _execute_triangular_arbitrage(self, opportunity: Dict[str, Any]) -> bool:
-        """
-        Executes a triangular arbitrage trade by performing three sequential swaps.
-
-        Args:
-            opportunity: Triangular arbitrage opportunity dictionary.
-        Returns:
-            True if the trade is executed successfully with profit; otherwise, False.
-        """
-        token1 = opportunity["token1"]
-        token2 = opportunity["token2"]
-        token3 = opportunity["token3"]
-        chain = opportunity["chain"]
-        network = opportunity["network"]
-        connector = opportunity["connector"]
-        token1_amount = opportunity["trade_amount"]
-        connector_configuration = self._database["connections"][chain][network][connector]
-        fee_payment_token_symbol = connector_configuration.get("fee_payment_token_symbol")
-
-        logger.info(f"Executing triangular arbitrage: {token1}->{token2}->{token3}->{token1}")
-
-        # Find wallet for the chain/network/connector
-        wallet = await self._get_wallet_for_chain_network_connector(chain, network, connector)
-        if not wallet:
-            logger.error(f"No wallet found for {chain}/{network}/{connector}")
-
-            return False
-
-        wallet_address = wallet.get("address")
-
-        try:
-            # Get initial balance to calculate profit later
-            initial_balances = await self._gateway_get_balances(
-                chain, network, wallet_address, [token1, token2, token3]
-            )
-            if not initial_balances or "balances" not in initial_balances:
-                logger.error(f"Failed to get initial balances for wallet {wallet_address}")
-
-                return False
-
-            initial_token1_balance = Decimal(str(initial_balances["balances"].get(token1, 0)))
-            initial_token2_balance = Decimal(str(initial_balances["balances"].get(token2, 0)))
-            initial_token3_balance = Decimal(str(initial_balances["balances"].get(token3, 0)))
-
-            if initial_token1_balance < token1_amount:
-                logger.info(f"Insufficient balance in wallet {wallet_address}: {initial_token1_balance} {token1}")
-
-                return False
-
-            fees_cost = DECIMAL_ZERO
-
-            # Step 1: Swap token1 -> token2
-            logger.info(f"Step 1: Swapping {token1_amount} {token1} for {token2}")
-            swap1 = await self._gateway_execute_swap(
-                network,
-                connector,
-                wallet_address,
-                token1,
-                token2,
-                TradeType.SELL,
-                token1_amount,
-                self._maximum_slippage_percentage,
-                None  # No specific pool address needed
-            )
-
-            if not swap1 or "signature" not in swap1:
-                logger.error(f"First swap failed for wallet {wallet_address}")
-
-                return False
-
-            swap1_confirmation = await self._wait_for_transaction_confirmation(
-                chain, network, swap1["signature"]
-            )
-            if not swap1_confirmation:
-                logger.error("First swap transaction not confirmed")
-
-                return False
-
-            # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
-            #
-            # # Get updated balances to determine the amount received
-            # intermediate_balances = await self._gateway_get_balances(
-            #     chain, network, wallet_address, [token1, token2, token3]
-            # )
-            # if not intermediate_balances or "balances" not in intermediate_balances:
-            #     logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-            #
-            #     return False
-            #
-            # received_token2_amount = Decimal(str(intermediate_balances["balances"].get(token2, 0)))
-            # token2_amount = received_token2_amount if received_token2_amount > DECIMAL_ZERO else opportunity.get("expected_token2_amount")
-
-            token2_amount = Decimal(swap1.get("totalOutputSwapped"))
-            fees_cost += Decimal(swap1.get("fee", 0))
-
-            # Step 2: Swap token2 -> token3
-            logger.info(f"Step 2: Swapping {token2_amount} {token2} for {token3}")
-            swap2 = await self._gateway_execute_swap(
-                network,
-                connector,
-                wallet_address,
-                token2,
-                token3,
-                TradeType.SELL,
-                token2_amount,
-                self._maximum_slippage_percentage,
-                None  # No specific pool address needed
-            )
-
-            if not swap2 or "signature" not in swap2:
-                logger.error(f"Second swap failed for wallet {wallet_address}")
-
-                return False
-
-            swap2_confirmation = await self._wait_for_transaction_confirmation(
-                chain, network, swap2["signature"]
-            )
-            if not swap2_confirmation:
-                logger.error("Second swap transaction not confirmed")
-
-                return False
-
-            # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
-            #
-            # # Get updated balances to determine the amount received
-            # intermediate_balances2 = await self._gateway_get_balances(
-            #     chain, network, wallet_address, [token1, token2, token3]
-            # )
-            # if not intermediate_balances2 or "balances" not in intermediate_balances2:
-            #     logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-            #
-            #     return False
-            #
-            # received_token3_amount = Decimal(str(intermediate_balances2["balances"].get(token3, 0)))
-            # token3_amount = received_token3_amount if received_token3_amount > DECIMAL_ZERO else opportunity.get("expected_token3_amount")
-
-            token3_amount = Decimal(swap2.get("totalOutputSwapped"))
-            fees_cost += Decimal(swap2.get("fee", 0))
-
-            # Step 3: Swap token3 -> token1
-            logger.info(f"Step 3: Swapping {token3_amount} {token3} for {token1}")
-            swap3 = await self._gateway_execute_swap(
-                network,
-                connector,
-                wallet_address,
-                token3,
-                token1,
-                TradeType.SELL,
-                token3_amount,
-                self._maximum_slippage_percentage,
-                None  # No specific pool address needed
-            )
-
-            if not swap3 or "signature" not in swap3:
-                logger.error(f"Third swap failed for wallet {wallet_address}")
-
-                return False
-
-            swap3_confirmation = await self._wait_for_transaction_confirmation(
-                chain, network, swap3["signature"]
-            )
-            if not swap3_confirmation:
-                logger.error("Third swap transaction not confirmed")
-
-                return False
-
-            fees_cost += Decimal(swap3.get("fee", 0))
-
-            fees_cost_in_token1 = DECIMAL_ZERO
-            if fees_cost > DECIMAL_ZERO:
-                if fee_payment_token_symbol and fee_payment_token_symbol != token1:
-                    fees_quote_swap = await self._gateway_quote_swap(
-                        network,
-                        connector,
-                        fee_payment_token_symbol,
-                        token1,
-                        fees_cost,
-                        TradeType.SELL,
-                        self._maximum_slippage_percentage,
-                        None
-                    )
-
-                    if fees_quote_swap and "estimatedAmountOut" in fees_quote_swap:
-                        fees_cost_in_token1 = Decimal(str(fees_quote_swap["estimatedAmountOut"]))
-                    else:
-                        raise Exception(f"Failed to get quote for {fee_payment_token_symbol} to {token1}")
-                else:
-                    fees_cost_in_token1 = fees_cost  # Fee token is already token1
-
-            await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
-
-            # Get final balances to determine profit
-            final_balances = await self._gateway_get_balances(
-                chain, network, wallet_address, [token1, token2, token3]
-            )
-            if not final_balances or "balances" not in final_balances:
-                logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-
-                return False
-
-            final_token1_balance = Decimal(str(final_balances["balances"].get(token1, 0)))
-            final_token2_balance = Decimal(str(final_balances["balances"].get(token2, 0)))
-            final_token3_balance = Decimal(str(final_balances["balances"].get(token3, 0)))
-
-            # Calculate actual profit
-            actual_profit = final_token1_balance - initial_token1_balance - fees_cost_in_token1
-            actual_profit_percentage = (actual_profit / token1_amount) * DECIMAL_ONE_HUNDRED
-
-            # Record trade execution
-            trade_record = {
-                "type": "triangular",
-                "timestamp": time.time(),
-                "token1": token1,
-                "token2": token2,
-                "token3": token3,
-                "wallet_address": wallet_address,
-                "chain": chain,
-                "network": network,
-                "connector": connector,
-                "token1_amount": token1_amount,
-                "token2_amount": token2_amount,
-                "token3_amount": token3_amount,
-                "initial_token1_balance": initial_token1_balance,
-                "initial_token2_balance": initial_token2_balance,
-                "initial_token3_balance": initial_token3_balance,
-                "final_token1_balance": final_token1_balance,
-                "final_token2_balance": final_token2_balance,
-                "final_token3_balance": final_token3_balance,
-                "token_1_balance_change": final_token1_balance - initial_token1_balance,
-                "token_2_balance_change": final_token2_balance - initial_token2_balance,
-                "token_3_balance_change": final_token3_balance - initial_token3_balance,
-                "profit_amount": actual_profit,
-                "profit_percentage": actual_profit_percentage,
-                "swap1_transaction_hash": swap1["signature"],
-                "swap2_transaction_hash": swap2["signature"],
-                "swap3_transaction_hash": swap3["signature"],
-                "total_fees_cost": fees_cost,
-                "fees_cost_in_token1": fees_cost_in_token1,
-            }
-
-            # Store trade record in database
-            if "execution_history" not in self._database:
-                self._database["execution_history"] = []
-            self._database["execution_history"].append(trade_record)
-
-            logger.info("Trade record:", trade_record)
-
-            if actual_profit_percentage > 0:
-                logger.info(
-                    f"Triangular arbitrage successful! Profit: {actual_profit} {token1} ({actual_profit_percentage:.2f}%)"
-                )
-
-                result = True
-            else:
-                logger.warning(
-                    f"Triangular arbitrage executed with loss or no profit: {actual_profit} {token1} ({actual_profit_percentage:.2f}%)"
-                )
-
-                result = False
-
-            return result
-        except Exception as exception:
-            logger.ignore_exception(exception, "Error during triangular arbitrage execution")
-
-            return False
 
     async def _get_wallet_for_chain_network_connector(self, chain: str, network: str, connector: str) -> Optional[Dict[str, Any]]:
         """
