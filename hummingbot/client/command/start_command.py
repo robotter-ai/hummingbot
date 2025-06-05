@@ -215,7 +215,8 @@ class StartCommand(GatewayChainApiManager):
             script_class = next((member for member_name, member in inspect.getmembers(script_module)
                                  if inspect.isclass(member) and
                                  issubclass(member, ScriptStrategyBase) and
-                                 member not in [ScriptStrategyBase, DirectionalStrategyBase, StrategyV2Base]))
+                                 member not in [ScriptStrategyBase, DirectionalStrategyBase, StrategyV2Base] and
+                                 not getattr(member, "__abstractmethods__", False)))
         except StopIteration:
             raise InvalidScriptModule(f"The module {script_name} does not contain any subclass of ScriptStrategyBase")
         if self.strategy_name != self.strategy_file_name:
