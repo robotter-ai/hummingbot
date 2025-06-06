@@ -119,7 +119,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, configuration=configuration)
+        super().__init__(*args, **kwargs, configuration=configuration, logger=logger)
 
         self._strategy_type = StrategyType.TRIANGULAR_ARBITRAGE
 
@@ -164,9 +164,9 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 success = await self._execute_arbitrage(opportunity)
 
                 if success:
-                    logger.info("Triangular arbitrage executed successfully.")
+                    logger.info("Arbitrage successfully collected profit.")
                 else:
-                    logger.warning("Triangular arbitrage execution failed.")
+                    logger.warning("Arbitrage incurred in loss or no profit.")
 
                 # Waits the configured delay between arbitrages
                 if self._time_delay_between_arbitrages > 0:
@@ -193,7 +193,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         """
         opportunities = []
 
-        for triad in self._triangular_arbitrage:
+        for triad in self._token_triads:
             token1, token2, token3 = self._extract_token_symbols_from_token_triad(triad)
 
             try:

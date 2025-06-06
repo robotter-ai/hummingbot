@@ -81,7 +81,7 @@ configuration: Dict[str, Any] = {
         },
         "use_async_data_updates": False,  # Whether to update data asynchronously or synchronously
         "main_quote_token": "USDT",  # Main quote token used for price references
-        "strategy_type": "TRIANGULAR_ARBITRAGE",  # Strategy type identifier for arbitrage strategy
+        "strategy_type": "CONNECTORS_ARBITRAGE",  # Strategy type identifier for arbitrage strategy
     },
     "connections": {
         # "polkadot": {
@@ -706,6 +706,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
     _gateway_is_ready: bool = False
     _gateway_http_client: Optional[GatewayHttpClient] = None
     _all_gateway_connections: List[Dict[str, Any]] = []
+    _logger: Optional[Logger] = None
 
     # Strategy parameters
     _last_arbitrage_check_time: float = 0
@@ -732,7 +733,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
 
     # Token data storage
     _token_pairs: List[str] = []
-    _triangular_arbitrage: List[str] = []
+    _token_triads: List[str] = []
     _token_symbols: List[str] = []
 
     # State control
@@ -741,7 +742,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
     _is_running: bool = False  # Indicates if an update is in progress
     _database_lock: asyncio.Lock = None
 
-    def __init__(self, connectors: Dict[str, ConnectorBase], configuration: Dict[str, Any]):
+    def __init__(self, connectors: Dict[str, ConnectorBase], configuration: Dict[str, Any], logger: Optional[Logger] = None):
         """
         Initializes the strategy: loads configuration and prepares database.
 
@@ -753,6 +754,8 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
         super().__init__(connectors)
 
         self._configuration = configuration
+        self._logger = logger
+        self._database_lock = asyncio.Lock()
 
     async def _initialize(self):
         """
@@ -795,7 +798,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
             self._transaction_polling_interval = int(global_configurations["transaction_polling_interval"])
             self._use_async_data_updates = bool(global_configurations["use_async_data_updates"])
             self._main_quote_token = global_configurations["main_quote_token"]
-            self._strategy_type = StrategyType.get_by_id(global_configurations.get("strategy_type", StrategyType.TRIANGULAR_ARBITRAGE).value)
+            self._strategy_type = StrategyType.get_by_id(global_configurations.get("strategy_type", StrategyType.CONNECTORS_ARBITRAGE).value)
 
             # Configure update intervals
             data_update_intervals = global_configurations["data_update_intervals"]
@@ -811,7 +814,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
                 self._maximum_transaction_confirmation_timeout = self._transaction_confirmation_delay * 5
 
             self._token_pairs = self._configuration.get("token_pairs", [])
-            self._triangular_arbitrage = self._configuration.get("token_triads", [])
+            self._token_triads = self._configuration.get("token_triads", [])
             self._token_symbols = self._get_all_token_symbols()
 
             await self._check_gateway_status()
@@ -1089,16 +1092,27 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
                     for token_pair in self._token_pairs:
                         base_token, quote_token = self._extract_token_symbols_from_token_pair(token_pair)
 
-                        # Find pools containing this token pair
-                        list_pools_response = await self._gateway_list_pools(
-                            connector_name,
-                            network_name,
-                            [PoolType.XYK.value, PoolType.STABLE.value, PoolType.AMM.value],
-                            [base_token, quote_token],
-                        )
+                        # For Raydium, use the AMM list-pools endpoint with configured pools
+                        if connector_name.lower() == "raydium":
+                            list_pools_response = await self._gateway_list_pools(
+                                connector_name,
+                                network_name,
+                                [PoolType.AMM.value],
+                                [base_token, quote_token],
+                                use_config_pools=True,  # Use configured pools for Raydium
+                            )
+                        else:
+                            # For other connectors (like Hydration), keep existing behavior
+                            list_pools_response = await self._gateway_list_pools(
+                                connector_name,
+                                network_name,
+                                [PoolType.XYK.value, PoolType.STABLE.value, PoolType.AMM.value],
+                                [base_token, quote_token],
+                            )
 
                         if not list_pools_response or not list_pools_response.get("pools"):
-                            raise Exception(f"No pools found for {token_pair} on {connector_name} {network_name}")
+                            logger.warning(f"No pools found for {token_pair} on {connector_name} {network_name}")
+                            continue
 
                         # Add found pools to our collection
                         for pool_information in list_pools_response.get("pools", []):
@@ -1112,7 +1126,8 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
                         )
 
                         if not detailed_pool_info:
-                            raise Exception(f"Failed to retrieve detailed pool information for {pool_address}")
+                            logger.error(f"Failed to retrieve detailed pool information for {pool_address}")
+                            continue
 
                         # Create or update pool with detailed information
                         base_token = self._get_token_by_address(
@@ -1125,13 +1140,16 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
 
                         internal_id = f"{chain_name}/{network_name}/{connector_name}/{pool_address}"
 
+                        # For Raydium, force AMM type
+                        pool_type = PoolType.AMM.value if connector_name.lower() == "raydium" else detailed_pool_info.get("poolType")
+
                         connection["pools"][internal_id] = {
                             "internal_id": internal_id,
                             "address": pool_address,
                             "chain": chain_name,
                             "network": network_name,
                             "connector": connector_name,
-                            "type": detailed_pool_info.get("poolType"),
+                            "type": pool_type,
                             "tokens_list": pool_tokens,
                             "tokens": {},
                             "annual_percentage_rate": None,
@@ -1482,7 +1500,6 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
 
         return promising_pairs
 
-    # noinspection PyMethodMayBeStatic
     def _find_pools_with_token_pair(self, base_token: str, quote_token: str) -> List[Dict[str, Any]]:
         """
         Searches the database for pools containing both tokens.
@@ -1495,7 +1512,6 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
         """
         result: List[Dict[str, Any]] = []
 
-        # First tries to use map for quick search
         key1 = f"{base_token}/{quote_token}"
         key2 = f"{quote_token}/{base_token}"
 
@@ -1755,7 +1771,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
                 if len(tokens_list) != 2:
                     raise ValueError(f"Invalid token pair: {pair}. Expected format: TOKEN1/TOKEN2")
         elif self._strategy_type.value == StrategyType.TRIANGULAR_ARBITRAGE.value:
-            for triad in self._triangular_arbitrage:
+            for triad in self._token_triads:
                 tokens_list = triad.split("/")
 
                 if len(tokens_list) != 3:
@@ -1824,16 +1840,22 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_pool_info(self, connector: str, network: str, pool_address: str):
         """
-        Retrieves pool details from the gateway.
-
-        Args:
-            connector: Connector name
-            network: Network name
-            pool_address: Pool address
-        Returns:
-            Pool information details
+        Gets pool information from the gateway.
         """
-        return await self._gateway_http_client.amm_pool_info(connector, network, pool_address)
+        try:
+            # Get pool info using the AMM endpoint
+            response = await self._gateway_http_client.api_request(
+                "get",
+                f"connectors/{connector}/amm/pool-info",
+                {
+                    "network": network,
+                    "poolAddress": pool_address
+                }
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Error getting pool info: {str(e)}")
+            return None
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
     async def _gateway_get_tokens(
@@ -1914,8 +1936,34 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
             token_addresses: Optional[List[str]] = None,
             max_number_of_pages: int = 3,
             use_official_tokens: bool = True,
-    ):
-        """List pools filtering the results"""
+            use_config_pools: bool = False,
+            fail_silently: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Lists available pools for a given connector and network.
+
+        Args:
+            connector: The connector/protocol (e.g., "raydium")
+            network: The network to use (e.g., "mainnet")
+            types: List of pool types to filter by
+            token_symbols: List of tokens to filter pools by
+            token_addresses: List of token addresses to filter pools by
+            max_number_of_pages: Maximum number of pages to fetch
+            use_official_tokens: Whether to use official tokens only
+            use_config_pools: Whether to use pool addresses from configuration
+            fail_silently: Whether to fail silently on error
+
+        Returns:
+            Dictionary containing pools information
+        """
         return await self._gateway_http_client.amm_list_pools(
-            connector, network, types, token_symbols, token_addresses, max_number_of_pages, use_official_tokens
+            connector=connector,
+            network=network,
+            types=types,
+            token_symbols=token_symbols,
+            token_addresses=token_addresses,
+            max_number_of_pages=max_number_of_pages,
+            use_official_tokens=use_official_tokens,
+            use_config_pools=use_config_pools,
+            fail_silently=fail_silently,
         )

@@ -802,9 +802,14 @@ class GatewayHttpClient:
         if pool_address is not None:
             request_payload["poolAddress"] = pool_address
 
-        return await self.api_request(
-            "get", f"connectors/{connector}/amm/quote-swap", request_payload, fail_silently=fail_silently
+        response = await self.api_request(
+            "get",
+            f"connectors/{connector}/amm/quote-swap",
+            request_payload,
+            fail_silently=fail_silently,
+            use_body=False
         )
+        return response
 
     async def amm_execute_swap(
             self,
@@ -839,6 +844,7 @@ class GatewayHttpClient:
             request_payload["nonce"] = int(nonce)
         if pool_address is not None:
             request_payload["poolAddress"] = pool_address
+
         return await self.api_request("post", f"connectors/{connector}/amm/execute-swap", request_payload)
 
     async def amm_pool_info(
@@ -862,6 +868,7 @@ class GatewayHttpClient:
             f"connectors/{connector}/amm/pool-info",
             params=query_params,
             fail_silently=fail_silently,
+            use_body=False,  # Send parameters in query string
         )
 
     async def amm_quote_liquidity(
@@ -912,6 +919,7 @@ class GatewayHttpClient:
             token_addresses: Optional[List[str]] = None,
             max_number_of_pages: int = 3,
             use_official_tokens: bool = True,
+            use_config_pools: bool = False,
             fail_silently: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -923,6 +931,7 @@ class GatewayHttpClient:
         :param types: List of pool types to filter by
         :param max_number_of_pages: Maximum number of pages to fetch
         :param use_official_tokens: Whether to use official tokens only
+        :param use_config_pools: Whether to use pool addresses from configuration
         :param fail_silently: Whether to fail silently on error
         :return: List of available pools with their information
         """
@@ -940,12 +949,12 @@ class GatewayHttpClient:
             query_params["maxNumberOfPages"] = max_number_of_pages
         if use_official_tokens is not None:
             query_params["useOfficialTokens"] = str(use_official_tokens).lower()
+        if use_config_pools is not None:
+            query_params["useConfigPools"] = str(use_config_pools).lower()
 
-        result = await self.api_request(
+        return await self.api_request(
             "get",
             f"connectors/{connector}/amm/list-pools",
             params=query_params,
             fail_silently=fail_silently,
         )
-
-        return result
