@@ -53,7 +53,7 @@ DECIMAL_NEGATIVE_INFINITY = Decimal("-Infinity")
 
 REQUEST_RETRIES = 3
 REQUEST_DELAY = 1  # seconds
-REQUEST_TIMEOUT = 999  # seconds
+REQUEST_TIMEOUT = 60  # seconds
 
 LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 
@@ -596,8 +596,6 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
     - Common utility functions and helpers
     - Abstract arbitrage execution methods
     """
-
-    markets: Dict[str, Any] = {}  # Not used, but mandatory because of inheritance
 
     # Configuration attributes
     # Example structure)
@@ -1828,6 +1826,16 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
                 return wallets[0]  # Return the first wallet found
 
         return None
+
+    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
+    async def _order_tracker_fetch_order(self, connector: ConnectorBase, client_order_id: str):
+        """Fetches an order from the order tracker."""
+        order = connector._order_tracker.fetch_order(client_order_id)
+
+        if order is None:
+            raise Exception(f"Order not found: {client_order_id}")
+
+        return order
 
     # --------------------------------------------------------------------------
     # Gateway Methods (using retry/timeout)

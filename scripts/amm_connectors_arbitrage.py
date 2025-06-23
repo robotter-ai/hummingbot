@@ -40,7 +40,8 @@ import time
 from decimal import Decimal
 from typing import Any, Dict, List
 
-from hummingbot.core.data_type.common import TradeType
+from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.core.data_type.in_flight_order import OrderState
 from scripts.community.amm_portfolio_base import (
     DECIMAL_FIFTY_PERCENT,
     DECIMAL_NEGATIVE_INFINITY,
@@ -77,6 +78,7 @@ configuration: Dict[str, Any] = {
         "use_async_data_updates": False,  # Whether to update data asynchronously or synchronously
         "main_quote_token": "USDT",  # Main quote token used for price references
         "strategy_type": StrategyType.CONNECTORS_ARBITRAGE,  # Strategy type identifier for connectors arbitrage
+        "rate_source": "custom",  # Use our custom rate source for HDX price
     },
     "connections": {
         "polkadot": {
@@ -143,6 +145,18 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
         - maximum_trade_amount: Maximum trade size
         - token_pairs: List of token pairs to monitor
     """
+
+    @classmethod
+    @property
+    def markets(cls):
+        output = {}
+
+        for (chain_name, chain_configuration) in configuration["connections"].items():
+            for (network_name, network_configuration) in chain_configuration.items():
+                for connector_name, connector_configuration in network_configuration.items():
+                    output[f"{connector_name}/amm_{chain_name}_{network_name}"] = configuration["token_pairs"]
+
+        return output
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs, configuration=configuration, logger=logger)
@@ -730,16 +744,12 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             logger.error(f"No wallet found for sell pool {sell_pool.get('address')}")
             return False
 
-        # TODO: Support multiple wallets per pool.
         # For now, we only support one wallet per pool.
         buy_wallet = buy_wallets[0]
         sell_wallet = sell_wallets[0]
 
         try:
-            # First swap (buy pool): base_token -> quote_token.
-            logger.info(
-                f"Step 1: Swapping {buy_pool_swap_amount} {base_token} for {quote_token} in pool {buy_pool.get('address')}"
-            )
+            # Get initial balances
             buy_pool_initial_balances = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
@@ -755,31 +765,49 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 )
                 return False
 
-            buy_pool_swap = await self._gateway_execute_swap(
-                buy_pool.get("network"),
-                buy_pool.get("connector"),
-                buy_wallet.get("address"),
-                base_token,
-                quote_token,
-                TradeType.SELL,
-                buy_pool_swap_amount,
-                self._maximum_slippage_percentage,
-                buy_pool.get("address"),
+            # First swap (buy pool): base_token -> quote_token
+            logger.info(
+                f"Step 1: Swapping {buy_pool_swap_amount} {base_token} for {quote_token} in pool {buy_pool.get('address')}"
             )
-            if not buy_pool_swap or "signature" not in buy_pool_swap:
-                logger.error(f"First swap failed in wallet {buy_wallet.get('internal_id')}")
+
+            # Get the price for the first swap
+            price_1 = self._get_token_pair_relative_price_in_pool(buy_pool, base_token, quote_token)
+            if price_1 is None or price_1 == DECIMAL_ZERO:
+                logger.error(f"Could not get price for {base_token}/{quote_token} in buy pool")
                 return False
 
-            logger.info(f"First swap signature: {buy_pool_swap['signature']}")
+            # Execute buy using the connector's sell method
+            buy_pool_connector = self.connectors[f"{buy_pool.get('connector')}/amm_{buy_pool.get('chain')}_{buy_pool.get('network')}"]
+            buy_order_id = buy_pool_connector.sell(
+                f"{base_token}-{quote_token}",
+                buy_pool_swap_amount,
+                OrderType.MARKET,
+                price_1,
+                **{
+                    "slippage_pct": self._maximum_slippage_percentage,
+                    "pool_address": buy_pool.get("address"),
+                }
+            )
 
+            # Use _order_tracker_fetch_order with built-in retries
+            buy_order = await self._order_tracker_fetch_order(buy_pool_connector, buy_order_id)
+            if buy_order.current_state != OrderState.FILLED:
+                logger.error(f"First swap failed - order state: {buy_order.current_state}")
+                return False
+
+            # Get transaction hash from the order
+            buy_tx_hash = buy_order.exchange_order_id
+            logger.info(f"First swap signature: {buy_tx_hash}")
+
+            # Wait for transaction confirmation
             buy_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_pool_swap["signature"]
+                buy_pool.get("chain"), buy_pool.get("network"), buy_tx_hash
             )
             if not buy_pool_swap_confirmation:
                 logger.error("First swap transaction not confirmed")
                 return False
 
-            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
+            await asyncio.sleep(self._balance_update_delay)  # Wait for balances to update
             buy_pool_final_balances = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
@@ -793,15 +821,12 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             sell_pool_swap_amount = (
                 buy_pool_quote_balance_received if buy_pool_quote_balance_received > DECIMAL_ZERO else expected_quote
             )
-            if buy_pool_quote_balance_received <= 0:
-                logger.warning(f"Actual quote received undetermined; using expected: {expected_quote} {quote_token}")
 
-            # Second swap (sell pool): quote_token -> base_token.
+            # Second swap (sell pool): quote_token -> base_token
             logger.info(
                 f"Step 2: Swapping {sell_pool_swap_amount} {quote_token} to {base_token} in pool {sell_pool.get('address')}"
             )
 
-            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
             sell_pool_initial_balances = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
             )
@@ -811,30 +836,45 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
 
             sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
             sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
-            sell_pool_swap = await self._gateway_execute_swap(
-                sell_pool.get("network"),
-                sell_pool.get("connector"),
-                sell_wallet.get("address"),
-                quote_token,
-                base_token,
-                TradeType.SELL,
-                sell_pool_swap_amount,
-                self._maximum_slippage_percentage,
-                sell_pool.get("address"),
-            )
-            if not sell_pool_swap or "signature" not in sell_pool_swap:
-                logger.error(f"Second swap failed in wallet {sell_wallet.get('address')}")
+
+            # Get the price for the second swap
+            price_2 = self._get_token_pair_relative_price_in_pool(sell_pool, quote_token, base_token)
+            if price_2 is None or price_2 == DECIMAL_ZERO:
+                logger.error(f"Could not get price for {quote_token}/{base_token} in sell pool")
                 return False
 
-            logger.info(f"Second swap signature: {sell_pool_swap['signature']}")
+            # Execute sell using the connector's sell method
+            sell_pool_connector = self.connectors[f"{sell_pool.get('connector')}/amm_{sell_pool.get('chain')}_{sell_pool.get('network')}"]
+            sell_order_id = sell_pool_connector.sell(
+                f"{quote_token}-{base_token}",
+                sell_pool_swap_amount,
+                OrderType.MARKET,
+                price_2,
+                **{
+                    "slippage_pct": self._maximum_slippage_percentage,
+                    "pool_address": sell_pool.get("address"),
+                }
+            )
+
+            # Use _order_tracker_fetch_order with built-in retries
+            sell_order = await self._order_tracker_fetch_order(sell_pool_connector, sell_order_id)
+            if sell_order.current_state != OrderState.FILLED:
+                logger.error(f"Second swap failed - order state: {sell_order.current_state}")
+                return False
+
+            # Get transaction hash from the order
+            sell_tx_hash = sell_order.exchange_order_id
+            logger.info(f"Second swap signature: {sell_tx_hash}")
+
+            # Wait for transaction confirmation
             sell_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_pool_swap["signature"]
+                sell_pool.get("chain"), sell_pool.get("network"), sell_tx_hash
             )
             if not sell_pool_swap_confirmation:
                 logger.error("Second swap transaction not confirmed")
                 return False
 
-            await asyncio.sleep(3)  # Wait some seconds to try to retrieve the updated balance
+            await asyncio.sleep(self._balance_update_delay)  # Wait for balances to update
             sell_pool_final_balances = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
             )
@@ -903,8 +943,8 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 "buy_pool_swap_amount": buy_pool_swap_amount,
                 "sell_pool_swap_amount": sell_pool_swap_amount,
                 "profit": profit_information,
-                "buy_pool_swap_transaction_hash": buy_pool_swap["signature"],
-                "sell_pool_swap_transaction_hash": sell_pool_swap["signature"],
+                "buy_pool_swap_transaction_hash": buy_tx_hash,
+                "sell_pool_swap_transaction_hash": sell_tx_hash,
             }
             self._database["execution_history"].append(trade_record)
 
