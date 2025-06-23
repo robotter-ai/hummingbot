@@ -663,6 +663,15 @@ class TegroRateSourceMode(ExchangeRateSourceModeBase):
     model_config = ConfigDict(title="tegro")
 
 
+class CustomRateSourceMode(ExchangeRateSourceModeBase):
+    name: str = Field(default="custom")
+    model_config = ConfigDict(title="custom")
+
+    def build_rate_source(self) -> RateSourceBase:
+        from hummingbot.core.rate_oracle.sources.custom_rate_source import CustomRateSource
+        return CustomRateSource()
+
+
 RATE_SOURCE_MODES = {
     AscendExRateSourceMode.model_config["title"]: AscendExRateSourceMode,
     BinanceRateSourceMode.model_config["title"]: BinanceRateSourceMode,
@@ -678,6 +687,7 @@ RATE_SOURCE_MODES = {
     DeriveRateSourceMode.model_config["title"]: DeriveRateSourceMode,
     TegroRateSourceMode.model_config["title"]: TegroRateSourceMode,
     MexcRateSourceMode.model_config["title"]: MexcRateSourceMode,
+    CustomRateSourceMode.model_config["title"]: CustomRateSourceMode,
 }
 
 
