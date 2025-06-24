@@ -1828,7 +1828,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
         return None
 
     @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
-    async def _order_tracker_fetch_order(self, connector: ConnectorBase, client_order_id: str):
+    def _order_tracker_fetch_order(self, connector: ConnectorBase, client_order_id: str):
         """Fetches an order from the order tracker."""
         order = connector._order_tracker.fetch_order(client_order_id)
 

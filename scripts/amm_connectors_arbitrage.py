@@ -385,15 +385,13 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
             if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
-                logger.error(f"Failed to get initial balances for wallet {buy_wallet.get('internal_id')}")
-                return False
+                raise Exception("Failed to get initial balances for wallet")
 
             sell_pool_initial_balances = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
             )
             if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
-                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet.get('internal_id')}")
-                return False
+                raise Exception("Failed to get initial sell wallet balances")
 
             # Simulates buy: base_token -> quote_token
             buy_quote = await self._gateway_quote_swap(
@@ -738,11 +736,9 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
         buy_wallets = await self._get_wallets_for_pool(buy_pool)
         sell_wallets = await self._get_wallets_for_pool(sell_pool)
         if not buy_wallets:
-            logger.error(f"No wallet found for buy pool {buy_pool.get('address')}")
-            return False
+            raise Exception("No wallet found for buy pool")
         if not sell_wallets:
-            logger.error(f"No wallet found for sell pool {sell_pool.get('address')}")
-            return False
+            raise Exception("No wallet found for sell pool")
 
         # For now, we only support one wallet per pool.
         buy_wallet = buy_wallets[0]
@@ -754,8 +750,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
             if not buy_pool_initial_balances or "balances" not in buy_pool_initial_balances:
-                logger.error(f"Failed to get initial balances for wallet {buy_wallet.get('internal_id')}")
-                return False
+                raise Exception("Failed to get initial balances for wallet")
 
             buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
             buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
@@ -773,8 +768,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             # Get the price for the first swap
             price_1 = self._get_token_pair_relative_price_in_pool(buy_pool, base_token, quote_token)
             if price_1 is None or price_1 == DECIMAL_ZERO:
-                logger.error(f"Could not get price for {base_token}/{quote_token} in buy pool")
-                return False
+                raise Exception("Could not get price for")
 
             # Execute buy using the connector's sell method
             buy_pool_connector = self.connectors[f"{buy_pool.get('connector')}/amm_{buy_pool.get('chain')}_{buy_pool.get('network')}"]
@@ -790,10 +784,9 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             )
 
             # Use _order_tracker_fetch_order with built-in retries
-            buy_order = await self._order_tracker_fetch_order(buy_pool_connector, buy_order_id)
+            buy_order = self._order_tracker_fetch_order(buy_pool_connector, buy_order_id)
             if buy_order.current_state != OrderState.FILLED:
-                logger.error(f"First swap failed - order state: {buy_order.current_state}")
-                return False
+                raise Exception("First swap failed - order state")
 
             # Get transaction hash from the order
             buy_tx_hash = buy_order.exchange_order_id
@@ -804,16 +797,14 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 buy_pool.get("chain"), buy_pool.get("network"), buy_tx_hash
             )
             if not buy_pool_swap_confirmation:
-                logger.error("First swap transaction not confirmed")
-                return False
+                raise Exception("First swap transaction not confirmed")
 
             await asyncio.sleep(self._balance_update_delay)  # Wait for balances to update
             buy_pool_final_balances = await self._gateway_get_balances(
                 buy_pool.get("chain"), buy_pool.get("network"), buy_wallet.get("address"), [base_token, quote_token]
             )
             if not buy_pool_final_balances or "balances" not in buy_pool_final_balances:
-                logger.error(f"Failed to get updated balances for wallet {buy_wallet.get('internal_id')}")
-                return False
+                raise Exception("Failed to get updated balances for wallet")
 
             buy_pool_final_base_balance = Decimal(str(buy_pool_final_balances["balances"].get(base_token, 0)))
             buy_pool_final_quote_balance = Decimal(str(buy_pool_final_balances["balances"].get(quote_token, 0)))
@@ -831,8 +822,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
             )
             if not sell_pool_initial_balances or "balances" not in sell_pool_initial_balances:
-                logger.error(f"Failed to get initial sell wallet balances for {sell_wallet.get('internal_id')}")
-                return False
+                raise Exception("Failed to get initial sell wallet balances")
 
             sell_pool_initial_base_balance = Decimal(str(sell_pool_initial_balances["balances"].get(base_token, 0)))
             sell_pool_initial_quote_balance = Decimal(str(sell_pool_initial_balances["balances"].get(quote_token, 0)))
@@ -840,8 +830,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             # Get the price for the second swap
             price_2 = self._get_token_pair_relative_price_in_pool(sell_pool, quote_token, base_token)
             if price_2 is None or price_2 == DECIMAL_ZERO:
-                logger.error(f"Could not get price for {quote_token}/{base_token} in sell pool")
-                return False
+                raise Exception("Could not get price for")
 
             # Execute sell using the connector's sell method
             sell_pool_connector = self.connectors[f"{sell_pool.get('connector')}/amm_{sell_pool.get('chain')}_{sell_pool.get('network')}"]
@@ -859,8 +848,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             # Use _order_tracker_fetch_order with built-in retries
             sell_order = await self._order_tracker_fetch_order(sell_pool_connector, sell_order_id)
             if sell_order.current_state != OrderState.FILLED:
-                logger.error(f"Second swap failed - order state: {sell_order.current_state}")
-                return False
+                raise Exception("Second swap failed - order state")
 
             # Get transaction hash from the order
             sell_tx_hash = sell_order.exchange_order_id
@@ -871,16 +859,14 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 sell_pool.get("chain"), sell_pool.get("network"), sell_tx_hash
             )
             if not sell_pool_swap_confirmation:
-                logger.error("Second swap transaction not confirmed")
-                return False
+                raise Exception("Second swap transaction not confirmed")
 
             await asyncio.sleep(self._balance_update_delay)  # Wait for balances to update
             sell_pool_final_balances = await self._gateway_get_balances(
                 sell_pool.get("chain"), sell_pool.get("network"), sell_wallet.get("address"), [base_token, quote_token]
             )
             if not sell_pool_final_balances or "balances" not in sell_pool_final_balances:
-                logger.error(f"Failed to get updated sell wallet balance for {sell_wallet.get('address')}")
-                return False
+                raise Exception("Failed to get updated sell wallet balance")
 
             sell_pool_final_base_balance = Decimal(str(sell_pool_final_balances["balances"].get(base_token, 0)))
             sell_pool_final_quote_balance = Decimal(str(sell_pool_final_balances["balances"].get(quote_token, 0)))
