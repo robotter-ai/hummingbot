@@ -27,7 +27,7 @@ from typing import Any, Dict, List
 
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import OrderState
-from scripts.community.amm_portfolio_base import (
+from scripts.community.amm_portfolio_base import (  # logged_class,
     DECIMAL_FIFTY_PERCENT,
     DECIMAL_NEGATIVE_INFINITY,
     DECIMAL_ONE_HUNDRED,
@@ -38,7 +38,6 @@ from scripts.community.amm_portfolio_base import (
     AMMPortfolioManagerBase,
     Logger,
     StrategyType,
-    logged_class,
 )
 
 # ==============================================================================
@@ -95,7 +94,7 @@ logger = Logger(path="logs/logs_amm_triangular_arbitrage.log", level=logging.DEB
 # ==============================================================================
 # AMMTriangularArbitrage Strategy Class
 # ==============================================================================
-@logged_class(logger=logger, disallowed_methods=["on_tick"])
+# @logged_class(logger=logger, disallowed_methods=["on_tick"])
 class AMMTriangularArbitrage(AMMPortfolioManagerBase):
     """
     AMM Triangular Arbitrage Strategy
