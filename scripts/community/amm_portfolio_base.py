@@ -56,7 +56,7 @@ REQUEST_RETRIES = 3
 REQUEST_DELAY = 1  # seconds
 REQUEST_TIMEOUT = 60  # seconds
 
-SWAP_OPERATION_RETRIES = 30
+SWAP_OPERATION_RETRIES = 60
 
 LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 
@@ -1839,7 +1839,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
         if order is None:
             raise Exception(f"Order not found: {client_order_id}")
 
-        if order.current_state not in [OrderState.OPEN, OrderState.CREATED, OrderState.APPROVED, OrderState.COMPLETED, OrderState.FILLED, OrderState.CANCELED, OrderState.FAILED]:
+        if order.current_state not in [OrderState.FILLED]:
             raise Exception(f"Order not filled: {client_order_id}. Current state: {order.current_state}")
 
         return order

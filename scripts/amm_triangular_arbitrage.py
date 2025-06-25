@@ -617,7 +617,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             )
 
             swap1_order = await self._order_tracker_fetch_order(connector, swap1_order_id)
-            if swap1_order.current_state not in [OrderState.OPEN, OrderState.CREATED, OrderState.APPROVED, OrderState.COMPLETED, OrderState.FILLED]:
+            if swap1_order.current_state not in [OrderState.FILLED]:
                 raise Exception(f"First swap failed - order state: {swap1_order.current_state}")
 
             # Get transaction hash from the order
@@ -660,7 +660,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             )
 
             swap2_order = await self._order_tracker_fetch_order(connector, swap2_order_id)
-            if swap2_order.current_state not in [OrderState.OPEN, OrderState.CREATED, OrderState.APPROVED, OrderState.COMPLETED, OrderState.FILLED, OrderState.CANCELED, OrderState.FAILED]:
+            if swap2_order.current_state not in [OrderState.FILLED]:
                 raise Exception(f"Second swap failed - order state: {swap2_order.current_state}")
 
             # Get transaction hash from the order
@@ -703,7 +703,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             )
 
             swap3_order = await self._order_tracker_fetch_order(connector, swap3_order_id)
-            if swap3_order.current_state not in [OrderState.OPEN, OrderState.CREATED, OrderState.APPROVED, OrderState.COMPLETED, OrderState.FILLED, OrderState.CANCELED, OrderState.FAILED]:
+            if swap3_order.current_state not in [OrderState.FILLED]:
                 raise Exception(f"Third swap failed - order state: {swap3_order.current_state}")
 
             # Get transaction hash from the order
