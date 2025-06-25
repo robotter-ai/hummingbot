@@ -1006,6 +1006,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
                         connector_name,
                         {
                             "fee_payment_token_symbol": connector_configuration.get("fee_payment_token_symbol"),
+                            "fee_payment_token_amount": connector_configuration.get("fee_payment_token_amount"),
                             "native_token_symbol": connector_configuration.get("native_token_symbol"),
                             "wallets": {},
                             "tokens": {},

@@ -71,6 +71,7 @@ configuration: Dict[str, Any] = {
                 "hydration": {
                     "native_token_symbol": "HDX",
                     "fee_payment_token_symbol": "HDX",
+                    "fee_payment_token_amount": "0.5",
                     "wallets": [
                         os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]
                     ],
@@ -573,6 +574,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         token1_amount = opportunity["trade_amount"]
         connector_configuration = self._database["connections"][chain_name][network_name][connector_name]
         fee_payment_token_symbol = connector_configuration.get("fee_payment_token_symbol")
+        fee_payment_token_amount = Decimal(connector_configuration.get("fee_payment_token_amount"))
 
         logger.info(f"Executing triangular arbitrage: {token1}->{token2}->{token3}->{token1}")
 
@@ -628,10 +630,10 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             if not swap1_confirmation:
                 raise Exception("First swap transaction not confirmed")
 
-            token2_amount = Decimal(swap1_order.executed_amount_base)
-            fees_cost += Decimal(swap1_order.trade_fee.amount) if swap1_order.trade_fee else DECIMAL_ZERO
+            token2_amount = Decimal(swap1_order.executed_amount_quote)
+            fees_cost += fee_payment_token_amount if fee_payment_token_amount > DECIMAL_ZERO else DECIMAL_ZERO
 
-            # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
+            # await asyncio.sleep(self._balantrade_feece_update_delay)  # Wait for balance update
             #
             # # Get updated balances to determine the amount received
             # intermediate_balances = await self._gateway_get_balances(
@@ -671,8 +673,8 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             if not swap2_confirmation:
                 raise Exception("Second swap transaction not confirmed")
 
-            token3_amount = Decimal(swap2_order.executed_amount_base)
-            fees_cost += Decimal(swap2_order.trade_fee.amount) if swap2_order.trade_fee else DECIMAL_ZERO
+            token3_amount = Decimal(swap2_order.executed_amount_quote)
+            fees_cost += fee_payment_token_amount if fee_payment_token_amount > DECIMAL_ZERO else DECIMAL_ZERO
 
             # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
             #
@@ -714,8 +716,8 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             if not swap3_confirmation:
                 raise Exception("Third swap transaction not confirmed")
 
-            token1_amount = Decimal(swap3_order.executed_amount_base)
-            fees_cost += Decimal(swap3_order.trade_fee.amount) if swap3_order.trade_fee else DECIMAL_ZERO
+            token1_amount = Decimal(swap3_order.executed_amount_quote)
+            fees_cost += fee_payment_token_amount if fee_payment_token_amount > DECIMAL_ZERO else DECIMAL_ZERO
 
             fees_cost_in_token1 = DECIMAL_ZERO
             if fees_cost > DECIMAL_ZERO:
