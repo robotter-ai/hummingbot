@@ -239,6 +239,9 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                                 "expected_profit_percentage": expected_profit["profit_percentage"],
                                 "expected_fees_cost": expected_profit["fees_cost"],
                                 "expected_fees_cost_in_token1": expected_profit["fees_cost_in_token1"],
+                                "price_token1_to_token2": expected_profit["price_token1_to_token2"],
+                                "price_token2_to_token3": expected_profit["price_token2_to_token3"],
+                                "price_token3_to_token1": expected_profit["price_token3_to_token1"],
                                 "timestamp": time.time(),
                             }
 
@@ -390,7 +393,10 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 "token3_amount": token3_amount,
                 "final_amount": final_token1_amount,
                 "fees_cost": fees_cost,
-                "fees_cost_in_token1": fees_cost_in_token1
+                "fees_cost_in_token1": fees_cost_in_token1,
+                "price_token1_to_token2": Decimal(str(swap1_quote["price"])) if "price" in swap1_quote else DECIMAL_ZERO,
+                "price_token2_to_token3": Decimal(str(swap2_quote["price"])) if "price" in swap2_quote else DECIMAL_ZERO,
+                "price_token3_to_token1": Decimal(str(swap3_quote["price"])) if "price" in swap3_quote else DECIMAL_ZERO,
             }
 
         except Exception as exception:
@@ -422,9 +428,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         # Checks if there is available balance for token1
         available_balance = await self._get_total_token_balance_from_all_wallets(opportunity["token1"])
         if available_balance < self._minimum_trade_amount:
-            logger.info(f"Insufficient balance of {opportunity["token1"]}: {available_balance}")
-
-            return False
+            raise Exception(f"Insufficient balance of {opportunity['token1']}: {available_balance}")
 
         # Calculates ideal trade amount
         trade_amount = await self._calculate_optimal_trade_amount(
@@ -432,9 +436,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         )
 
         if not trade_amount or trade_amount <= DECIMAL_ZERO:
-            logger.info(f"Invalid optimal trade amount: {trade_amount}")
-
-            return False
+            raise Exception(f"Invalid optimal trade amount: {trade_amount}")
 
         # Simulate the triangular trade with the optimal amount
         expected_profit = await self._simulate_arbitrage_trade(
@@ -449,12 +451,10 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
 
         # Checks if opportunity meets minimum profitability
         if expected_profit["profit_percentage"] < self._minimum_profitability_percentage:
-            logger.info(
+            raise Exception(
                 f"Triangular opportunity not profitable: "
                 f"{expected_profit['profit_percentage']:.2f}% < {self._minimum_profitability_percentage}%"
             )
-
-            return False
 
         # Update opportunity with calculated values
         opportunity.update({
@@ -465,7 +465,10 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             "expected_profit_amount": expected_profit["profit_amount"],
             "expected_profit_percentage": expected_profit["profit_percentage"],
             "expected_fees_cost": expected_profit["fees_cost"],
-            "expected_fees_cost_in_token1": expected_profit["fees_cost_in_token1"]
+            "expected_fees_cost_in_token1": expected_profit["fees_cost_in_token1"],
+            "price_token1_to_token2": expected_profit["price_token1_to_token2"],
+            "price_token2_to_token3": expected_profit["price_token2_to_token3"],
+            "price_token3_to_token1": expected_profit["price_token3_to_token1"],
         })
 
         logger.info(
@@ -561,6 +564,9 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         token1 = opportunity["token1"]
         token2 = opportunity["token2"]
         token3 = opportunity["token3"]
+        price_token_1_to_2 = opportunity["price_token1_to_token2"]
+        price_token_2_to_3 = opportunity["price_token2_to_token3"]
+        price_token_3_to_1 = opportunity["price_token3_to_token1"]
         chain_name = opportunity["chain"]
         network_name = opportunity["network"]
         connector_name = opportunity["connector"]
@@ -573,9 +579,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
         # Find wallet for the chain/network/connector
         wallet = await self._get_wallet_for_chain_network_connector(chain_name, network_name, connector_name)
         if not wallet:
-            logger.error(f"No wallet found for {chain_name}/{network_name}/{connector_name}")
-
-            return False
+            raise Exception(f"No wallet found for {chain_name}/{network_name}/{connector_name}")
 
         wallet_address = wallet.get("address")
 
@@ -585,18 +589,14 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 chain_name, network_name, wallet_address, [token1, token2, token3]
             )
             if not initial_balances or "balances" not in initial_balances:
-                logger.error(f"Failed to get initial balances for wallet {wallet_address}")
-
-                return False
+                raise Exception(f"Failed to get initial balances for wallet {wallet_address}")
 
             initial_token1_balance = Decimal(str(initial_balances["balances"].get(token1, 0)))
             initial_token2_balance = Decimal(str(initial_balances["balances"].get(token2, 0)))
             initial_token3_balance = Decimal(str(initial_balances["balances"].get(token3, 0)))
 
             if initial_token1_balance < token1_amount:
-                logger.info(f"Insufficient balance in wallet {wallet_address}: {initial_token1_balance} {token1}")
-
-                return False
+                raise Exception(f"Insufficient balance in wallet {wallet_address}: {initial_token1_balance} {token1}")
 
             fees_cost = DECIMAL_ZERO
 
@@ -607,7 +607,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 f"{token1}-{token2}",
                 token1_amount,
                 OrderType.MARKET,
-                None,  # TODO: Check!!!
+                price_token_1_to_2,
                 **{
                     "slippage_pct": self._maximum_slippage_percentage,
                     "pool_address": None,
@@ -628,6 +628,9 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             if not swap1_confirmation:
                 raise Exception("First swap transaction not confirmed")
 
+            token2_amount = Decimal(swap1_order.executed_amount_base)
+            fees_cost += Decimal(swap1_order.trade_fee.amount) if swap1_order.trade_fee else DECIMAL_ZERO
+
             # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
             #
             # # Get updated balances to determine the amount received
@@ -635,44 +638,41 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             #     chain, network, wallet_address, [token1, token2, token3]
             # )
             # if not intermediate_balances or "balances" not in intermediate_balances:
-            #     logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-            #
-            #     return False
+            #     raise Exception(f"Failed to get updated balances for wallet {wallet_address}")
             #
             # received_token2_amount = Decimal(str(intermediate_balances["balances"].get(token2, 0)))
             # token2_amount = received_token2_amount if received_token2_amount > DECIMAL_ZERO else opportunity.get("expected_token2_amount")
 
-            # TODO: Check!!!
-            token2_amount = Decimal(swap1_order.executed_amount_base)
-            # TODO: Check!!!
-            fees_cost += Decimal(swap1_order.trade_fee.amount) if swap1_order.trade_fee else DECIMAL_ZERO
-
             # Step 2: Swap token2 -> token3
             logger.info(f"Step 2: Swapping {token2_amount} {token2} for {token3}")
-            swap2 = await self._gateway_execute_swap(
-                network_name,
-                connector_name,
-                wallet_address,
-                token2,
-                token3,
-                TradeType.SELL,
+            connector = self.connectors[f"{connector_name}/amm_{chain_name}_{network_name}"]
+            swap2_order_id = connector.sell(
+                f"{token2}-{token3}",
                 token2_amount,
-                self._maximum_slippage_percentage,
-                None  # No specific pool address needed
+                OrderType.MARKET,
+                price_token_2_to_3,
+                **{
+                    "slippage_pct": self._maximum_slippage_percentage,
+                    "pool_address": None,
+                }
             )
 
-            if not swap2 or "signature" not in swap2:
-                logger.error(f"Second swap failed for wallet {wallet_address}")
+            swap2_order = self._order_tracker_fetch_order(connector, swap2_order_id)
+            if swap2_order.current_state != OrderState.FILLED:
+                raise Exception(f"Second swap failed - order state: {swap2_order.current_state}")
 
-                return False
+            # Get transaction hash from the order
+            swap2_tx_hash = swap2_order.exchange_order_id
+            logger.info(f"Second swap signature: {swap2_tx_hash}")
 
             swap2_confirmation = await self._wait_for_transaction_confirmation(
-                chain_name, network_name, swap2["signature"]
+                chain_name, network_name, swap2_tx_hash
             )
             if not swap2_confirmation:
-                logger.error("Second swap transaction not confirmed")
+                raise Exception("Second swap transaction not confirmed")
 
-                return False
+            token3_amount = Decimal(swap2_order.executed_amount_base)
+            fees_cost += Decimal(swap2_order.trade_fee.amount) if swap2_order.trade_fee else DECIMAL_ZERO
 
             # await asyncio.sleep(self._balance_update_delay)  # Wait for balance update
             #
@@ -681,44 +681,41 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             #     chain, network, wallet_address, [token1, token2, token3]
             # )
             # if not intermediate_balances2 or "balances" not in intermediate_balances2:
-            #     logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-            #
-            #     return False
+            #     raise Exception(f"Failed to get updated balances for wallet {wallet_address}")
             #
             # received_token3_amount = Decimal(str(intermediate_balances2["balances"].get(token3, 0)))
             # token3_amount = received_token3_amount if received_token3_amount > DECIMAL_ZERO else opportunity.get("expected_token3_amount")
 
-            token3_amount = Decimal(swap2.get("totalOutputSwapped"))
-            fees_cost += Decimal(swap2.get("fee", 0))
-
             # Step 3: Swap token3 -> token1
             logger.info(f"Step 3: Swapping {token3_amount} {token3} for {token1}")
-            swap3 = await self._gateway_execute_swap(
-                network_name,
-                connector_name,
-                wallet_address,
-                token3,
-                token1,
-                TradeType.SELL,
+            connector = self.connectors[f"{connector_name}/amm_{chain_name}_{network_name}"]
+            swap3_order_id = connector.sell(
+                f"{token3}-{token1}",
                 token3_amount,
-                self._maximum_slippage_percentage,
-                None  # No specific pool address needed
+                OrderType.MARKET,
+                price_token_3_to_1,
+                **{
+                    "slippage_pct": self._maximum_slippage_percentage,
+                    "pool_address": None,
+                }
             )
 
-            if not swap3 or "signature" not in swap3:
-                logger.error(f"Third swap failed for wallet {wallet_address}")
+            swap3_order = self._order_tracker_fetch_order(connector, swap3_order_id)
+            if swap3_order.current_state != OrderState.FILLED:
+                raise Exception(f"Third swap failed - order state: {swap3_order.current_state}")
 
-                return False
+            # Get transaction hash from the order
+            swap3_tx_hash = swap3_order.exchange_order_id
+            logger.info(f"Third swap signature: {swap3_tx_hash}")
 
             swap3_confirmation = await self._wait_for_transaction_confirmation(
-                chain_name, network_name, swap3["signature"]
+                chain_name, network_name, swap3_tx_hash
             )
             if not swap3_confirmation:
-                logger.error("Third swap transaction not confirmed")
+                raise Exception("Third swap transaction not confirmed")
 
-                return False
-
-            fees_cost += Decimal(swap3.get("fee", 0))
+            token1_amount = Decimal(swap3_order.executed_amount_base)
+            fees_cost += Decimal(swap3_order.trade_fee.amount) if swap3_order.trade_fee else DECIMAL_ZERO
 
             fees_cost_in_token1 = DECIMAL_ZERO
             if fees_cost > DECIMAL_ZERO:
@@ -748,9 +745,7 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 chain_name, network_name, wallet_address, [token1, token2, token3]
             )
             if not final_balances or "balances" not in final_balances:
-                logger.error(f"Failed to get updated balances for wallet {wallet_address}")
-
-                return False
+                raise Exception(f"Failed to get updated balances for wallet {wallet_address}")
 
             final_token1_balance = Decimal(str(final_balances["balances"].get(token1, 0)))
             final_token2_balance = Decimal(str(final_balances["balances"].get(token2, 0)))
@@ -786,8 +781,8 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
                 "profit_amount": actual_profit,
                 "profit_percentage": actual_profit_percentage,
                 "swap1_transaction_hash": swap1_tx_hash,
-                "swap2_transaction_hash": swap2["signature"],
-                "swap3_transaction_hash": swap3["signature"],
+                "swap2_transaction_hash": swap2_tx_hash,
+                "swap3_transaction_hash": swap3_tx_hash,
                 "total_fees_cost": fees_cost,
                 "fees_cost_in_token1": fees_cost_in_token1,
             }

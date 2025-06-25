@@ -359,22 +359,19 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
         # Checks if there is available balance
         available_balance = await self._get_total_token_balance_from_all_wallets(base_token)
         if available_balance < self._minimum_trade_amount:
-            logger.info(f"Insufficient balance of {base_token}: {available_balance}")
-            return False
+            raise Exception(f"Insufficient balance of {base_token}: {available_balance}")
 
         # Calculates ideal trade amount
         trade_amount = await self._calculate_optimal_trade_amount(opportunity, available_balance)
         if not trade_amount or trade_amount <= DECIMAL_ZERO:
-            logger.info(f"Invalid optimal trade amount: {trade_amount}")
-            return False
+            raise Exception(f"Invalid optimal trade amount: {trade_amount}")
 
         try:
             # Get wallet addresses for each pool
             buy_wallets = await self._get_wallets_for_pool(buy_pool)
             sell_wallets = await self._get_wallets_for_pool(sell_pool)
             if not buy_wallets or not sell_wallets:
-                logger.info("No wallets found for pools")
-                return False
+                raise Exception("No wallets found for pools")
 
             # For simplicity, use first wallet for each pool
             buy_wallet = buy_wallets[0]
@@ -405,8 +402,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 buy_pool.get("address"),
             )
             if not buy_quote or "estimatedAmountOut" not in buy_quote:
-                logger.info(f"Buy quote unavailable for pool {buy_pool.get('internal_id')}")
-                return False
+                raise Exception(f"Buy quote unavailable for pool {buy_pool.get('internal_id')}")
 
             expected_quote = Decimal(str(buy_quote["estimatedAmountOut"]))
 
@@ -422,8 +418,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
                 sell_pool.get("address"),
             )
             if not sell_quote or "estimatedAmountOut" not in sell_quote:
-                logger.info(f"Sell quote unavailable for pool {sell_pool.get('internal_id')}")
-                return False
+                raise Exception(f"Sell quote unavailable for pool {sell_pool.get('internal_id')}")
 
             # Make sure we have the most recent token prices
             await self._update_token_information()
@@ -511,11 +506,10 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
 
             # Checks if opportunity meets minimum profitability
             if profit_information["profit"]["percentage"] < self._minimum_profitability_percentage:
-                logger.info(
+                raise Exception(
                     f"Opportunity not profitable after slippage: "
                     f"{profit_information['profit']['percentage']:.2f}% < {self._minimum_profitability_percentage}%"
                 )
-                return False
 
             logger.info(
                 f"Opportunity validated: {base_token}/{quote_token} expected profit {profit_information['profit']['percentage']:.2f}%"
@@ -755,10 +749,9 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             buy_pool_initial_base_balance = Decimal(str(buy_pool_initial_balances["balances"].get(base_token, 0)))
             buy_pool_initial_quote_balance = Decimal(str(buy_pool_initial_balances["balances"].get(quote_token, 0)))
             if buy_pool_initial_base_balance < buy_pool_swap_amount:
-                logger.info(
+                raise Exception(
                     f"Insufficient balance in {buy_wallet.get('internal_id')}: {buy_pool_initial_base_balance} {base_token}"
                 )
-                return False
 
             # First swap (buy pool): base_token -> quote_token
             logger.info(
