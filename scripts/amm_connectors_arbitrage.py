@@ -776,8 +776,8 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             )
 
             # Use _order_tracker_fetch_order with built-in retries
-            buy_order = self._order_tracker_fetch_order(buy_pool_connector, buy_order_id)
-            if buy_order.current_state != OrderState.FILLED:
+            buy_order = await self._order_tracker_fetch_order(buy_pool_connector, buy_order_id)
+            if buy_order.current_state not in [OrderState.FILLED]:
                 raise Exception("First swap failed - order state")
 
             # Get transaction hash from the order
@@ -785,11 +785,11 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             logger.info(f"First swap signature: {buy_tx_hash}")
 
             # Wait for transaction confirmation
-            buy_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
-                buy_pool.get("chain"), buy_pool.get("network"), buy_tx_hash
-            )
-            if not buy_pool_swap_confirmation:
-                raise Exception("First swap transaction not confirmed")
+            # buy_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
+            #     buy_pool.get("chain"), buy_pool.get("network"), buy_tx_hash
+            # )
+            # if not buy_pool_swap_confirmation:
+            #     raise Exception("First swap transaction not confirmed")
 
             await asyncio.sleep(self._balance_update_delay)  # Wait for balances to update
             buy_pool_final_balances = await self._gateway_get_balances(
@@ -839,7 +839,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
 
             # Use _order_tracker_fetch_order with built-in retries
             sell_order = await self._order_tracker_fetch_order(sell_pool_connector, sell_order_id)
-            if sell_order.current_state != OrderState.FILLED:
+            if sell_order.current_state not in [OrderState.FILLED]:
                 raise Exception("Second swap failed - order state")
 
             # Get transaction hash from the order
@@ -847,11 +847,11 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             logger.info(f"Second swap signature: {sell_tx_hash}")
 
             # Wait for transaction confirmation
-            sell_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
-                sell_pool.get("chain"), sell_pool.get("network"), sell_tx_hash
-            )
-            if not sell_pool_swap_confirmation:
-                raise Exception("Second swap transaction not confirmed")
+            # sell_pool_swap_confirmation = await self._wait_for_transaction_confirmation(
+            #     sell_pool.get("chain"), sell_pool.get("network"), sell_tx_hash
+            # )
+            # if not sell_pool_swap_confirmation:
+            #     raise Exception("Second swap transaction not confirmed")
 
             await asyncio.sleep(self._balance_update_delay)  # Wait for balances to update
             sell_pool_final_balances = await self._gateway_get_balances(

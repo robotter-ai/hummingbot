@@ -623,11 +623,11 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             swap1_tx_hash = swap1_order.exchange_order_id
             logger.info(f"First swap signature: {swap1_tx_hash}")
 
-            swap1_confirmation = await self._wait_for_transaction_confirmation(
-                chain_name, network_name, swap1_tx_hash
-            )
-            if not swap1_confirmation:
-                raise Exception("First swap transaction not confirmed")
+            # swap1_confirmation = await self._wait_for_transaction_confirmation(
+            #     chain_name, network_name, swap1_tx_hash
+            # )
+            # if not swap1_confirmation:
+            #     raise Exception("First swap transaction not confirmed")
 
             token2_amount = Decimal(swap1_order.executed_amount_quote)
             fees_cost += fee_payment_token_amount if fee_payment_token_amount > DECIMAL_ZERO else DECIMAL_ZERO
@@ -666,11 +666,11 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             swap2_tx_hash = swap2_order.exchange_order_id
             logger.info(f"Second swap signature: {swap2_tx_hash}")
 
-            swap2_confirmation = await self._wait_for_transaction_confirmation(
-                chain_name, network_name, swap2_tx_hash
-            )
-            if not swap2_confirmation:
-                raise Exception("Second swap transaction not confirmed")
+            # swap2_confirmation = await self._wait_for_transaction_confirmation(
+            #     chain_name, network_name, swap2_tx_hash
+            # )
+            # if not swap2_confirmation:
+            #     raise Exception("Second swap transaction not confirmed")
 
             token3_amount = Decimal(swap2_order.executed_amount_quote)
             fees_cost += fee_payment_token_amount if fee_payment_token_amount > DECIMAL_ZERO else DECIMAL_ZERO
@@ -709,11 +709,11 @@ class AMMTriangularArbitrage(AMMPortfolioManagerBase):
             swap3_tx_hash = swap3_order.exchange_order_id
             logger.info(f"Third swap signature: {swap3_tx_hash}")
 
-            swap3_confirmation = await self._wait_for_transaction_confirmation(
-                chain_name, network_name, swap3_tx_hash
-            )
-            if not swap3_confirmation:
-                raise Exception("Third swap transaction not confirmed")
+            # swap3_confirmation = await self._wait_for_transaction_confirmation(
+            #     chain_name, network_name, swap3_tx_hash
+            # )
+            # if not swap3_confirmation:
+            #     raise Exception("Third swap transaction not confirmed")
 
             token1_amount = Decimal(swap3_order.executed_amount_quote)
             fees_cost += fee_payment_token_amount if fee_payment_token_amount > DECIMAL_ZERO else DECIMAL_ZERO
