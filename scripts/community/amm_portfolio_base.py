@@ -31,6 +31,7 @@ from pydantic.v1 import Field, validator
 from hummingbot.client.config.config_data_types import BaseClientModel
 from hummingbot.client.settings import GatewayConnectionSetting
 from hummingbot.connector.connector_base import ConnectorBase
+from hummingbot.core.data_type.in_flight_order import OrderState
 from hummingbot.core.event.events import TradeType
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
@@ -54,6 +55,8 @@ DECIMAL_NEGATIVE_INFINITY = Decimal("-Infinity")
 REQUEST_RETRIES = 3
 REQUEST_DELAY = 1  # seconds
 REQUEST_TIMEOUT = 60  # seconds
+
+SWAP_OPERATION_RETRIES = 30
 
 LOCK_ACQUISITION_TIMEOUT = 5  # seconds
 
@@ -1827,13 +1830,16 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
 
         return None
 
-    @run_with_retry_and_timeout(retries=REQUEST_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
-    def _order_tracker_fetch_order(self, connector: ConnectorBase, client_order_id: str):
+    @run_with_retry_and_timeout(retries=SWAP_OPERATION_RETRIES, delay=REQUEST_DELAY, timeout=REQUEST_TIMEOUT)
+    async def _order_tracker_fetch_order(self, connector: ConnectorBase, client_order_id: str):
         """Fetches an order from the order tracker."""
         order = connector._order_tracker.fetch_order(client_order_id)
 
         if order is None:
             raise Exception(f"Order not found: {client_order_id}")
+
+        if order.current_state not in [OrderState.OPEN, OrderState.CREATED, OrderState.APPROVED, OrderState.COMPLETED, OrderState.FILLED, OrderState.CANCELED, OrderState.FAILED]:
+            raise Exception(f"Order not filled: {client_order_id}. Current state: {order.current_state}")
 
         return order
 
