@@ -237,49 +237,15 @@ class GatewayCommand(GatewayChainApiManager):
                     self.notify(
                         f"No available blockchain networks available for the connector '{connector}'.")
                     return
-
-                # Handle both old and new data structures
-                available_networks = connector_config[0].get("available_networks", connector_config[0].get("networks", []))
+                available_networks: List[Dict[str, Any]
+                                         ] = connector_config[0]["networks"]
                 trading_types: str = connector_config[0]["trading_types"]
 
-                # Extract chain and networks with proper error handling
-                chain = None
-                networks = []
+                # Since there's always just one chain per connector, directly get the first chain
+                chain = connector_config[0]['chain']
 
-                # Try to get chain from available_networks first (new structure)
-                if available_networks and isinstance(available_networks, list) and len(available_networks) > 0:
-                    first_network = available_networks[0]
-                    if isinstance(first_network, dict) and 'chain' in first_network:
-                        chain = first_network['chain']
-                        # Extract networks from the matching chain entry
-                        for network_item in available_networks:
-                            if isinstance(network_item, dict) and network_item.get('chain') == chain:
-                                if 'networks' in network_item and isinstance(network_item['networks'], list):
-                                    networks = network_item['networks']
-                                    break
-
-                # Fallback to old structure if new structure didn't work
-                if chain is None:
-                    chain = connector_config[0].get('chain')
-                    if chain is None:
-                        self.notify(f"Could not determine chain for connector '{connector}'.")
-                        return
-
-                # If networks is still empty, try to use available_networks directly
-                if not networks and available_networks:
-                    if all(isinstance(n, str) for n in available_networks):
-                        networks = available_networks
-                    elif isinstance(available_networks, list) and len(available_networks) > 0:
-                        # Try to extract networks from the first item
-                        first_item = available_networks[0]
-                        if isinstance(first_item, dict) and 'networks' in first_item:
-                            networks = first_item['networks']
-                        elif isinstance(first_item, str):
-                            networks = available_networks
-
-                if not networks:
-                    self.notify(f"No networks found for connector '{connector}' on chain '{chain}'.")
-                    return
+                # Get networks for the selected chain and use the new prompt format
+                networks = available_networks
 
                 # networks as options
                 while True:
@@ -736,31 +702,15 @@ class GatewayCommand(GatewayChainApiManager):
         connectors_tiers: List[Dict[str, Any]] = []
 
         for connector in connector_list["connectors"]:
-            # Handle both old and new data structures
-            available_networks = connector.get("available_networks", connector.get("networks", []))
+            available_networks: List[str] = connector["networks"]
 
-            # Extract chain type and flatten the list with proper error handling
-            chain_type: List[str] = []
-            all_networks = []
+            # Extract chain type and flatten the list
+            chain_type: List[str] = [connector["chain"]]
+            chain_type_str = ", ".join(chain_type)  # Convert list to comma-separated string
 
-            if available_networks and isinstance(available_networks, list):
-                for network_item in available_networks:
-                    if isinstance(network_item, dict):
-                        # New structure: {chain: "ethereum", networks: ["mainnet", "testnet"]}
-                        if 'chain' in network_item:
-                            chain_type.append(network_item['chain'])
-                        if 'networks' in network_item and isinstance(network_item['networks'], list):
-                            all_networks.extend(network_item['networks'])
-                    elif isinstance(network_item, str):
-                        # Old structure: direct string list
-                        all_networks.append(network_item)
-
-            # Fallback: if no chains found, try to get from connector directly
-            if not chain_type and 'chain' in connector:
-                chain_type = [connector['chain']]
-
-            chain_type_str = ", ".join(chain_type) if chain_type else "N/A"
-            networks_str = ", ".join(all_networks) if all_networks else "N/A"
+            # Extract networks and flatten the nested lists
+            all_networks = available_networks
+            networks_str = ", ".join(all_networks)  # Convert flattened list to string
 
             # Extract trading types and convert to string
             trading_types: List[str] = connector.get("trading_types", [])
