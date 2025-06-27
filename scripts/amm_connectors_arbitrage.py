@@ -762,9 +762,9 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             if price_1 is None or price_1 == DECIMAL_ZERO:
                 raise Exception("Could not get price for")
 
-            # Execute buy using the connector's sell method
+            # Execute buy using the connector's buy method
             buy_pool_connector = self.connectors[f"{buy_pool.get('connector')}/amm_{buy_pool.get('chain')}_{buy_pool.get('network')}"]
-            buy_order_id = buy_pool_connector.sell(
+            buy_order_id = buy_pool_connector.buy(
                 f"{base_token}-{quote_token}",
                 buy_pool_swap_amount,
                 OrderType.MARKET,
@@ -827,7 +827,7 @@ class AMMConnectorsArbitrage(AMMPortfolioManagerBase):
             # Execute sell using the connector's sell method
             sell_pool_connector = self.connectors[f"{sell_pool.get('connector')}/amm_{sell_pool.get('chain')}_{sell_pool.get('network')}"]
             sell_order_id = sell_pool_connector.sell(
-                f"{quote_token}-{base_token}",
+                f"{base_token}-{quote_token}",
                 sell_pool_swap_amount,
                 OrderType.MARKET,
                 price_2,
