@@ -67,7 +67,7 @@ configuration: Dict[str, Any] = {
         "transaction_polling_interval": "2",  # Time delay between transaction polling
     },
     "connections": {
-        "polkadot": {
+        "hydrationChain": {
             "mainnet": {
                 "hydration": {
                     "wallets": [
@@ -111,7 +111,7 @@ configuration: Dict[str, Any] = {
 # Example structure)
 # database: Dict[str, Any] = {
 #     "connections": {
-#         "polkadot": {
+#         "hydrationChain": {
 #             "mainnet": {
 #                 "hydration": {
 #                     "wallets": {

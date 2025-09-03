@@ -80,13 +80,13 @@ configuration: Dict[str, Any] = {
         "rate_source": "custom",  # Use our custom rate source for HDX price
     },
     "connections": {
-        "polkadot": {
+        "hydrationChain": {
             "mainnet": {
                 "hydration": {
                     "native_token_symbol": "HDX",
                     "fee_payment_token_symbol": "HDX",
                     "wallets": [
-                        os.environ["POLKADOT_MAINNET_HYDRATION_WALLET_ADDRESS"]
+                        os.environ["HYDRATIONCHAIN_MAINNET_HYDRATION_WALLET_ADDRESS"]
                     ],
                     "pools": [],
                 }

@@ -477,7 +477,7 @@ class GatewayBase(ConnectorBase):
             return tx_details.get("txReceipt")
         elif self.chain == "solana":
             return tx_details.get("txData")
-        elif self.chain == "polkadot":
+        elif self.chain == "hydration":
             return tx_details.get("txData")
         raise NotImplementedError(f"Unsupported chain: {self.chain}")
 
@@ -486,7 +486,7 @@ class GatewayBase(ConnectorBase):
             return tx_status == 1 and tx_receipt is not None and tx_receipt.get("status") == 1
         elif self.chain == "solana":
             return tx_status == 1 and tx_receipt is not None
-        elif self.chain == "polkadot":
+        elif self.chain == "hydration":
             return tx_status == 1 and tx_receipt is not None
         raise NotImplementedError(f"Unsupported chain: {self.chain}")
 
@@ -495,7 +495,7 @@ class GatewayBase(ConnectorBase):
             return tx_status in [0, 2, 3]
         elif self.chain == "solana":
             return tx_status == 0
-        elif self.chain == "polkadot":
+        elif self.chain == "hydration":
             return tx_status == 0
         raise NotImplementedError(f"Unsupported chain: {self.chain}")
 
@@ -504,7 +504,7 @@ class GatewayBase(ConnectorBase):
             return tx_status == -1 or (tx_receipt is not None and tx_receipt.get("status") == 0)
         elif self.chain == "solana":
             return tx_status == -1
-        elif self.chain == "polkadot":
+        elif self.chain == "hydration":
             return tx_status == -1
         raise NotImplementedError(f"Unsupported chain: {self.chain}")
 
@@ -515,6 +515,6 @@ class GatewayBase(ConnectorBase):
             return Decimal(str(gas_used)) * gas_price / Decimal(1e9)
         elif self.chain == "solana":
             return Decimal(tx_receipt["meta"]["fee"]) / Decimal(1e9)
-        elif self.chain == "polkadot":
+        elif self.chain == "hydration":
             return Decimal(tx_receipt["fee"]) / Decimal(1e12)
         raise NotImplementedError(f"Unsupported chain: {self.chain}")
