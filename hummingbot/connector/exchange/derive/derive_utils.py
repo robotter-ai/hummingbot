@@ -33,7 +33,7 @@ class DeriveConfigMap(BaseConnectorConfigMap):
     derive_api_secret: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your wallet private key",
+            "prompt": "Enter your wallet mnemonic",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,
@@ -81,7 +81,7 @@ class DeriveTestnetConfigMap(BaseConnectorConfigMap):
     derive_testnet_api_secret: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your wallet private key",
+            "prompt": "Enter your wallet mnemonic",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,

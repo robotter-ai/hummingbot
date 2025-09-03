@@ -149,7 +149,7 @@ class VertexConfigMap(BaseConnectorConfigMap):
     vertex_arbitrum_private_key: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your Arbitrum private key",
+            "prompt": "Enter your Arbitrum mnemonic",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,
@@ -175,7 +175,7 @@ class VertexTestnetConfigMap(BaseConnectorConfigMap):
     vertex_testnet_arbitrum_private_key: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your Arbitrum TESTNET private key",
+            "prompt": "Enter your Arbitrum TESTNET mnemonic",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,

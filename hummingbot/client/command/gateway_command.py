@@ -340,7 +340,7 @@ class GatewayCommand(GatewayChainApiManager):
                                 break
                             except Exception:
                                 self.notify(
-                                    "Error adding wallet. Check private key.\n")
+                                    "Error adding wallet. Check mnemonic.\n")
 
                         # display wallet balance
                         native_token: str = await self._get_native_currency_symbol(chain, network)
@@ -385,7 +385,7 @@ class GatewayCommand(GatewayChainApiManager):
         self.app.clear_input()
         self.placeholder_mode = True
         wallet_private_key = await self.app.prompt(
-            prompt=f"Enter your {chain}-{network} wallet private key >>> ",
+            prompt=f"Enter your {chain}-{network} wallet mnemonic >>> ",
             is_password=True
         )
         self.app.clear_input()

@@ -214,7 +214,7 @@ class InjectiveDelegatedAccountMode(InjectiveAccountMode):
     private_key: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your Injective trading account private key or seed phrase",
+            "prompt": "Enter your Injective trading account mnemonic or seed phrase",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,
@@ -276,7 +276,7 @@ class InjectiveVaultAccountMode(InjectiveAccountMode):
     private_key: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter the vault admin private key",
+            "prompt": "Enter the vault admin mnemonic",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,

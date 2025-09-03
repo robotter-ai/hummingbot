@@ -216,7 +216,7 @@ def show_welcome(style: Style):
     SET A SECURE PASSWORD:
 
     To use Hummingbot, you will need to give it access to your crypto assets by entering
-    your exchange API keys and/or wallet private keys. These keys are not shared with
+    your exchange API keys and/or wallet mnemonic. These keys are not shared with
     anyone, including us.
 
     On the next screen, you will set a password to protect these keys and other sensitive
