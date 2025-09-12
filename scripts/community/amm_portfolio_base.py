@@ -87,13 +87,13 @@ configuration: Dict[str, Any] = {
         "strategy_type": "CONNECTORS_ARBITRAGE",  # Strategy type identifier for arbitrage strategy
     },
     "connections": {
-        # "hydrationChain": {
+        # "hydration": {
         #     "mainnet": {
         #         "hydration": {
         #             "native_token_symbol": "HDX",
         #             "fee_payment_token_symbol": "HDX",
         #             "wallets": [
-        #                 os.environ["HYDRATIONCHAIN_MAINNET_HYDRATION_WALLET_ADDRESS"]
+        #                 os.environ["HYDRATION_MAINNET_WALLET_ADDRESS"]
         #             ],
         #             "pools": [],
         #         }
@@ -604,7 +604,7 @@ class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
     # Example structure)
     # database: Dict[str, Any] = {
     #     "connections": {
-    #         "hydrationChain": {
+    #         "hydration": {
     #             "mainnet": {
     #                 "hydration": {
     #                     "wallets": {
