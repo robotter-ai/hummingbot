@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "client:dev",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/hummingbot_quickstart.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "args": [],
+            "justMyCode": false,
+            "stopOnEntry": false,
+            "python": "~/miniconda3/envs/hummingbot/bin/python",
+            "subProcess": true,
+            "django": false,
+            "gevent": false,
+            "jinja": false,
+            // "debugOptions": [
+            //     "RedirectOutput",
+            //     "ShowReturnValue"
+            // ],
+            "purpose": ["debug-in-terminal"]
+        }
+    ]
+}

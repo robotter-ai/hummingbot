@@ -60,6 +60,7 @@ debug.log
 
 # VSCode
 .vscode/
+!.vscode/launch.json
 .history/
 
 # emacs files
