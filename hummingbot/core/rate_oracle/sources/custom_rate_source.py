@@ -8,10 +8,10 @@ class CustomRateSource(RateSourceBase):
     def __init__(self):
         super().__init__()
         self._prices = {
-            "HDX-USDT": Decimal("0.10"),
-            "HDX-USDC": Decimal("0.10"),
-            "SOL-USDT": Decimal("142.38"),
-            "SOL-USDC": Decimal("142.38"),
+            "HDX-USDT": Decimal("0.0095"),
+            "HDX-USDC": Decimal("0.0095"),
+            "SOL-USDT": Decimal("239.60"),
+            "SOL-USDC": Decimal("239.60"),
         }
 
     @property
