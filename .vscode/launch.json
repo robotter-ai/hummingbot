@@ -19,10 +19,10 @@
             "django": false,
             "gevent": false,
             "jinja": false,
-            "debugOptions": [
-                "RedirectOutput",
-                "ShowReturnValue"
-            ],
+            // "debugOptions": [
+            //     "RedirectOutput",
+            //     "ShowReturnValue"
+            // ],
             "purpose": ["debug-in-terminal"]
         }
     ]
