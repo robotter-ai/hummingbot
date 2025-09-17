@@ -46,7 +46,7 @@ from scripts.community.amm_portfolio_base import (  # logged_class,
 configuration: Dict[str, Any] = {
     "globals": {
         "maximum_slippage_percentage": "0.5",  # Maximum allowed price slippage when executing trades (Ex.: 0.5 for 0.5%)
-        "minimum_profitability_percentage": "-30",  # Minimum profit threshold required to execute an arbitrage (Ex.: 1 for 1%)
+        "minimum_profitability_percentage": "1",  # Minimum profit threshold required to execute an arbitrage (Ex.: 1 for 1%)
         "arbitrage_check_interval_seconds": "60",  # Time interval between subsequent arbitrage opportunity checks
         "minimum_trade_amount": "0.1",  # Minimum amount to trade in the first token of the triangle
         "maximum_trade_amount": "0.2",  # Maximum amount to trade in the first token of the triangle
@@ -94,6 +94,7 @@ logger = Logger(path="logs/logs_amm_triangular_arbitrage.log", level=logging.DEB
 # ==============================================================================
 # AMMTriangularArbitrage Strategy Class
 # ==============================================================================
+# Enable the annotation below to enable detailed logging
 # @logged_class(logger=logger, disallowed_methods=["on_tick"])
 class AMMTriangularArbitrage(AMMPortfolioManagerBase):
     """
