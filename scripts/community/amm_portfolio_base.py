@@ -582,6 +582,7 @@ logger = Logger(path="logs/logs_amm_portfolio_base.log", level=logging.DEBUG)
 # ==============================================================================
 # AMMPortfolioManagerBase Strategy Class
 # ==============================================================================
+# Enable the annotation below to enable detailed logging
 # @logged_class(logger=logger, disallowed_methods=["on_tick"])
 class AMMPortfolioManagerBase(ScriptStrategyBase, ABC):
     """
