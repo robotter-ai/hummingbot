@@ -39,7 +39,7 @@ class DEXPrice(ScriptStrategyBase):
         # Check if gateway is accessible first
         try:
             # Test gateway connection
-            await self.gateway_client.ping()
+            await self.gateway_client.ping_gateway()
         except Exception as e:
             self.log_with_clock(logging.ERROR, f"Gateway not accessible: {e}")
             return
